@@ -4,6 +4,7 @@
 
 pub mod focus;
 pub mod gaps;
+pub mod modals;
 pub mod overlay;
 pub mod scroll;
 
@@ -17,6 +18,7 @@ pub struct State {
     pub focus: focus::State,
     pub scroll: scroll::State,
     pub gaps: gaps::State,
+    pub modals: modals::State,
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +27,7 @@ pub enum Msg {
     Focus(focus::Msg),
     Scroll(scroll::Msg),
     Gaps(gaps::Msg),
+    Modals(modals::Msg),
 }
 
 impl Msg {
@@ -32,6 +35,14 @@ impl Msg {
     pub fn gaps_status(&self) -> Option<&bato_kit::frame::UpdateStatus> {
         match self {
             Msg::Gaps(m) => gaps::simulated(m),
+            _ => None,
+        }
+    }
+
+    /// A toast the modals section asks the frame to show.
+    pub fn toast(&self) -> Option<(String, Tone)> {
+        match self {
+            Msg::Modals(m) => m.toast(),
             _ => None,
         }
     }
@@ -43,6 +54,7 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Focus(m) => focus::update(&mut state.focus, m).map(Msg::Focus),
         Msg::Scroll(m) => scroll::update(&mut state.scroll, m).map(Msg::Scroll),
         Msg::Gaps(m) => gaps::update(&mut state.gaps, m).map(Msg::Gaps),
+        Msg::Modals(m) => modals::update(&mut state.modals, m).map(Msg::Modals),
     }
 }
 
@@ -55,6 +67,11 @@ pub fn levels<'a>(state: &'a State, cx: &Ctx) -> Vec<bato_kit::modal::Modal<'a, 
     overlay::levels(&state.overlay, cx)
         .into_iter()
         .map(|l| l.map(Msg::Overlay))
+        .chain(
+            modals::levels(&state.modals, cx)
+                .into_iter()
+                .map(|l| l.map(Msg::Modals)),
+        )
         .collect()
 }
 
@@ -69,6 +86,18 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
         ),
         n if n.starts_with("inputs:") => crate::showcase::inputs::text_fields::b1_selftest(&n[7..])
             .map(|v| v.into_iter().map(|s| s.map(|n| match n {})).collect()),
+        "boundary" => Some(
+            modals::boundary_selftest()
+                .into_iter()
+                .map(|s| s.map(Msg::Modals))
+                .collect(),
+        ),
+        "modals" => Some(
+            modals::selftest()
+                .into_iter()
+                .map(|s| s.map(Msg::Modals))
+                .collect(),
+        ),
         _ => None,
     }
 }
@@ -85,6 +114,10 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
             label("Overlays, focus and scroll areas: the shared infrastructure every component builds on.", 14.0, 20.0)
                 .color(c(p.subtext)),
             vgap(32.0),
+            // First: its self-test aims at containers by id, which the
+            // script finds in layout (unscrolled) coordinates.
+            modals::view(&state.modals, cx).map(Msg::Modals),
+            vgap(24.0),
             overlay::view(&state.overlay, cx).map(Msg::Overlay),
             vgap(24.0),
             focus::view(&state.focus, cx).map(Msg::Focus),
