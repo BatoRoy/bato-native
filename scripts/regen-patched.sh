@@ -1,32 +1,78 @@
 #!/usr/bin/env bash
-# Recreate the patched upstream crates that Cargo.toml's [patch.crates-io]
-# points at. They live outside the repo, in ~/.cache/bato-native/ (override
-# with BATO_NATIVE_CACHE for a dry run). Idempotent: existing dirs are kept.
+# Regenerate patched/ from upstream sources + patches/, so the tree is
+# reproducible:
+#
+#   upstream (crates.io .crate, or iced's winit fork at a pinned commit)
+#   + patches/<crate>.patch
+#   + patches/tripwires/<crate>.rs appended to src/lib.rs (the BATO_PATCH
+#     constant bato-kit references, so an unpatched build fails to compile)
+#
+#   scripts/regen-patched.sh            # rewrite patched/ in place
+#   scripts/regen-patched.sh /tmp/out   # write elsewhere (dry run), then:
+#   diff -r /tmp/out patched            # must print nothing
+#
+# .crate files come from ~/.cargo/registry/cache when present (offline),
+# else from static.crates.io; both are checked against the sha256 below.
+# The winit fork is cloned from $WINIT_REPO (default: GitHub).
+#
+# To change a patch: edit the crate under patched/, `diff -ru` it against a
+# fresh upstream copy into patches/<crate>.patch (without the tripwire),
+# rerun this script and check `git diff patched/` is empty.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
-cache=${BATO_NATIVE_CACHE:-$HOME/.cache/bato-native}
-mkdir -p "$cache"
-git_id=(-c user.name=bato -c user.email=bato@local)
+out=${1:-$here/patched}
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
 
-crate() { # name version patch
-  local dir="$cache/$1-$2-bato"
-  [ -d "$dir" ] && { echo "ok   $dir"; return; }
-  local tmp; tmp=$(mktemp -d)
-  curl -sSfL "https://static.crates.io/crates/$1/$1-$2.crate" | tar -xz -C "$tmp"
-  mv "$tmp/$1-$2" "$dir"; rmdir "$tmp"
-  (cd "$dir" && git init -q && git add -A && git "${git_id[@]}" commit -qm "upstream $1 $2" && git "${git_id[@]}" am -q "$here/patches/$3")
-  echo "new  $dir"
+WINIT_REPO=${WINIT_REPO:-https://github.com/iced-rs/winit.git}
+WINIT_REV=48116469f15d3bc52b5e56bb516694be8882870d
+
+fetch_crate() { # name version sha256 -> path of the .crate
+  local name=$1 ver=$2 sum=$3 file
+  file=$(ls "$HOME"/.cargo/registry/cache/*/"$name-$ver.crate" 2>/dev/null | head -n1 || true)
+  if [ -z "$file" ]; then
+    file="$work/$name-$ver.crate"
+    curl -sSfL "https://static.crates.io/crates/$name/$name-$ver.crate" -o "$file"
+  fi
+  echo "$sum  $file" | sha256sum -c --quiet - >&2
+  echo "$file"
 }
 
-crate cosmic-text 0.15.0 cosmic-text-0.15.0-freetype-light-hinting.patch
-crate cryoglyph 0.1.0 cryoglyph-0.1.0-skia-gamma.patch
-crate iced_wgpu 0.14.0 iced_wgpu-0.14.0-surface-copy-src.patch
+finish() { # dir dest-name patch
+  local dir=$1 dest=$2 patch=$3
+  git -C "$dir" apply --whitespace=nowarn "$here/patches/$patch"
+  cat "$here/patches/tripwires/$dest.rs" >> "$dir/src/lib.rs"
+  rm -rf "${out:?}/$dest"
+  mv "$dir" "$out/$dest"
+  echo "regenerated $out/$dest"
+}
 
-# iced's winit fork (value120 wheel deltas), pinned, with smol_str 0.2.
-dir="$cache/winit-bato"
-if [ -d "$dir" ]; then echo "ok   $dir"; else
-  git clone -q https://github.com/iced-rs/winit.git "$dir"
-  (cd "$dir" && git checkout -q -b bato-iced014 48116469f15d3bc52b5e56bb516694be8882870d \
-     && git "${git_id[@]}" am -q "$here/patches/iced-winit-fork-smol-str-0.2.patch")
-  echo "new  $dir"
-fi
+crate() { # name version sha256 patch
+  local name=$1 ver=$2 sum=$3 patch=$4 file
+  file=$(fetch_crate "$name" "$ver" "$sum")
+  tar -xzf "$file" -C "$work"
+  local dir="$work/$name-$ver"
+  # git apply needs a repository to resolve paths relative to the crate root.
+  git -C "$dir" init -q
+  finish "$dir" "$name" "$patch"
+  rm -rf "$out/$name/.git"
+  # The crate's own .gitignore drops Cargo.lock from the bato-native tree.
+  if grep -qx '/\?Cargo.lock' "$out/$name/.gitignore" 2>/dev/null; then
+    rm -f "$out/$name/Cargo.lock"
+  fi
+}
+
+crate cosmic-text 0.15.0 173852283a9a57a3cbe365d86e74dc428a09c50421477d5ad6fe9d9509e37737 \
+  cosmic-text-0.15.0-freetype-light-hinting.patch
+crate cryoglyph 0.1.0 08bc795bdbccdbd461736fb163930a009da6597b226d6f6fce33e7a8eb6ec519 \
+  cryoglyph-0.1.0-skia-gamma.patch
+crate iced_wgpu 0.14.0 ff144a999b0ca0f8a10257934500060240825c42e950ec0ebee9c8ae30561c13 \
+  iced_wgpu-0.14.0-surface-copy-src.patch
+
+# iced's winit fork (value120 wheel deltas on Wayland), pinned, with smol_str 0.2.
+git clone -q --no-checkout "$WINIT_REPO" "$work/winit"
+git -C "$work/winit" -c advice.detachedHead=false checkout -q "$WINIT_REV"
+finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch
+rm -rf "$out/winit/.git"
