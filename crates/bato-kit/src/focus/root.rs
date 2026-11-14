@@ -34,6 +34,8 @@ use super::{
 
 pub struct FocusRoot<'a, M> {
     content: Element<'a, M, iced::Theme, iced::Renderer>,
+    /// The window, for laying out overlays (anchored panels) to operate on.
+    viewport: Rectangle,
 }
 
 /// Wrap the window's content (done by [`crate::frame::Frame::view`]).
@@ -42,6 +44,7 @@ pub fn focus_root<'a, M>(
 ) -> FocusRoot<'a, M> {
     FocusRoot {
         content: content.into(),
+        viewport: Rectangle::with_size(Size::INFINITE),
     }
 }
 
@@ -164,6 +167,32 @@ fn describe(e: Option<&Entry>) -> String {
 }
 
 impl<'a, M> FocusRoot<'a, M> {
+    /// Run `op` on the content, then on its overlay (anchored panels come
+    /// last in document order, like React portals).
+    fn each(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        op: &mut dyn widget::Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, op);
+        let viewport = self.viewport;
+        if let Some(mut ov) = self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            &viewport,
+            Vector::ZERO,
+        ) {
+            let node = ov.as_overlay_mut().layout(renderer, viewport.size());
+            ov.as_overlay_mut()
+                .operate(Layout::new(&node), renderer, op);
+        }
+    }
+
     fn collect(
         &mut self,
         tree: &mut Tree,
@@ -171,17 +200,13 @@ impl<'a, M> FocusRoot<'a, M> {
         renderer: &iced::Renderer,
     ) -> Collect {
         let mut col = Collect::new(super::ANCHOR.get());
-        self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, &mut col);
+        self.each(tree, layout, renderer, &mut col);
         col
     }
 
     fn apply(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &iced::Renderer, op: Apply) {
         let mut op = op;
-        self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, &mut op);
+        self.each(tree, layout, renderer, &mut op);
     }
 
     /// Tab / Shift+Tab. Returns whether focus moved.
@@ -369,6 +394,7 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) {
+        self.viewport = *viewport;
         // Modality first, so widgets see the new value while handling it.
         let press = super::is_pointer_press(event);
         match event {

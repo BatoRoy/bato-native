@@ -212,6 +212,7 @@ struct Halo<'a, Message> {
 /// The field's identity for focus restore and the Tab starting point.
 struct HaloState {
     token: u64,
+    focused: bool,
 }
 
 impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, Message> {
@@ -224,6 +225,7 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
     fn state(&self) -> tree::State {
         tree::State::new(HaloState {
             token: focus::next_token(),
+            focused: false,
         })
     }
     fn children(&self) -> Vec<Tree> {
@@ -286,6 +288,12 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
             shell,
             viewport,
         );
+        let now = tree.children[0]
+            .state
+            .downcast_ref::<text_input::State<P>>()
+            .is_focused();
+        let st = tree.state.downcast_mut::<HaloState>();
+        focus::reveal_field(&mut st.focused, now, event, layout.bounds(), shell);
     }
     fn mouse_interaction(
         &self,

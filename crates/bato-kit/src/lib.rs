@@ -11,7 +11,8 @@
 //! | [`surface`], [`label`], [`icon`] | The three building blocks: a CSS box, Chromium-placed text, lucide icons |
 //! | [`button`], [`badge`], [`card`], [`kbd`], [`segmented`], [`checkbox`], [`switch`], [`input`], [`spinner`], [`empty`] | Components |
 //! | [`focus`] | Keyboard focus: Tab order, `:focus-visible` rings, focus scopes (dialog trap), roving groups |
-//! | [`scroller`], [`autoscroll`] | Chromium scrolling (wheel, touchpad, touch, keys, scrollbar) and BatoScroll |
+//! | [`scroller`], [`autoscroll`] | Chromium scrolling (wheel, touchpad, touch, keys, scrollbars, nesting, scroll-into-view, edge fade, virtual lists) and BatoScroll |
+//! | [`field`] | The label/hint/error scaffold and the shared control box (`Field.tsx`, `controlClasses`) |
 //! | [`modal`], [`blur`], [`toast`], [`rail_tip`], [`timer`] | The overlay stack (modals, drawers), toasts and timed things |
 //! | [`floating`], [`overlay`], [`menu`], [`hotkeys`] | Anchored overlays (`floating.ts`), menus, keyboard shortcuts |
 //! | [`layout`] | Grid with spans and tracks, AutoGrid, Masonry, AspectRatio, absolute placement, hairlines, page |
@@ -36,6 +37,7 @@ pub mod ctx;
 pub mod cursor;
 pub mod datefmt;
 pub mod empty;
+pub mod field;
 pub mod floating;
 pub mod focus;
 pub mod fonts;
@@ -84,6 +86,7 @@ pub mod prelude {
     pub use crate::checkbox::checkbox;
     pub use crate::ctx::Ctx;
     pub use crate::empty::empty_state;
+    pub use crate::field::{FieldSize, field, text_control};
     pub use crate::focus::{Ring, autofocus, focus_scope, roving};
     pub use crate::icon::{Ico, icon};
     pub use crate::input::input;
@@ -92,6 +95,7 @@ pub mod prelude {
     pub use crate::layout::{Grid, gap, grid, hline, page, vgap, vline};
     pub use crate::menu::{MenuEntry, action, menu_list, separator};
     pub use crate::overlay::{DismissReason, anchored, context_area};
+    pub use crate::scroller::{Heights, scroll_area, virtual_list};
     pub use crate::segmented::{Segment, segmented, tabs};
     pub use crate::spinner::spinner;
     pub use crate::style::c;

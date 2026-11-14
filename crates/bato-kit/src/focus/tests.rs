@@ -442,3 +442,30 @@ fn roving_moves_focus_and_selection() {
     assert_eq!(h.key(&mut el, Named::ArrowRight, false), vec![Msg::Pick(0)]);
     assert_eq!(h.focused(&mut el), id("r0"));
 }
+
+#[test]
+fn focus_out_reports_keyboard_focus_leaving() {
+    let mut el: El<'_> = focus_root(column![
+        surface(pad()).on_press(Msg::A).id("out"),
+        on_focus_out(
+            row![
+                surface(pad()).on_press(Msg::A).id("in1"),
+                surface(pad()).on_press(Msg::B).id("in2"),
+            ],
+            Msg::C,
+        ),
+    ])
+    .into();
+    let mut h = Harness::new(&el);
+    request(Target::Id(Id::new("in1")));
+    h.idle(&mut el);
+    h.idle(&mut el);
+    assert_eq!(h.key(&mut el, Named::Tab, false), vec![], "still inside");
+    assert_eq!(h.focused(&mut el), id("in2"));
+    assert_eq!(
+        h.key(&mut el, Named::Tab, false),
+        vec![Msg::C],
+        "left the panel"
+    );
+    assert_eq!(h.focused(&mut el), id("out"));
+}

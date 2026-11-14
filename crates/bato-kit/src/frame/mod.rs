@@ -516,6 +516,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 modal(panel, w, wrap(Msg::Close), cover)
                     .animate(animate)
                     .id(level_id(depth))
+                    .wrap_panel(|p| crate::focus::focus_scope(p).into())
                     .backdrop(backdrop_blur(self.dialog_opened, animate))
                     .into(),
             );
@@ -524,7 +525,14 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         let mut above: Vec<El<'a, M>> = Vec::new();
         for l in levels {
             let top = l.kind() == Kind::Top;
-            let el: El<'a, M> = l.id(level_id(depth)).blur(true).animate(animate).into();
+            // Each level traps Tab while it is the top one, focuses its first
+            // control when it opens and gives focus back when it closes.
+            let el: El<'a, M> = l
+                .id(level_id(depth))
+                .wrap_panel(|p| crate::focus::focus_scope(p).into())
+                .blur(true)
+                .animate(animate)
+                .into();
             depth += 1;
             if top { above.push(el) } else { layers.push(el) }
         }

@@ -337,10 +337,12 @@ impl App {
             Vec::new()
         };
         let root = self.frame.view_with(page, levels, Msg::Frame);
-        match &self.script {
+        let root = match &self.script {
             Some(steps) => bato_kit::overlay::script::script(root, steps.clone()).into(),
             None => root,
-        }
+        };
+        // `BATO_SELFTEST=scroll`: scripted scroll input (otherwise a no-op).
+        gallery::interaction::scroll::selftest(root)
     }
 }
 

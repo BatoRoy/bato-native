@@ -40,10 +40,12 @@
 //! return bato_kit::focus::focus("name");                            // Task from update()
 //! ```
 
+mod focus_out;
 mod root;
 mod roving;
 mod scope;
 
+pub use focus_out::{FocusOut, on_focus_out};
 pub use root::{FocusRoot, focus_root};
 pub use roving::{Axis, Roving, roving};
 pub use scope::{FocusScope, autofocus, focus_scope};
@@ -128,6 +130,23 @@ fn begin_press() {
 
 fn end_press() {
     PRESS_OPEN.set(false);
+}
+
+/// For widgets wrapping an iced `text_input` (which keeps its own focus):
+/// call after the input's `update` with whether it is focused now. A field
+/// that became focused other than by a press scrolls into view.
+pub fn reveal_field<M>(
+    was: &mut bool,
+    now: bool,
+    event: &Event,
+    bounds: Rectangle,
+    shell: &mut iced::advanced::Shell<'_, M>,
+) {
+    if now && !*was && !is_pointer_press(event) {
+        crate::scroller::focus_into_view(bounds);
+        shell.request_redraw();
+    }
+    *was = now;
 }
 
 /// Who to focus.
@@ -267,6 +286,8 @@ pub struct FocusState {
     focused: bool,
     token: u64,
     space: bool,
+    /// Focused by a key or a program: scroll into view on the next event.
+    reveal: bool,
 }
 
 impl Default for FocusState {
@@ -275,6 +296,7 @@ impl Default for FocusState {
             focused: false,
             token: next_token(),
             space: false,
+            reveal: false,
         }
     }
 }
@@ -283,8 +305,10 @@ impl Focusable for FocusState {
     fn is_focused(&self) -> bool {
         self.focused
     }
+    /// Operations (Tab, scopes, `focus(id)`) land here; a click does not.
     fn focus(&mut self) {
         self.focused = true;
+        self.reveal = true;
     }
     fn unfocus(&mut self) {
         self.focused = false;
@@ -388,13 +412,24 @@ impl FocusState {
         let want = inside && focusable;
         if want != self.focused {
             if want {
-                self.focus();
+                // Chromium does not scroll a clicked control into view.
+                self.focused = true;
             } else {
                 self.unfocus();
             }
             true
         } else {
             false
+        }
+    }
+
+    /// Call from `update` with the widget's layout bounds: after a keyboard
+    /// or programmatic focus, scrolls every scroller around it so it shows
+    /// (Chromium: instant, `nearest`).
+    pub fn reveal<M>(&mut self, bounds: Rectangle, shell: &mut iced::advanced::Shell<'_, M>) {
+        if std::mem::take(&mut self.reveal) && self.focused {
+            crate::scroller::focus_into_view(bounds);
+            shell.request_redraw();
         }
     }
 

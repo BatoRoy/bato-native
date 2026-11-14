@@ -559,6 +559,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
         if state.focus.sync(focusable) | state.focus.pointer(event, inside, focusable) {
             shell.request_redraw();
         }
+        state.focus.reveal(bounds, shell);
         if focusable && state.focus.activation(event, shell) {
             if let Some(m) = self.on_press.clone() {
                 shell.publish(m);

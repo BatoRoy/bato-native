@@ -2,9 +2,12 @@
 //! `scroll_physics::autoscroll::Autoscroll`, which owns every decision.
 //!
 //! Two widgets share an [`AutoscrollBus`]:
-//! - the main [`Scroller`](super::scroller) **arms** it: a middle press inside
-//!   its viewport that no child consumed (text fields consume middle presses:
-//!   they are ineligible), and only if the content can scroll;
+//! - a [`Scroller`](super::scroller) **arms** it: a middle press inside its
+//!   viewport that no child consumed (text fields consume middle presses:
+//!   they are ineligible), and only if the content can scroll. The page
+//!   scroller owns the bus; scrollers nested in it use it too, and the
+//!   innermost one that can scroll on some axis is the target (BatoScroll's
+//!   "nearest scrollable ancestor"), recorded in [`Bus::target`];
 //! - [`AutoscrollLayer`] wraps the whole shell and, while engaged, is the
 //!   full-window overlay: it sees every event first, swallows pointer input to
 //!   the content (no hover, no clicks), maps the events with
@@ -33,8 +36,13 @@ use crate::scale::device_scale;
 #[derive(Debug, Default)]
 pub struct Bus {
     pub auto: Autoscroll,
-    /// Logical px the scroller still has to apply (positive = content up).
+    /// Logical px the target scroller still has to apply (positive =
+    /// content moves left / up).
+    pub pending_dx: f32,
     pub pending_dy: f32,
+    /// The scroller that armed it (its internal id); `None` means the
+    /// scroller that owns the bus (debug hooks arm it that way).
+    pub target: Option<u64>,
     pub engaged_at: Option<Instant>,
     /// A press/release pair being swallowed after a stop.
     swallow_release: Option<mouse::Button>,
@@ -59,11 +67,19 @@ impl Bus {
         self.auto.set_config(AutoscrollConfig::load());
         self.auto.press_middle(x, y, now);
         self.engaged_at = Some(now);
+        self.pending_dx = 0.0;
         self.pending_dy = 0.0;
+        self.target = None;
         debug(&format!(
             "armed at ({x:.0},{y:.0}) state={:?}",
             self.auto.state()
         ));
+    }
+
+    /// [`Bus::arm`] for a given scroller (the innermost that can scroll).
+    pub fn arm_for(&mut self, target: u64, x: f32, y: f32, now: Instant) {
+        self.arm(x, y, now);
+        self.target = Some(target);
     }
 }
 
@@ -140,6 +156,7 @@ pub fn route_engaged(bus: &mut Bus, event: &Event) -> Route {
         ));
         if !bus.auto.is_engaged() {
             bus.engaged_at = None;
+            bus.pending_dx = 0.0;
             bus.pending_dy = 0.0;
         }
     }
@@ -206,7 +223,8 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer>
             if let Event::Window(window::Event::RedrawRequested(now)) = event
                 && bus.auto.is_engaged()
             {
-                let (_, dy) = bus.auto.tick(*now, device_scale());
+                let (dx, dy) = bus.auto.tick(*now, device_scale());
+                bus.pending_dx += dx;
                 bus.pending_dy += dy;
                 shell.request_redraw();
             }

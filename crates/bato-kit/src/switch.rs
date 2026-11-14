@@ -125,6 +125,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
         if st.focus.pointer(event, inside, true) {
             shell.request_redraw();
         }
+        st.focus.reveal(layout.bounds(), shell);
         if st.focus.activation(event, shell) {
             shell.publish((self.on_toggle)(!self.on));
             return;
