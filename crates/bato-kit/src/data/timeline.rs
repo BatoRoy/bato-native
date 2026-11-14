@@ -130,12 +130,14 @@ pub fn brighten(c: Color, k: f32) -> Color {
 
 // ── Builder ─────────────────────────────────────────────────────────────
 
+type OnItem<'a, M> = Box<dyn Fn(&TimelineItem) -> M + 'a>;
+
 pub struct Timeline<'a, M> {
     cx: Ctx,
     items: Vec<TimelineItem>,
     start: Option<NaiveDateTime>,
     end: Option<NaiveDateTime>,
-    on_item_click: Option<Box<dyn Fn(&TimelineItem) -> M + 'a>>,
+    on_item_click: Option<OnItem<'a, M>>,
     axis_format: String,
     scrollable: bool,
     min_width: f32,

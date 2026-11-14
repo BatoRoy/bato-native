@@ -444,6 +444,8 @@ pub fn action_button<'a, M: Clone + 'a>(cx: &Ctx, a: RowAction<M>) -> El<'a, M> 
 // ── The builder ─────────────────────────────────────────────────────────
 
 type OnMsg<'a, M> = Rc<dyn Fn(TableMsg) -> M + 'a>;
+type RowFn<'a, T, R> = Box<dyn Fn(&T) -> R + 'a>;
+type OnSelect<'a, M> = Box<dyn Fn(Vec<String>) -> M + 'a>;
 
 pub struct DataTable<'a, T, M> {
     cx: Ctx,
@@ -451,12 +453,12 @@ pub struct DataTable<'a, T, M> {
     columns: Vec<Column<'a, T, M>>,
     state: &'a TableState,
     on_msg: OnMsg<'a, M>,
-    row_key: Option<Box<dyn Fn(&T) -> String + 'a>>,
+    row_key: Option<RowFn<'a, T, String>>,
     filterable: bool,
     page_size: usize,
-    selected: Option<(&'a [String], Box<dyn Fn(Vec<String>) -> M + 'a>)>,
-    on_row_click: Option<Box<dyn Fn(&T) -> M + 'a>>,
-    row_actions: Option<Box<dyn Fn(&T) -> Vec<RowAction<M>> + 'a>>,
+    selected: Option<(&'a [String], OnSelect<'a, M>)>,
+    on_row_click: Option<RowFn<'a, T, M>>,
+    row_actions: Option<RowFn<'a, T, Vec<RowAction<M>>>>,
     empty_message: String,
     filter_id: Option<widget::Id>,
 }

@@ -272,6 +272,7 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
         "feedback" => Some(map(feedback::selftest::steps(), Msg::Feedback)),
         "pickers" => Some(overlays::triggers::selftest()),
         "layout" => Some(map(layout::selftest::steps(), Msg::Layout)),
+        n if n.starts_with("data:") => data::table::b6_selftest(&n[5..]).map(|v| map(v, Msg::Data)),
         _ => None,
     }
 }

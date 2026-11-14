@@ -166,3 +166,154 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
         .body(column![filter, table].spacing(12))
         .into()
 }
+
+// ── BATO_SELFTEST=data:<card> (batch B6) ─────────────────────────────────
+
+/// `BATO_SELFTEST=data:table|pagination|charts|timeline`, with
+/// `BATO_VIEW=view=examples&tab=data&card=<card>`. Window points (the card
+/// is scrolled to 24 px under the top), measured on the Electron reference.
+pub fn b6_selftest(card: &str) -> Option<Vec<bato_kit::overlay::script::Step<super::Msg>>> {
+    use bato_kit::iced::keyboard::Modifiers;
+    use bato_kit::iced::keyboard::key::Named;
+    use bato_kit::iced::mouse::{self, ScrollDelta};
+    use bato_kit::iced::{Event, Point};
+    use bato_kit::overlay::script::{Step, Target};
+    use std::time::Duration;
+
+    let at = |x: f32, y: f32| Target::At(Point::new(x, y));
+    let left = mouse::Button::Left;
+    let none = Modifiers::default();
+    let wait = |ms| Step::Wait(Duration::from_millis(ms));
+    let chars = |s: &str| s.chars().map(|c| Step::Char(c, none)).collect::<Vec<_>>();
+    let click = |x, y| Step::Click(at(x, y), left);
+    let steps: Vec<Step<super::Msg>> = match card {
+        "table" => [
+            vec![
+                Step::Shot("rest"),
+                // Row hover: the fill and the Edit / Delete icons fade in.
+                Step::Move(at(500.0, 240.0)),
+                wait(400),
+                Step::Shot("row-hover"),
+                // Edit's title tooltip; the Delete icon tints red on hover.
+                Step::Move(at(1091.0, 240.0)),
+                wait(700),
+                Step::Shot("edit-tooltip"),
+                Step::Move(at(1122.0, 240.0)),
+                wait(300),
+                Step::Shot("delete-hover"),
+                click(1122.0, 240.0),
+                wait(400),
+                Step::Shot("delete-toast"),
+                // Select all on the page, then drop one (indeterminate).
+                click(368.0, 194.0),
+                wait(300),
+                Step::Shot("select-all"),
+                click(368.0, 292.0),
+                wait(300),
+                Step::Shot("indeterminate"),
+                // Sort: Name asc, Name desc, then Age asc.
+                click(420.0, 194.0),
+                wait(300),
+                Step::Shot("sort-name-asc"),
+                click(420.0, 194.0),
+                wait(300),
+                Step::Shot("sort-name-desc"),
+                click(855.0, 194.0),
+                wait(300),
+                Step::Shot("sort-age"),
+                // Page 2.
+                click(1028.0, 554.0),
+                wait(300),
+                Step::Shot("page-2"),
+                // Filter (back to page 1), then no match: the empty state.
+                click(500.0, 141.0),
+            ],
+            chars("grace"),
+            vec![wait(300), Step::Shot("filter-grace")],
+            chars("zz"),
+            vec![
+                wait(300),
+                Step::Shot("filter-empty"),
+            ],
+            vec![Step::Key(Named::Backspace, none); 7],
+            vec![
+                // Role filter: Designers.
+                click(535.0, 95.0),
+                wait(300),
+                Step::Shot("role-designers"),
+                // Keyboard: Tab from the filter to the header checkbox.
+                click(500.0, 141.0),
+                Step::Key(Named::Tab, none),
+                wait(200),
+                Step::Shot("tab-checkbox"),
+                Step::Key(Named::Tab, none),
+                wait(200),
+                Step::Shot("tab-sort-name"),
+                Step::Key(Named::Enter, none),
+                wait(300),
+                Step::Shot("enter-sorts"),
+            ],
+        ]
+        .concat(),
+        "pagination" => vec![
+            Step::Shot("rest"),
+            Step::Move(at(398.0, 96.0)),
+            wait(300),
+            Step::Shot("hover-1"),
+            click(614.0, 96.0),
+            wait(300),
+            Step::Shot("next-4"),
+            // `1 … 3 [4] 5 … 12`: the 12 is now where Next was.
+            click(614.0, 96.0),
+            wait(300),
+            Step::Shot("last-12"),
+            Step::Key(Named::Tab, none),
+            wait(200),
+            Step::Shot("tab-focus"),
+        ],
+        "charts" => vec![
+            Step::Move(at(460.0, 150.0)),
+            wait(200),
+            Step::Shot("line-hover-3"),
+            Step::Move(at(700.0, 150.0)),
+            wait(200),
+            Step::Shot("line-hover-13"),
+            Step::Move(at(1000.0, 150.0)),
+            wait(200),
+            Step::Shot("area-hover"),
+            Step::Move(at(608.0, 470.0)),
+            wait(300),
+            Step::Shot("bar-hover-thu"),
+            Step::Move(at(545.0, 573.0)),
+            wait(300),
+            Step::Shot("bar-label-hover-wed"),
+            Step::Move(at(1000.0, 470.0)),
+            wait(300),
+            Step::Shot("left"),
+        ],
+        "timeline" => {
+            // The last cards of the tab cannot scroll to the top: the page
+            // clamps. 125 px lower while sortable / kanban / node-graph are
+            // stubs (the Target::Id page-offset bug rules out ids).
+            let dy = 125.0;
+            vec![
+                Step::Move(at(600.0, 137.0 + dy)),
+                wait(700),
+                Step::Shot("bar-hover-tooltip"),
+                Step::Event(Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: ScrollDelta::Lines { x: -2.0, y: 0.0 },
+                })),
+                wait(800),
+                Step::Shot("scrolled-sticky"),
+                Step::Move(at(420.0, 185.0 + dy)),
+                wait(300),
+                Step::Shot("hover-under-label"),
+                click(1017.0, 54.0 + dy),
+                wait(400),
+                Step::Shot("no-scroll"),
+            ]
+        }
+        _ => return None,
+    };
+    Some(steps)
+}
