@@ -1,0 +1,15 @@
+# Input driver for tools/nested.sh: a virtual pointer and a real
+# wl_data_device file drag inside the nested session. Its own workspace, so it
+# stays out of the kit's build, lockfile and CI.
+[workspace]
+
+[package]
+name = "wldriver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+wayland-client = "=0.31.15"
+wayland-protocols-wlr = { version = "=0.3.12", features = ["client"] }
+wayland-protocols = { version = "=0.32.13", features = ["client"] }

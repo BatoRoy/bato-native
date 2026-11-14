@@ -5,6 +5,7 @@
 | `offscreen.sh check` | Exit 0 only if the off-screen output `BATOPOC` is up. Run `up`/`down` only if you own the desktop session. |
 | `shot.sh <pid> <out.png>` | Screenshot a window, refusing any window that isn't on `BATOPOC`. |
 | `compare.sh …` | The **fidelity harness**: builds and runs `compare/` (below). |
+| `nested.sh …` | A **hidden nested session** with real input, for what the off-screen output can't test (below). |
 
 ## Fidelity harness (`tools/compare`)
 
@@ -152,3 +153,33 @@ hand.
 
 We chose Rust over Python because the harness diffs 39 × 1 M pixels per batch, and the standard
 library has no PNG codec.
+
+## Real input: the nested session (`tools/nested.sh`)
+
+The off-screen output is part of the user's own Hyprland session, so nothing may click or type
+there, and a window there never gets real keyboard focus. Paste, shortcuts, the primary selection
+and file drops need focus. `nested.sh` starts a separate session that never shows on screen:
+a windowless `kwin_wayland --virtual` with Hyprland nested in it. It has its own runtime dir, HOME,
+config and D-Bus, so `hyprctl`, `wl-copy` and `grim` reach only the nested sockets.
+`tools/wldriver` (built on first `up`) drives a virtual pointer and does real `text/uri-list` drags.
+
+```sh
+tools/nested.sh up
+BATO_VIEW='view=examples&tab=inputs&card=text-fields' tools/nested.sh run target/release/gallery
+tools/nested.sh exec wl-copy "hello"                 # the nested clipboard
+tools/nested.sh drive "move 690 310" "sleep 200" "click 700 316"
+tools/nested.sh key CTRL,V                          # also: key ,x  key SHIFT,O  key ,Escape
+tools/nested.sh exec wl-paste -n                    # what the app copied
+tools/nested.sh drive "drag some.png 900 890"       # a real file drop
+tools/nested.sh shot out.png 486 260 860 100        # region in output pixels
+tools/nested.sh down
+```
+
+- **Coordinates** are output pixels: 1600×1000 at scale 1 (`NESTED_W`/`NESTED_H`).
+- **Pointer moves:** move the pointer once before the first click, so the window gets `wl_pointer.enter`.
+- **Key names** are xkb keysyms (`Return`, `End`, `Escape`). Keys go to `class:batopoc-nested`; `run` sets that
+  app_id.
+- **Hyprland ≥ 0.57** reads Lua, so the config is `hyprland.lua` and `key`/`focus` use `hl.dsp.*`. Both fall back to
+  the classic dispatch syntax.
+- **Socket path length:** sockets live in `$BATO_NESTED_RUN` (default `/tmp/bn-$UID`). A Unix socket path must fit in
+  107 bytes, so keep that directory short.
