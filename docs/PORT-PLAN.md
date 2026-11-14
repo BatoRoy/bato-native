@@ -144,6 +144,35 @@ Each batch must deliver, per component:
 
 **Checkpoint 3:** the whole Examples page side by side with Electron.
 
+#### Phase 3 status (2026-11-14): done, tagged `v0.3.0`
+
+All 32 Showcase cards and 7 tabs are ported.
+
+| Wave | Batches |
+|---|---|
+| 3a | B1 inputs, B2 pickers, B3 modals + command palette + FileDropzone (Wayland drag-and-drop winit patch), B4 feedback/layout, B5 date |
+| 3b | B6 data + charts (resvg), B7 drag-and-drop (dnd-kit port), B8 code editor (cosmic-text SyntaxEditor/ViEditor, `editor` feature), B9 node graph (xyflow parity), B10 dashboard, kit fixes |
+
+**Fidelity** (B11): all 39 views score mean 0.14–0.44 vs Electron (`tools/compare.sh batch all`), the same range as the approved Home page. Date cards are compared against live captures.
+
+**Performance** (gallery, release, every component compiled in):
+- first frame 123–173 ms;
+- idle PSS 78–84 MB on any tab;
+- idle CPU 0–2 ticks / 5 s;
+- GPU 43–59 MiB;
+- binary 29.4 MB.
+
+**Decisions made in Phase 3:**
+- `panic = "unwind"` in release, so the error boundary shows React's fallback.
+- A fifth patched crate: winit gets Wayland file drops.
+- The cosmic-text family-fallback patch serves non-Latin glyphs from the same Inter 4.001 subsets Electron uses, then the system Inter.
+
+**Not done** (see the batch notes in the merge commits):
+- avatar images;
+- CodeMirror search/multi-cursor/folding and IME in the editor;
+- Kanban drag tilt (iced has no rotation);
+- a few React `title` tooltips.
+
 ### Phase 4: Finish
 
 1. B10 Dashboard (needs B2, B6, B7).
