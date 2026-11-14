@@ -1061,13 +1061,18 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
     ) {
         let b = layout.bounds();
         let id = tree.state.downcast_ref::<State>().id;
-        let _entered = chain::enter(id, self.autoscroll.as_ref());
-        let root = chain::is_root();
-        let now = Instant::now();
-        let s = device_scale();
         let (clip, offset, dragging) = {
             let st = tree.state.downcast_ref::<State>();
             (st.clip(b), st.offset(), st.drag.is_some() || st.touch.is_scrolling())
+        };
+        let _entered = chain::enter(id, self.autoscroll.as_ref(), (offset.x, offset.y));
+        let root = chain::is_root();
+        let now = Instant::now();
+        let s = device_scale();
+        // Window coordinates of what this scroller receives.
+        let win = {
+            let (x, y) = chain::to_window();
+            Vector::new(x, y)
         };
         // Where the pointer reaches this scroller's content.
         let visible = clip.intersection(viewport).unwrap_or(Rectangle {
@@ -1149,7 +1154,8 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                         if can {
                             state.x.stop();
                             state.y.stop();
-                            bus.borrow_mut().arm_for(id, p.x, p.y, now);
+                            let w = p + win;
+                            bus.borrow_mut().arm_for(id, w.x, w.y, now);
                             state.log("autoscroll", format!("armed at {p:?}"));
                             d.shell.request_redraw();
                         }
@@ -1196,6 +1202,12 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                 let Some(p) = cursor.position_over(visible) else {
                     return;
                 };
+                let p = p + win;
+                let visible_w = Rectangle {
+                    x: visible.x + win.x,
+                    y: visible.y + win.y,
+                    ..visible
+                };
                 let shift = chain::shift();
                 let (ix, iy) = classify_xy(*delta, shift);
                 if (ix, iy) == (ScrollInput::End, ScrollInput::End) {
@@ -1224,7 +1236,7 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                 if !mine {
                     return;
                 }
-                chain::wheel_latch(id, kind, p, shift, now, visible);
+                chain::wheel_latch(id, kind, p, shift, now, visible_w);
                 for (input, ax, on) in [
                     (ix, &mut state.x, self.axis.x()),
                     (iy, &mut state.y, self.axis.y()),

@@ -321,7 +321,8 @@ impl App {
                 gallery::interaction::view(&self.interaction, cx, wide).map(Msg::Interaction)
             }
         };
-        self.frame.view(page, Msg::Frame)
+        // `BATO_SELFTEST=scroll`: scripted scroll input (otherwise a no-op).
+        gallery::interaction::scroll::selftest(self.frame.view(page, Msg::Frame))
     }
 }
 

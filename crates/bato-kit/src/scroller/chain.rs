@@ -116,6 +116,8 @@ pub enum Target {
 #[derive(Default)]
 struct Shared {
     stack: Vec<u64>,
+    /// The offsets (logical px) of the scrollers on the stack.
+    shifts: Vec<(f32, f32)>,
     buses: Vec<(u64, AutoscrollBus)>,
     wheel: Option<WheelLatch>,
     /// (finger, scroller)
@@ -160,6 +162,7 @@ impl Drop for Entered {
     fn drop(&mut self) {
         with(|s| {
             s.stack.pop();
+            s.shifts.pop();
             if self.bus {
                 s.buses.pop();
             }
@@ -167,10 +170,11 @@ impl Drop for Entered {
     }
 }
 
-/// A scroller's `update` starts.
-pub fn enter(id: u64, bus: Option<&AutoscrollBus>) -> Entered {
+/// A scroller's `update` starts; `offset` is its scroll offset (logical px).
+pub fn enter(id: u64, bus: Option<&AutoscrollBus>, offset: (f32, f32)) -> Entered {
     with(|s| {
         s.stack.push(id);
+        s.shifts.push(offset);
         if let Some(b) = bus {
             s.buses.push((id, b.clone()));
         }
@@ -181,6 +185,18 @@ pub fn enter(id: u64, bus: Option<&AutoscrollBus>) -> Entered {
 /// The scrollers whose `update` is running, outer → inner.
 pub fn stack() -> Vec<u64> {
     with(|s| s.stack.clone())
+}
+
+/// What to add to a position the running scroller received to get window
+/// coordinates: its ancestors' offsets (latches and the autoscroll origin
+/// are kept in window coordinates).
+pub fn to_window() -> (f32, f32) {
+    with(|s| {
+        let n = s.shifts.len().saturating_sub(1);
+        s.shifts[..n]
+            .iter()
+            .fold((0.0, 0.0), |a, o| (a.0 - o.0, a.1 - o.1))
+    })
 }
 
 /// Is the running scroller the outermost one?
@@ -422,12 +438,13 @@ mod tests {
 
     #[test]
     fn stack_and_key_chain() {
-        let a = enter(100, None);
+        let a = enter(100, None, (0.0, 50.0));
         assert!(is_root());
         press_here();
         {
-            let _b = enter(101, None);
+            let _b = enter(101, None, (7.0, 9.0));
             assert!(!is_root());
+            assert_eq!(to_window(), (0.0, -50.0), "the parent's offset only");
             assert_eq!(stack(), vec![100, 101]);
             press_here();
         }
