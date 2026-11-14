@@ -54,14 +54,15 @@ finish() { # dir dest-name patch...
   echo "regenerated $out/$dest"
 }
 
-crate() { # name version sha256 patch
-  local name=$1 ver=$2 sum=$3 patch=$4 file
+crate() { # name version sha256 patch...
+  local name=$1 ver=$2 sum=$3 file
+  shift 3
   file=$(fetch_crate "$name" "$ver" "$sum")
   tar -xzf "$file" -C "$work"
   local dir="$work/$name-$ver"
   # git apply needs a repository to resolve paths relative to the crate root.
   git -C "$dir" init -q
-  finish "$dir" "$name" "$patch"
+  finish "$dir" "$name" "$@"
   rm -rf "$out/$name/.git"
   # The crate's own .gitignore drops Cargo.lock from the bato-native tree.
   if grep -qx '/\?Cargo.lock' "$out/$name/.gitignore" 2>/dev/null; then
@@ -70,7 +71,7 @@ crate() { # name version sha256 patch
 }
 
 crate cosmic-text 0.15.0 173852283a9a57a3cbe365d86e74dc428a09c50421477d5ad6fe9d9509e37737 \
-  cosmic-text-0.15.0-freetype-light-hinting.patch
+  cosmic-text-0.15.0-freetype-light-hinting.patch cosmic-text-0.15.0-family-fallback.patch
 crate cryoglyph 0.1.0 08bc795bdbccdbd461736fb163930a009da6597b226d6f6fce33e7a8eb6ec519 \
   cryoglyph-0.1.0-skia-gamma.patch
 crate iced_wgpu 0.14.0 ff144a999b0ca0f8a10257934500060240825c42e950ec0ebee9c8ae30561c13 \

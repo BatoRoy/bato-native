@@ -192,6 +192,7 @@ pub struct FontFallbackIter<'a> {
     script_i: (usize, usize),
     common_i: usize,
     other_i: usize,
+    family_fallback_i: usize,
     end: bool,
     ideal_weight: fontdb::Weight,
 }
@@ -219,6 +220,7 @@ impl<'a> FontFallbackIter<'a> {
             script_i: (0, 0),
             common_i: 0,
             other_i: 0,
+            family_fallback_i: 0,
             end: false,
             ideal_weight,
         }
@@ -410,6 +412,28 @@ impl<'a> FontFallbackIter<'a> {
                 if let Some(font) = self
                     .font_system
                     .get_font(fallback_info.id, self.ideal_weight)
+                {
+                    return Some(font);
+                }
+            }
+        }
+
+        // bato: the default family's own fallback families, in order, before
+        // any script or common fallback (CSS: unicode-range subsets of one
+        // family, then the next family of the stack). Exact weight only.
+        if let Some(Family::Name(family)) = self.default_families.first().copied() {
+            while let Some(fallback_family) = self
+                .font_system
+                .family_fallbacks
+                .get(*family)
+                .and_then(|list| list.get(self.family_fallback_i))
+                .cloned()
+            {
+                self.family_fallback_i += 1;
+                let id = font_match_keys_iter(false)
+                    .find(|m_key| self.face_contains_family(m_key.id, &fallback_family))
+                    .map(|m_key| m_key.id);
+                if let Some(font) = id.and_then(|id| self.font_system.get_font(id, self.ideal_weight))
                 {
                     return Some(font);
                 }

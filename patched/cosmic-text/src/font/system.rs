@@ -121,6 +121,10 @@ pub struct FontSystem {
 
     /// List of fallbacks
     pub(crate) fallbacks: Fallbacks,
+
+    /// bato: per-family fallback families, tried in order right after the
+    /// default family's face and before any script or common fallback.
+    pub(crate) family_fallbacks: HashMap<String, Vec<String>>,
 }
 
 impl fmt::Debug for FontSystem {
@@ -222,12 +226,21 @@ impl FontSystem {
             shape_buffer: ShapeBuffer::default(),
             dyn_fallback: Box::new(impl_fallback),
             fallbacks,
+            family_fallbacks: HashMap::default(),
         }
     }
 
     /// Create a new [`FontSystem`] with a pre-specified locale and font database.
     pub fn new_with_locale_and_db(locale: String, db: fontdb::Database) -> Self {
         Self::new_with_locale_and_db_and_fallback(locale, db, PlatformFallback)
+    }
+
+    /// bato: set the families tried, in order and at the exact requested
+    /// weight, for glyphs the default face of `family` lacks, before the
+    /// script and common fallbacks (like the next families of a CSS font
+    /// stack, or the `unicode-range` subsets of one `@font-face` family).
+    pub fn set_family_fallbacks(&mut self, family: &str, fallbacks: Vec<String>) {
+        self.family_fallbacks.insert(family.into(), fallbacks);
     }
 
     /// Get the locale.

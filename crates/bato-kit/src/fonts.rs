@@ -1,18 +1,56 @@
-//! Bundled fonts: Inter 4 (wght axis, opsz pinned to 14) and JetBrains Mono
-//! 400/500, compiled in from `assets/fonts`. Call [`setup`] once before the
-//! first frame (the frame's `run` helper does).
+//! Bundled fonts: Inter 4.001 (wght axis, opsz pinned to 14) and JetBrains
+//! Mono 400/500, compiled in from `assets/fonts`. Call [`setup`] once before
+//! the first frame (the frame's `run` helper does).
 //!
 //! The family names are pinned: a machine may also have a system `Inter`
 //! (static instances) and `JetBrains Mono` variants, and fontdb would happily
 //! resolve "Inter" weight 600 to the system SemiBold. So every system face of
-//! those families is removed from the font database before anything is shaped.
+//! those families is taken out of the "Inter" family before anything is
+//! shaped.
+//!
+//! Inter is fontsource's split, as Electron loads it: the Latin subset is the
+//! `Inter` face, the other six `unicode-range` subsets are fallback families
+//! tried in Chromium's order, then the system's static Inter faces (renamed
+//! to [`SYSTEM_INTER`], so a weight request never resolves to them), the next
+//! family of the CSS stack. Only after those come cosmic-text's script and
+//! common fallbacks.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 use iced::advanced::graphics::text::cosmic_text::fontdb;
 use iced::advanced::graphics::text::font_system;
 
 pub const INTER: &[u8] = include_bytes!("../../../assets/fonts/InterVariable-latin.ttf");
+/// The other fontsource Inter 4.001 subsets (`woff2_decompress`ed), in the
+/// order Chromium tries them: the last `@font-face` of fontsource's CSS whose
+/// `unicode-range` covers a character wins.
+pub const INTER_SUBSETS: [(&str, &[u8]); 6] = [
+    (
+        "Inter latin-ext",
+        include_bytes!("../../../assets/fonts/InterVariable-latin-ext.ttf"),
+    ),
+    (
+        "Inter vietnamese",
+        include_bytes!("../../../assets/fonts/InterVariable-vietnamese.ttf"),
+    ),
+    (
+        "Inter greek",
+        include_bytes!("../../../assets/fonts/InterVariable-greek.ttf"),
+    ),
+    (
+        "Inter greek-ext",
+        include_bytes!("../../../assets/fonts/InterVariable-greek-ext.ttf"),
+    ),
+    (
+        "Inter cyrillic",
+        include_bytes!("../../../assets/fonts/InterVariable-cyrillic.ttf"),
+    ),
+    (
+        "Inter cyrillic-ext",
+        include_bytes!("../../../assets/fonts/InterVariable-cyrillic-ext.ttf"),
+    ),
+];
 pub const JBM_REGULAR: &[u8] =
     include_bytes!("../../../assets/fonts/JetBrainsMono-Regular-latin.ttf");
 pub const JBM_MEDIUM: &[u8] =
@@ -20,6 +58,9 @@ pub const JBM_MEDIUM: &[u8] =
 
 pub const SANS: &str = "Inter";
 pub const MONO: &str = "JetBrains Mono";
+/// The system's own `Inter` faces, renamed: fallback only, after the bundled
+/// subsets (Electron's stack is `"Inter Variable", Inter, …`).
+pub const SYSTEM_INTER: &str = "Inter (system)";
 
 /// hhea ascent / descent in em (spec §2.1), for the CSS line-box model.
 pub const INTER_ASC: f32 = 1984.0 / 2048.0;
@@ -35,10 +76,12 @@ pub fn setup() {
 
 fn setup_once() {
     let mut fs = font_system().write().expect("font system");
-    // Drop system faces that share our family names.
+    // Take system faces that share our family names out of those families:
+    // static `Inter` faces become the fallback-only SYSTEM_INTER family, every
+    // other `Inter …` / `JetBrains Mono …` face is dropped.
     {
         let db = fs.raw().db_mut();
-        let shadowing: Vec<fontdb::ID> = db
+        let shadowing: Vec<fontdb::FaceInfo> = db
             .faces()
             .filter(|f| !matches!(f.source, fontdb::Source::Binary(_)))
             .filter(|f| {
@@ -48,28 +91,57 @@ fn setup_once() {
                         || name.starts_with("JetBrains Mono")
                 })
             })
-            .map(|f| f.id)
+            .cloned()
             .collect();
-        for id in shadowing {
-            db.remove_face(id);
+        for face in shadowing {
+            db.remove_face(face.id);
+            if let Some((_, lang)) = face.families.first().filter(|(n, _)| n == SANS) {
+                let mut renamed = face.clone();
+                renamed.families = vec![(SYSTEM_INTER.into(), *lang)];
+                db.push_face_info(renamed);
+            }
         }
     }
     fs.load_font(Cow::Borrowed(INTER));
     fs.load_font(Cow::Borrowed(JBM_REGULAR));
     fs.load_font(Cow::Borrowed(JBM_MEDIUM));
+    for (family, bytes) in INTER_SUBSETS {
+        let before: HashSet<fontdb::ID> = fs.raw().db().faces().map(|f| f.id).collect();
+        fs.load_font(Cow::Borrowed(bytes));
+        let db = fs.raw().db_mut();
+        let added: Vec<fontdb::FaceInfo> = db
+            .faces()
+            .filter(|f| !before.contains(&f.id))
+            .cloned()
+            .collect();
+        for mut face in added {
+            db.remove_face(face.id);
+            let lang = face
+                .families
+                .first()
+                .map_or(fontdb::Language::English_UnitedStates, |f| f.1);
+            face.families = vec![(family.into(), lang)];
+            db.push_face_info(face);
+        }
+    }
+    let mut chain: Vec<String> = INTER_SUBSETS.iter().map(|(f, _)| f.to_string()).collect();
+    chain.push(SYSTEM_INTER.into());
+    fs.raw().set_family_fallbacks(SANS, chain);
 
     // fontdb registers a variable font once, at its default weight (400).
     // cosmic-text only accepts exact weight matches inside a family, so a
     // request for Inter 500 or 600 silently fell back to *another family*
-    // (NotoSans-Medium, FreeSans Bold). Register the Inter face once per
-    // CSS weight; cosmic-text then applies `wght` = the requested weight
+    // (NotoSans-Medium, FreeSans Bold). Register each bundled Inter face once
+    // per CSS weight; cosmic-text then applies `wght` = the requested weight
     // for both shaping (harfrust) and rasterization.
     let db = fs.raw().db_mut();
     let inter: Vec<fontdb::FaceInfo> = db
         .faces()
         .filter(|f| {
             matches!(f.source, fontdb::Source::Binary(_))
-                && f.families.iter().any(|(n, _)| n == SANS)
+                && f.families
+                    .iter()
+                    .any(|(n, _)| n == SANS || INTER_SUBSETS.iter().any(|(s, _)| n == s))
         })
         .cloned()
         .collect();
@@ -90,4 +162,79 @@ pub fn sans() -> iced::Font {
 
 pub fn mono() -> iced::Font {
     iced::Font::with_name(MONO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::advanced::graphics::text::cosmic_text::{
+        Attrs, Buffer, Family, Metrics, Shaping, Weight,
+    };
+
+    /// The family of the face each character of `text` shaped with.
+    fn faces(text: &str, weight: u16) -> Vec<(char, String)> {
+        setup();
+        let mut guard = font_system().write().expect("font system");
+        let fs = guard.raw();
+        let mut buffer = Buffer::new(fs, Metrics::new(14.0, 20.0));
+        let attrs = Attrs::new()
+            .family(Family::Name(SANS))
+            .weight(Weight(weight));
+        buffer.set_text(fs, text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(fs, false);
+        let mut out = Vec::new();
+        for run in buffer.layout_runs() {
+            for g in run.glyphs {
+                let face = fs.db().face(g.font_id).expect("face");
+                let ch = text[g.start..g.end].chars().next().expect("char");
+                out.push((ch, face.families[0].0.clone()));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn inter_subsets_cover_like_electron() {
+        for weight in [400, 600] {
+            let got = faces("Aé Ă Ж Ѣ Ω ἀ Ơ", weight);
+            let family = |c: char| got.iter().find(|(g, _)| *g == c).map(|(_, f)| f.as_str());
+            assert_eq!(family('A'), Some(SANS));
+            assert_eq!(family('é'), Some(SANS));
+            assert_eq!(family('Ă'), Some("Inter latin-ext"));
+            assert_eq!(family('Ж'), Some("Inter cyrillic"));
+            assert_eq!(family('Ѣ'), Some("Inter cyrillic-ext"));
+            assert_eq!(family('Ω'), Some("Inter greek"));
+            assert_eq!(family('ἀ'), Some("Inter greek-ext"));
+            assert_eq!(family('Ơ'), Some("Inter latin-ext"));
+        }
+    }
+
+    #[test]
+    fn arrows_fall_back_to_system_inter_only_after_the_subsets() {
+        setup();
+        let has_system = {
+            let mut guard = font_system().write().expect("font system");
+            guard
+                .raw()
+                .db()
+                .faces()
+                .any(|f| f.families.iter().any(|(n, _)| n == SYSTEM_INTER))
+        };
+        let got = faces("a←", 500);
+        assert_eq!(got[0].1, SANS);
+        if has_system {
+            assert_eq!(got[1].1, SYSTEM_INTER);
+        } else {
+            assert_ne!(got[1].1, SANS);
+        }
+        // A weight request never resolves to the system faces.
+        let db_has_sans_system = {
+            let mut guard = font_system().write().expect("font system");
+            guard.raw().db().faces().any(|f| {
+                !matches!(f.source, fontdb::Source::Binary(_))
+                    && f.families.iter().any(|(n, _)| n == SANS)
+            })
+        };
+        assert!(!db_has_sans_system);
+    }
 }
