@@ -1,0 +1,420 @@
+{
+  "electron": {
+    "build": "app-client npm run package:linux (dist/electron/linux-unpacked/app)",
+    "full": "BATO_CAPTURE_FULL=1: viewport emulated to card height + 48 (or the page height for a tab)",
+    "settings": "fresh --user-data-dir: dark theme, brand accent, 100 %, comfortable width",
+    "template_commit": "dc553f3 (bato-template phase1/harness)",
+    "window": "1280x800 on the off-screen output; Chromium's own capture (BATO_CAPTURE), equal to a tools/shot.sh capture except the 4x4 compositor-rounded corners"
+  },
+  "shots": {
+    "dashboard": {
+      "bato_view": "view=examples&tab=dashboard",
+      "captured": "2026-11-14T08:26:30+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/dashboard.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "dashboard/dashboard": {
+      "bato_view": "view=examples&tab=dashboard&card=dashboard",
+      "captured": "2026-11-14T08:26:37+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/dashboard-dashboard.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data": {
+      "bato_view": "view=examples&tab=data",
+      "captured": "2026-11-14T08:27:04+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/data.png",
+      "full": {
+        "file": "docs/reference/examples/full/data.png",
+        "size": "1280x2819"
+      },
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/charts": {
+      "bato_view": "view=examples&tab=data&card=charts",
+      "captured": "2026-11-14T08:27:25+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/data-charts.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/kanban": {
+      "bato_view": "view=examples&tab=data&card=kanban",
+      "captured": "2026-11-14T08:27:45+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/data-kanban.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/node-graph": {
+      "bato_view": "view=examples&tab=data&card=node-graph",
+      "captured": "2026-11-14T08:27:52+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/data-node-graph.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/pagination": {
+      "bato_view": "view=examples&tab=data&card=pagination",
+      "captured": "2026-11-14T08:27:18+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/data-pagination.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/sortable": {
+      "bato_view": "view=examples&tab=data&card=sortable",
+      "captured": "2026-11-14T08:27:38+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/data-sortable.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/table": {
+      "bato_view": "view=examples&tab=data&card=table",
+      "captured": "2026-11-14T08:27:11+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/data-table.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "data/timeline": {
+      "bato_view": "view=examples&tab=data&card=timeline",
+      "captured": "2026-11-14T08:27:31+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/data-timeline.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "date": {
+      "bato_view": "view=examples&tab=date",
+      "captured": "2026-11-14T08:23:55+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/date.png",
+      "full": {
+        "file": "docs/reference/examples/full/date.png",
+        "size": "1280x1358"
+      },
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "date/calendar-time": {
+      "bato_view": "view=examples&tab=date&card=calendar-time",
+      "captured": "2026-11-14T08:24:08+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/date-calendar-time.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "date/calendar-view": {
+      "bato_view": "view=examples&tab=date&card=calendar-view",
+      "captured": "2026-11-14T08:24:15+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/date-calendar-view.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "date/pickers": {
+      "bato_view": "view=examples&tab=date&card=pickers",
+      "captured": "2026-11-14T08:24:02+01:00",
+      "clock": true,
+      "file": "docs/reference/examples/date-pickers.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "feedback": {
+      "bato_view": "view=examples&tab=feedback",
+      "captured": "2026-11-14T08:24:32+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/feedback.png",
+      "full": {
+        "file": "docs/reference/examples/full/feedback.png",
+        "size": "1280x1436"
+      },
+      "notes": [
+        "unstable"
+      ],
+      "size": "1280x800",
+      "stable": false
+    },
+    "feedback/accordion": {
+      "bato_view": "view=examples&tab=feedback&card=accordion",
+      "captured": "2026-11-14T08:25:35+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/feedback-accordion.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "feedback/alerts": {
+      "bato_view": "view=examples&tab=feedback&card=alerts",
+      "captured": "2026-11-14T08:25:14+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/feedback-alerts.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "feedback/atoms": {
+      "bato_view": "view=examples&tab=feedback&card=atoms",
+      "captured": "2026-11-14T08:24:58+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/feedback-atoms.png",
+      "full": null,
+      "notes": [
+        "unstable"
+      ],
+      "size": "1280x800",
+      "stable": false
+    },
+    "feedback/navigation": {
+      "bato_view": "view=examples&tab=feedback&card=navigation",
+      "captured": "2026-11-14T08:25:21+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/feedback-navigation.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "feedback/stepper": {
+      "bato_view": "view=examples&tab=feedback&card=stepper",
+      "captured": "2026-11-14T08:25:28+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/feedback-stepper.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs": {
+      "bato_view": "view=examples&tab=inputs",
+      "captured": "2026-11-14T08:22:53+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs.png",
+      "full": {
+        "file": "docs/reference/examples/full/inputs.png",
+        "size": "1280x3032"
+      },
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/code-editor": {
+      "bato_view": "view=examples&tab=inputs&card=code-editor",
+      "captured": "2026-11-14T08:23:41+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-code-editor.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/search": {
+      "bato_view": "view=examples&tab=inputs&card=search",
+      "captured": "2026-11-14T08:23:34+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-search.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/selects": {
+      "bato_view": "view=examples&tab=inputs&card=selects",
+      "captured": "2026-11-14T08:23:14+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-selects.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/sliders-color": {
+      "bato_view": "view=examples&tab=inputs&card=sliders-color",
+      "captured": "2026-11-14T08:23:21+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-sliders-color.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/specialized": {
+      "bato_view": "view=examples&tab=inputs&card=specialized",
+      "captured": "2026-11-14T08:23:07+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-specialized.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/text-fields": {
+      "bato_view": "view=examples&tab=inputs&card=text-fields",
+      "captured": "2026-11-14T08:23:00+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-text-fields.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/time-input": {
+      "bato_view": "view=examples&tab=inputs&card=time-input",
+      "captured": "2026-11-14T08:23:27+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-time-input.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "inputs/toggles-upload": {
+      "bato_view": "view=examples&tab=inputs&card=toggles-upload",
+      "captured": "2026-11-14T08:23:48+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/inputs-toggles-upload.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout": {
+      "bato_view": "view=examples&tab=layout",
+      "captured": "2026-11-14T08:25:42+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout.png",
+      "full": {
+        "file": "docs/reference/examples/full/layout.png",
+        "size": "1280x2155"
+      },
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout/app-shell": {
+      "bato_view": "view=examples&tab=layout&card=app-shell",
+      "captured": "2026-11-14T08:26:23+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout-app-shell.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout/editor-tabs": {
+      "bato_view": "view=examples&tab=layout&card=editor-tabs",
+      "captured": "2026-11-14T08:26:09+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout-editor-tabs.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout/primitives": {
+      "bato_view": "view=examples&tab=layout&card=primitives",
+      "captured": "2026-11-14T08:25:49+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout-primitives.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout/resizable": {
+      "bato_view": "view=examples&tab=layout&card=resizable",
+      "captured": "2026-11-14T08:26:16+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout-resizable.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout/responsive": {
+      "bato_view": "view=examples&tab=layout&card=responsive",
+      "captured": "2026-11-14T08:25:56+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout-responsive.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "layout/scrollable": {
+      "bato_view": "view=examples&tab=layout&card=scrollable",
+      "captured": "2026-11-14T08:26:02+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/layout-scrollable.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "overlays": {
+      "bato_view": "view=examples&tab=overlays",
+      "captured": "2026-11-14T08:26:43+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/overlays.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "overlays/context-menu": {
+      "bato_view": "view=examples&tab=overlays&card=context-menu",
+      "captured": "2026-11-14T08:26:50+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/overlays-context-menu.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    },
+    "overlays/triggers": {
+      "bato_view": "view=examples&tab=overlays&card=triggers",
+      "captured": "2026-11-14T08:26:57+01:00",
+      "clock": false,
+      "file": "docs/reference/examples/overlays-triggers.png",
+      "full": null,
+      "notes": [],
+      "size": "1280x800",
+      "stable": true
+    }
+  }
+}

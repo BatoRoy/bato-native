@@ -1,0 +1,23 @@
+[package]
+name = "bato-compare"
+version = "0.1.0"
+edition = "2024"
+description = "Fidelity harness: captures the Electron reference and a native window off-screen and diffs them."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "compare"
+path = "src/main.rs"
+
+# Standalone on purpose: not a member of the root workspace, so it never adds
+# to the kit's build, lock file or CI, and the root manifest stays untouched.
+# Its own Cargo.lock and target/ live in this directory.
+[workspace]
+
+[dependencies]
+png = "0.18"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
