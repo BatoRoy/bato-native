@@ -28,8 +28,8 @@ id                           mean     >8 %   px>24Σ  bbox (x0,y0–x1,y1)     n
 home                        0.184    0.51%     4842  16,16–1148,777         ref:stored native:cursor
 ```
 
-That row is the sanity check: `tools/compare.sh one home --native poc/iced/target/release/batopoc-iced`.
-The PoC README reports 0.18 and 4 843 for the same view. Batch mode also writes
+That row is the sanity check: `tools/compare.sh one home --native target/release/gallery`.
+The archived PoC (docs/poc-iced/README.md) reports 0.18 and 4 843 for the same view. Batch mode also writes
 `target/compare/summary.tsv`.
 
 Then open `target/compare/<tab>-<card>.side.png`, which shows **Electron | native | diff**:

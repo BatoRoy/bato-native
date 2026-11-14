@@ -2,9 +2,8 @@
 resolver = "3"
 members = ["crates/*", "examples/*"]
 # patched/: normalised upstream sources consumed via [patch.crates-io] (each is
-# its own package/workspace); poc/: the iced proof of concept, kept as the
-# extraction reference until bato-kit replaces it.
-exclude = ["patched", "poc"]
+# its own package/workspace).
+exclude = ["patched"]
 
 [workspace.package]
 version = "0.1.0"

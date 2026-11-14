@@ -1,4 +1,14 @@
-# bato-template native client — iced proof of concept
+# bato-template native client — iced proof of concept (archived)
+
+> **Archived.** The PoC's code now lives in `crates/bato-kit` (widgets, frame) and
+> `examples/gallery` (the app, `BATO_VIEW` and `BATO_SMOKE` hooks), on `crates/bato-shell` for the
+> platform. Same views, same numbers: `tools/compare.sh batch home scroll-lab scroll-lab-rows options
+> about --native target/release/gallery`. Path map: `src/widgets/*` → `bato-kit/src/*`, `src/ui.rs` →
+> `button.rs` / `badge.rs` / `card.rs` / `kbd.rs`, `src/style.rs` → `style.rs` + `anim.rs`,
+> `src/app.rs` → `bato-kit/src/frame/` + `examples/gallery/src/{main,home}.rs`, `lablist.rs` →
+> `examples/gallery/src/lab_rows.rs`, `net.rs` / `smoke.rs` → bato-shell, `scripts/setup-patched-deps.sh`
+> → `scripts/regen-patched.sh`. This file and `shots/` are kept as the record of the PoC.
+
 
 The slice from `native/POC-BRIEF.md` (sidebar, Home, Examples placeholder, Scroll lab, App Options,
 About) built on **iced 0.14** (crates.io release) with the wgpu renderer, aiming for pixel parity with

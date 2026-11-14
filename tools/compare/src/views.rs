@@ -19,7 +19,7 @@ pub struct View {
     pub clock: bool,
 }
 
-/// The PoC slice references in docs/reference/ (see poc/iced/README.md).
+/// The PoC slice references in docs/reference/ (see docs/poc-iced/README.md).
 const SLICE: &[(&str, &str)] = &[
     ("home", "view=home"),
     ("scroll-lab", "view=scroll-lab"),
