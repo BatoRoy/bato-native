@@ -1,7 +1,11 @@
 //! `Switch` (spec §4.4): 36×20 pill, 16 px white knob with
 //! `0 1px 3px #000@.3`, track colour and knob slide over 200 ms. Taps toggle
 //! like clicks. Focusable (a click focuses it, Tab reaches it, Enter / Space
-//! toggle) with `focusRing`. (Label click and disabled come with B1.)
+//! toggle) with `focusRing`.
+//!
+//! `.label(…)` makes the row a `<label>`: 14 px `subtext` text 10 px after
+//! the switch; a click on it toggles and focuses the switch. `.disabled(…)`:
+//! `opacity .5` on the row, no toggling, not focusable, default cursor.
 
 use std::time::Instant;
 
@@ -22,6 +26,10 @@ pub struct Switch<'a, Message> {
     on_color: Color,
     ring: Option<Ring>,
     id: Option<widget::Id>,
+    label: Option<(String, Color)>,
+    disabled: bool,
+    /// The opaque backdrop, so a faded (disabled) knob composites once.
+    over: Option<Color>,
 }
 
 /// A switch in the theme's colours (`app-control` off, `app-accent` on).
@@ -37,6 +45,8 @@ pub fn switch<'a, Message>(
         f,
     )
     .focus_ring(Ring::focus(cx))
+    .label_color(crate::style::c(cx.p().subtext))
+    .over(crate::style::c(cx.over))
 }
 
 impl<'a, Message> Switch<'a, Message> {
@@ -53,7 +63,29 @@ impl<'a, Message> Switch<'a, Message> {
             on_color,
             ring: None,
             id: None,
+            label: None,
+            disabled: false,
+            over: None,
         }
+    }
+    fn over(mut self, c: Color) -> Self {
+        self.over = Some(c);
+        self
+    }
+    /// The `<label>` text after the switch.
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        let color = self.label.take().map_or(Color::WHITE, |(_, c)| c);
+        self.label = Some((text.into(), color));
+        self
+    }
+    fn label_color(mut self, color: Color) -> Self {
+        self.label = Some((String::new(), color));
+        self
+    }
+    /// `disabled`: inert, `opacity .5`.
+    pub fn disabled(mut self, on: bool) -> Self {
+        self.disabled = on;
+        self
     }
     /// The `:focus-visible` ring.
     pub fn focus_ring(mut self, ring: Ring) -> Self {
@@ -122,11 +154,12 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
             }
             _ => cursor.is_over(layout.bounds()),
         };
-        if st.focus.pointer(event, inside, true) {
+        let enabled = !self.disabled;
+        if st.focus.sync(enabled) | st.focus.pointer(event, inside, enabled) {
             shell.request_redraw();
         }
         st.focus.reveal(layout.bounds(), shell);
-        if st.focus.activation(event, shell) {
+        if enabled && st.focus.activation(event, shell) {
             shell.publish((self.on_toggle)(!self.on));
             return;
         }
@@ -149,6 +182,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
                     }
                 }
             }
+            _ if !enabled => {}
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor.is_over(layout.bounds()) =>
             {
@@ -195,7 +229,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
             operation,
             self.id.as_ref(),
             layout.bounds(),
-            true,
+            !self.disabled,
             true,
         );
     }
@@ -208,7 +242,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
         _v: &Rectangle,
         _r: &iced::Renderer,
     ) -> mouse::Interaction {
-        if cursor.is_over(layout.bounds()) {
+        if cursor.is_over(layout.bounds()) && !self.disabled {
             mouse::Interaction::Pointer
         } else {
             mouse::Interaction::None
@@ -263,15 +297,52 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
                 },
                 snap: false,
             },
-            fade(Color::WHITE),
+            // CSS fades the switch as one layer: the knob is white at the
+            // group opacity over the backdrop, not over the faded track.
+            match self.over {
+                Some(bg) if crate::anim::current_opacity() < 1.0 => {
+                    lerp(bg, Color::WHITE, crate::anim::current_opacity())
+                }
+                _ => fade(Color::WHITE),
+            },
         );
     }
 }
 
-impl<'a, Message: 'a> From<Switch<'a, Message>>
+impl<'a, Message: Clone + 'a> From<Switch<'a, Message>>
     for Element<'a, Message, iced::Theme, iced::Renderer>
 {
-    fn from(s: Switch<'a, Message>) -> Self {
-        Element::new(s)
+    fn from(mut s: Switch<'a, Message>) -> Self {
+        let label = s.label.take().filter(|(t, _)| !t.is_empty());
+        let disabled = s.disabled;
+        let Some((text, color)) = label else {
+            return if disabled {
+                crate::anim::opacity(0.5, Element::new(s)).into()
+            } else {
+                Element::new(s)
+            };
+        };
+        let toggle = (!disabled).then(|| (s.on_toggle)(!s.on));
+        let row = crate::surface::surface(
+            iced::widget::row![
+                Element::new(s),
+                crate::label::label(text, 14.0, 20.0).color(color)
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press_maybe(toggle)
+        .focusable(false)
+        .labels_child()
+        .cursor(if disabled {
+            crate::cursor::Cursor::Default
+        } else {
+            crate::cursor::Cursor::Pointer
+        });
+        if disabled {
+            crate::anim::opacity(0.5, row).into()
+        } else {
+            row.into()
+        }
     }
 }

@@ -67,6 +67,8 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
                 .map(|s| s.map(Msg::Overlay))
                 .collect(),
         ),
+        n if n.starts_with("inputs:") => crate::showcase::inputs::text_fields::b1_selftest(&n[7..])
+            .map(|v| v.into_iter().map(|s| s.map(|n| match n {})).collect()),
         _ => None,
     }
 }
