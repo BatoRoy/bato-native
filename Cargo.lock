@@ -1041,9 +1041,6 @@ version = "0.1.0"
 dependencies = [
  "bato-kit",
  "bato-shell",
- "libc",
- "serde_json",
- "zbus",
 ]
 
 [[package]]

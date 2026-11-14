@@ -375,7 +375,7 @@ mod tests {
     fn easing_endpoints_and_midpoint() {
         assert_eq!(ease_standard(0.0), 0.0);
         assert_eq!(ease_standard(1.0), 1.0);
-        assert!((ease_standard(0.5) - 0.8).abs() < 0.02);
+        assert!((ease_standard(0.5) - 0.7756).abs() < 0.001);
         assert!(ease_out(0.5) > 0.5);
     }
 

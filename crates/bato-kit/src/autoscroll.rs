@@ -80,11 +80,11 @@ pub enum Route {
 pub fn route_engaged(bus: &mut Bus, event: &Event) -> Route {
     // The release matching a press that stopped autoscroll is swallowed even
     // though autoscroll is already idle.
-    if let (Some(b), Event::Mouse(mouse::Event::ButtonReleased(r))) = (bus.swallow_release, event) {
-        if b == *r {
-            bus.swallow_release = None;
-            return Route::Swallow;
-        }
+    if let (Some(b), Event::Mouse(mouse::Event::ButtonReleased(r))) = (bus.swallow_release, event)
+        && b == *r
+    {
+        bus.swallow_release = None;
+        return Route::Swallow;
     }
     if !bus.auto.is_engaged() {
         return Route::Pass;
@@ -203,12 +203,12 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer>
                 shell.request_redraw();
                 return;
             }
-            if let Event::Window(window::Event::RedrawRequested(now)) = event {
-                if bus.auto.is_engaged() {
-                    let (_, dy) = bus.auto.tick(*now, device_scale());
-                    bus.pending_dy += dy;
-                    shell.request_redraw();
-                }
+            if let Event::Window(window::Event::RedrawRequested(now)) = event
+                && bus.auto.is_engaged()
+            {
+                let (_, dy) = bus.auto.tick(*now, device_scale());
+                bus.pending_dy += dy;
+                shell.request_redraw();
             }
             bus.auto.is_engaged()
         };

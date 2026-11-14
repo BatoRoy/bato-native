@@ -696,21 +696,21 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                 }
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if let (Some(t), Some(p)) = (state.thumb_rect(b), cursor.position_over(b)) {
-                    if p.x >= b.x + b.width - BAR {
-                        if t.contains(p) {
-                            state.drag = Some((p.y, state.axis.offset()));
-                            state.log("drag", String::new());
-                        } else {
-                            // Track click: page step (87.5% of the viewport), animated.
-                            let s = device_scale();
-                            let step = b.height * 0.875 * s * if p.y < t.y { -1.0 } else { 1.0 };
-                            state.axis.animate_to(state.axis.target() + step, now);
-                            state.log("track", format!("{step:+.0}"));
-                        }
-                        shell.request_redraw();
-                        shell.capture_event();
+                if let (Some(t), Some(p)) = (state.thumb_rect(b), cursor.position_over(b))
+                    && p.x >= b.x + b.width - BAR
+                {
+                    if t.contains(p) {
+                        state.drag = Some((p.y, state.axis.offset()));
+                        state.log("drag", String::new());
+                    } else {
+                        // Track click: page step (87.5% of the viewport), animated.
+                        let s = device_scale();
+                        let step = b.height * 0.875 * s * if p.y < t.y { -1.0 } else { 1.0 };
+                        state.axis.animate_to(state.axis.target() + step, now);
+                        state.log("track", format!("{step:+.0}"));
                     }
+                    shell.request_redraw();
+                    shell.capture_event();
                 }
             }
             Event::Keyboard(iced::keyboard::Event::KeyPressed {
@@ -894,8 +894,10 @@ mod tests {
         // nothing is drawn hovered, so a starting scroll never flashes a row.
         let h = hover_after(HoverSource::Mouse, TouchOutcome::Pending, p);
         assert_eq!(h, HoverSource::TouchPending(p));
-        let mut pending = State::default();
-        pending.hover = h;
+        let pending = State {
+            hover: h,
+            ..State::default()
+        };
         let area0 = Rectangle {
             x: 0.0,
             y: 0.0,
