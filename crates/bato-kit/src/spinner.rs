@@ -70,17 +70,19 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Spinner {
         &mut self,
         _tree: &mut Tree,
         event: &iced::Event,
-        _layout: Layout<'_>,
+        layout: Layout<'_>,
         _cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         _clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut iced::advanced::Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
+        // Frames only while on screen (scrolled away, it stays idle).
         if matches!(
             event,
             iced::Event::Window(iced::window::Event::RedrawRequested(_))
-        ) {
+        ) && layout.bounds().intersects(viewport)
+        {
             shell.request_redraw();
         }
     }

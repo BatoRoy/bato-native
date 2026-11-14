@@ -8,3 +8,5 @@ crate::showcase::tab_cards! {
     stepper: Stepper => "stepper",
     accordion: Accordion => "accordion",
 }
+
+pub mod selftest;

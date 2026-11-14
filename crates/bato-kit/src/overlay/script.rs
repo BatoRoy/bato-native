@@ -170,6 +170,10 @@ impl<'a, M: Clone + 'a> Script<'a, M> {
         id: &widget::Id,
     ) -> Option<Rectangle> {
         let mut op = Find { id, found: None };
+        // Containers in the base tree report content coordinates: inside
+        // the page scroller they sit `page_offset` lower than on screen.
+        // (Assumes base-tree targets are page content.)
+        let page = crate::scroller::page_offset();
         if let Some(ov) = self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
@@ -185,6 +189,7 @@ impl<'a, M: Clone + 'a> Script<'a, M> {
             self.content
                 .as_widget_mut()
                 .operate(&mut tree.children[0], layout, renderer, &mut op);
+            return op.found.map(|b| b - page);
         }
         op.found
     }
@@ -306,6 +311,9 @@ impl<'a, M: Clone + 'a> Script<'a, M> {
         let aim = |this: &mut Self, tree: &mut Tree, t: &Target| -> bool {
             match this.resolve(tree, layout, renderer, viewport, t) {
                 Some(p) => {
+                    if std::env::var_os("BATO_SELFTEST_TRACE").is_some() {
+                        eprintln!("SELFTEST aim {t:?} -> {p:?}");
+                    }
                     tree.state.downcast_mut::<State>().pointer = Some(p);
                     true
                 }

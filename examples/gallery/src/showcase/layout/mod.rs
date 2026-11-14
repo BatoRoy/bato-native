@@ -9,3 +9,5 @@ crate::showcase::tab_cards! {
     resizable: Resizable => "resizable",
     app_shell: AppShell => "app-shell",
 }
+
+pub mod selftest;

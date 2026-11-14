@@ -805,7 +805,10 @@ fn focus_first_child<Message>(
     content
         .as_widget_mut()
         .operate(&mut tree.children[0], child, renderer, &mut col);
-    if let Some(i) = col.entries.iter().position(|e| e.tab_stop) {
+    // A label focuses its control even when Tab skips it (an unchecked
+    // radio of a group, `tabindex=-1`).
+    let first = col.entries.iter().position(|e| e.tab_stop);
+    if let Some(i) = first.or((!col.entries.is_empty()).then_some(0)) {
         let mut apply = crate::focus::Apply::new(Some(i));
         content
             .as_widget_mut()

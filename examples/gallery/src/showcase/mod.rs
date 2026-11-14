@@ -23,6 +23,35 @@ use bato_kit::prelude::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Toast(String, Tone),
+    /// A FileDropzone click: open the portal file chooser and send the
+    /// chosen paths back as `reply(paths)` (React's `onPaths`).
+    OpenFiles {
+        multiple: bool,
+        reply: Reply,
+    },
+}
+
+/// Where the chosen paths of [`Effect::OpenFiles`] go.
+#[derive(Clone, Copy)]
+pub struct Reply(pub fn(Vec<std::path::PathBuf>) -> Msg);
+
+impl PartialEq for Reply {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::fn_addr_eq(self.0, other.0)
+    }
+}
+
+impl std::fmt::Debug for Reply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Reply")
+    }
+}
+
+/// The overlay levels the Showcase has open, bottom first (the Triggers
+/// card's ConfirmDialog, Drawer and CommandPalette: plug
+/// `overlays::triggers::levels` in here).
+pub fn levels<'a>(_state: &'a State, _cx: &Ctx) -> Vec<bato_kit::modal::Modal<'a, Msg>> {
+    Vec::new()
 }
 
 /// Declares a tab's cards: `module: Variant => "card-id"`, in page order.
@@ -225,6 +254,20 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
         col = col.push(container(el).id(card_id(state.tab, id)).width(Length::Fill));
     }
     page(col, wide, 24)
+}
+
+/// `BATO_SELFTEST=<name>` scripts of the Showcase tabs (open the tab with
+/// `BATO_VIEW`).
+pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>> {
+    use bato_kit::overlay::script::Step;
+    fn map<M>(steps: Vec<Step<M>>, f: fn(M) -> Msg) -> Vec<Step<Msg>> {
+        steps.into_iter().map(|s| s.map(f)).collect()
+    }
+    match name {
+        "feedback" => Some(map(feedback::selftest::steps(), Msg::Feedback)),
+        "layout" => Some(map(layout::selftest::steps(), Msg::Layout)),
+        _ => None,
+    }
 }
 
 /// A card that is not ported yet: the real Card look, its title, and
