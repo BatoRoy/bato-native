@@ -4,6 +4,9 @@
 //! `accent_ink`. The optional label (14 px subtext, gap 10) toggles too.
 //! Disabled: opacity .5 on the whole thing.
 //!
+//! Focus: the box is the focusable `<button>` (focusRing, Space / Enter
+//! toggle); a click on the label focuses it, as `<label>` does.
+//!
 //! ```ignore
 //! checkbox(&cx, self.agree, Msg::Agree).label("I agree")
 //! checkbox(&cx, false, Msg::All).indeterminate(true)
@@ -16,6 +19,7 @@ use crate::El;
 use crate::anim::opacity;
 use crate::ctx::Ctx;
 use crate::cursor::Cursor;
+use crate::focus::Ring;
 use crate::icon::{Ico, icon};
 use crate::label::label;
 use crate::style::c;
@@ -28,6 +32,7 @@ pub struct Checkbox<'a, M> {
     disabled: bool,
     label: Option<String>,
     on_toggle: Box<dyn Fn(bool) -> M + 'a>,
+    id: Option<iced::advanced::widget::Id>,
 }
 
 pub fn checkbox<'a, M: Clone + 'a>(
@@ -42,6 +47,7 @@ pub fn checkbox<'a, M: Clone + 'a>(
         disabled: false,
         label: None,
         on_toggle: Box::new(on_toggle),
+        id: None,
     }
 }
 
@@ -59,6 +65,11 @@ impl<'a, M: Clone + 'a> Checkbox<'a, M> {
         self.disabled = on;
         self
     }
+    /// For [`crate::focus::focus`].
+    pub fn id(mut self, id: impl Into<iced::advanced::widget::Id>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
 }
 
 impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
@@ -74,10 +85,13 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
         } else {
             Space::new().width(12).height(12).into()
         };
-        let boxed = surface(glyph)
+        let msg = (!disabled).then(|| (cb.on_toggle)(!cb.checked));
+        let mut boxed = surface(glyph)
             .width(16)
             .height(16)
             .center()
+            .on_press_maybe(msg.clone())
+            .focus_ring(Ring::focus(&cb.cx))
             .style(move |st| {
                 let p = &t.p;
                 if filled {
@@ -98,13 +112,17 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
                         .radius(4.0)
                 }
             });
+        if let Some(id) = cb.id {
+            boxed = boxed.id(id);
+        }
         let mut items: Vec<El<'a, M>> = vec![boxed.into()];
         if let Some(l) = cb.label {
             items.push(label(l, 14.0, 20.0).color(c(cb.cx.p().subtext)).into());
         }
-        let msg = (!disabled).then(|| (cb.on_toggle)(!cb.checked));
         let whole = surface(row(items).spacing(10).align_y(Alignment::Center))
             .on_press_maybe(msg)
+            .focusable(false)
+            .labels_child()
             .cursor(if disabled {
                 Cursor::Default
             } else {

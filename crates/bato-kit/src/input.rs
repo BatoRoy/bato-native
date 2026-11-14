@@ -5,6 +5,11 @@
 //! boxes, iced does not), and keeps middle presses for itself (primary paste;
 //! `data-batoscroll-ignore`).
 //!
+//! Focus ([`crate::focus`]): Tab reaches the field (a disabled one is
+//! skipped); the halo is `:focus`, so it also shows after a click. Esc is
+//! not passed to iced's text input, which would blur on it: Chromium keeps
+//! focus and lets the key reach the dialog.
+//!
 //! The label/hint/error scaffold (`Field`, INF-10) builds on this in Phase 2.
 //!
 //! ```ignore
@@ -15,12 +20,13 @@
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::{self, Quad};
 use iced::advanced::text::Renderer as TextRenderer;
-use iced::advanced::widget::{self, Tree, Widget};
+use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::widget::text_input;
 use iced::{Background, Border, Color, Element, Event, Length, Rectangle, Size, mouse};
 
 use crate::ctx::Ctx;
+use crate::focus;
 use crate::fonts;
 use crate::style::{c, rgba};
 
@@ -175,6 +181,7 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>>
                     selection: colors.selection,
                 }
             });
+        let disabled = f.on_input.is_none();
         if let Some(on_input) = f.on_input {
             inner = inner.on_input(on_input);
         }
@@ -188,6 +195,7 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>>
             inner: inner.into(),
             halo: colors.halo,
             width: f.width,
+            disabled,
         };
         Element::new(halo)
     }
@@ -198,11 +206,25 @@ struct Halo<'a, Message> {
     inner: Element<'a, Message, iced::Theme, iced::Renderer>,
     halo: Color,
     width: Length,
+    disabled: bool,
+}
+
+/// The field's identity for focus restore and the Tab starting point.
+struct HaloState {
+    token: u64,
 }
 
 impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, Message> {
     fn size(&self) -> Size<Length> {
         Size::new(self.width, self.inner.as_widget().size().height)
+    }
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<HaloState>()
+    }
+    fn state(&self) -> tree::State {
+        tree::State::new(HaloState {
+            token: focus::next_token(),
+        })
     }
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.inner)]
@@ -244,6 +266,16 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
             shell.capture_event();
             return;
         }
+        if focus::is_pointer_press(event) && cursor.is_over(layout.bounds()) {
+            focus::note_press(tree.state.downcast_ref::<HaloState>().token);
+        }
+        if let Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            ..
+        }) = event
+        {
+            return;
+        }
         self.inner.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -278,6 +310,16 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
+        let token = tree.state.downcast_ref::<HaloState>().token;
+        operation.custom(None, layout.bounds(), &mut focus::Anchor(token));
+        operation.custom(
+            None,
+            layout.bounds(),
+            &mut focus::Meta {
+                token,
+                tab_stop: !self.disabled,
+            },
+        );
         self.inner.as_widget_mut().operate(
             &mut tree.children[0],
             layout.children().next().unwrap(),

@@ -10,6 +10,7 @@
 //! | [`style`] | The palette bridge (tokens → iced colours, shadows) |
 //! | [`surface`], [`label`], [`icon`] | The three building blocks: a CSS box, Chromium-placed text, lucide icons |
 //! | [`button`], [`badge`], [`card`], [`kbd`], [`segmented`], [`checkbox`], [`switch`], [`input`], [`spinner`], [`empty`] | Components |
+//! | [`focus`] | Keyboard focus: Tab order, `:focus-visible` rings, focus scopes (dialog trap), roving groups |
 //! | [`scroller`], [`autoscroll`] | Chromium scrolling (wheel, touchpad, touch, keys, scrollbar) and BatoScroll |
 //! | [`modal`], [`blur`], [`toast`], [`rail_tip`], [`timer`] | Overlays and timed things |
 //! | [`layout`] | Grid with spans and tracks, AutoGrid, Masonry, AspectRatio, absolute placement, hairlines, page |
@@ -34,6 +35,7 @@ pub mod ctx;
 pub mod cursor;
 pub mod datefmt;
 pub mod empty;
+pub mod focus;
 pub mod fonts;
 pub mod frame;
 pub mod icon;
@@ -78,6 +80,7 @@ pub mod prelude {
     pub use crate::checkbox::checkbox;
     pub use crate::ctx::Ctx;
     pub use crate::empty::empty_state;
+    pub use crate::focus::{Ring, autofocus, focus_scope, roving};
     pub use crate::icon::{Ico, icon};
     pub use crate::input::input;
     pub use crate::kbd::{app_mark, kbd};

@@ -7,6 +7,9 @@
 //! button(&cx).ghost().square(32).icon_sized(Ico::X, 16.0).on_press(Msg::Close)
 //! button(&cx).label("Saving").loading(true)
 //! ```
+//!
+//! Focusable when enabled, with `focusRing` (2 px accentBright, 2 px offset
+//! in the page background); Enter / Space click.
 
 use bato_theme::Rgb;
 use iced::widget::row;
@@ -14,6 +17,7 @@ use iced::{Alignment, Color, Length, Padding};
 
 use crate::El;
 use crate::ctx::Ctx;
+use crate::focus::Ring;
 use crate::icon::{Ico, icon};
 use crate::label::{Label, label};
 use crate::spinner::spinner;
@@ -141,6 +145,7 @@ pub struct Button<'a, M> {
     loading: bool,
     disabled: bool,
     width: Option<Length>,
+    id: Option<iced::advanced::widget::Id>,
 }
 
 /// A primary, medium button on `cx`'s backdrop, without content yet.
@@ -154,6 +159,7 @@ pub fn button<'a, M: Clone + 'a>(cx: &Ctx) -> Button<'a, M> {
         loading: false,
         disabled: false,
         width: None,
+        id: None,
     }
 }
 
@@ -232,6 +238,11 @@ impl<'a, M: Clone + 'a> Button<'a, M> {
         self.width = Some(w.into());
         self
     }
+    /// For [`crate::focus::focus`].
+    pub fn id(mut self, id: impl Into<iced::advanced::widget::Id>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
 }
 
 impl<'a, M: Clone + 'a> From<Button<'a, M>> for El<'a, M> {
@@ -267,7 +278,11 @@ impl<'a, M: Clone + 'a> From<Button<'a, M>> for El<'a, M> {
             .center()
             .style(button_style(&b.cx, b.variant, disabled))
             .on_press_maybe(if disabled { None } else { b.on_press })
-            .disabled(disabled);
+            .disabled(disabled)
+            .focus_ring(Ring::focus(&b.cx));
+        if let Some(id) = b.id {
+            s = s.id(id);
+        }
         if let Size::Icon(sz) = b.size {
             s = s.width(sz as f32);
         }

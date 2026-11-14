@@ -93,6 +93,7 @@ pub fn toast_stack<'a, M: Clone + 'a>(
         let (text, muted) = (p.text, p.muted);
         let close = surface(icon(Ico::X, 14.0))
             .on_press(dismiss(toast.id))
+            .focus_ring(crate::focus::Ring::plain(&cx))
             .style(move |s| {
                 BoxStyle::default()
                     .radius(4.0)

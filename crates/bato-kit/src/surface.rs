@@ -14,6 +14,11 @@
 //!
 //! Touch: a tap (`FingerPressed` + `FingerLifted` inside) clicks like the mouse;
 //! `FingerLost` (the scroller took the finger) cancels.
+//!
+//! Focus ([`crate::focus`]): a pressable surface is focusable (a click or tap
+//! focuses it, Tab reaches it, Enter clicks on press and Space on release) and
+//! paints its [`Ring`] while focused with keyboard modality; nothing changes
+//! when it is not focused.
 
 use std::time::{Duration, Instant};
 
@@ -28,6 +33,7 @@ use iced::{
 
 use crate::anim::{ease_standard, fade};
 use crate::cursor::Cursor;
+use crate::focus::{FocusState, Ring};
 use crate::scale::snap_rect;
 use crate::style::lerp;
 
@@ -134,25 +140,6 @@ pub enum Status {
 /// current group opacity.
 pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
     let r = s.radius;
-    // Outer rings (box-shadow 0 0 0 Npx), outermost first.
-    for (w, c) in s.rings.iter().rev() {
-        renderer.fill_quad(
-            Quad {
-                bounds: Rectangle {
-                    x: b.x - w,
-                    y: b.y - w,
-                    width: b.width + 2.0 * w,
-                    height: b.height + 2.0 * w,
-                },
-                border: Border {
-                    radius: (r + w).into(),
-                    ..Border::default()
-                },
-                ..Quad::default()
-            },
-            fade(*c),
-        );
-    }
     // Drop shadows: CSS lists them top-most first; paint bottom-most first.
     for sh in s.shadows.iter().rev() {
         let grow = sh.spread;
@@ -197,6 +184,26 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
                 snap: false,
             },
             Color::TRANSPARENT,
+        );
+    }
+    // Rings (box-shadow 0 0 0 Npx), outermost first. Tailwind lists the ring
+    // shadows before `--tw-shadow`, so they paint over the drop shadows.
+    for (w, c) in s.rings.iter().rev() {
+        renderer.fill_quad(
+            Quad {
+                bounds: Rectangle {
+                    x: b.x - w,
+                    y: b.y - w,
+                    width: b.width + 2.0 * w,
+                    height: b.height + 2.0 * w,
+                },
+                border: Border {
+                    radius: (r + w).into(),
+                    ..Border::default()
+                },
+                ..Quad::default()
+            },
+            fade(*c),
         );
     }
     if s.bg.is_some() || s.border.is_some() {
@@ -289,6 +296,11 @@ pub struct Surface<'a, Message> {
     transition: Duration,
     disabled: bool,
     cursor: Option<Cursor>,
+    id: Option<widget::Id>,
+    focusable: Option<bool>,
+    tab_stop: bool,
+    ring: Option<Ring>,
+    labels_child: bool,
 }
 
 pub fn surface<'a, Message>(
@@ -308,6 +320,11 @@ pub fn surface<'a, Message>(
         transition: Duration::from_millis(150),
         disabled: false,
         cursor: None,
+        id: None,
+        focusable: None,
+        tab_stop: true,
+        ring: None,
+        labels_child: false,
     }
 }
 
@@ -381,6 +398,38 @@ impl<'a, Message: Clone + 'a> Surface<'a, Message> {
         self.cursor = Some(c);
         self
     }
+    /// For [`crate::focus::focus`] and iced's focus operations.
+    pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+    /// Take keyboard focus (default: when pressable and enabled). A focusable
+    /// surface without `on_press` is a button with no action yet.
+    pub fn focusable(mut self, on: bool) -> Self {
+        self.focusable = Some(on);
+        self
+    }
+    /// `false` = `tabindex=-1`: focusable by click or program, skipped by Tab.
+    pub fn tab_stop(mut self, on: bool) -> Self {
+        self.tab_stop = on;
+        self
+    }
+    /// The `:focus-visible` ring. It replaces the style's own rings while it
+    /// shows, as Tailwind's `focus-visible:ring-*` does.
+    pub fn focus_ring(mut self, ring: Ring) -> Self {
+        self.ring = Some(ring);
+        self
+    }
+    /// A `<label>` around a control: a click on it focuses the first
+    /// focusable widget inside (the control), as Chromium does.
+    pub fn labels_child(mut self) -> Self {
+        self.labels_child = true;
+        self
+    }
+
+    fn is_focusable(&self) -> bool {
+        !self.disabled && self.focusable.unwrap_or(self.on_press.is_some())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -393,6 +442,7 @@ struct State {
     t: f32,
     from: f32,
     started: Option<Instant>,
+    focus: FocusState,
 }
 
 impl State {
@@ -488,13 +538,31 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
             shell,
             viewport,
         );
-        if shell.is_event_captured() {
-            return;
-        }
+        let focusable = self.is_focusable();
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
         let over =
             cursor.is_over(bounds) && viewport.contains(cursor.position().unwrap_or_default());
+        // Focus follows every press, captured or not (Chromium focuses on
+        // mousedown; a press anywhere else blurs).
+        let inside = match event {
+            Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
+                bounds.contains(*position) && viewport.contains(*position)
+            }
+            _ => over,
+        };
+        if state.focus.sync(focusable) | state.focus.pointer(event, inside, focusable) {
+            shell.request_redraw();
+        }
+        if focusable && state.focus.activation(event, shell) {
+            if let Some(m) = self.on_press.clone() {
+                shell.publish(m);
+            }
+            return;
+        }
+        if shell.is_event_captured() {
+            return;
+        }
         let interactive = self.on_press.is_some() && !self.disabled;
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
@@ -537,6 +605,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
                     && let Some(m) = self.on_press.clone()
                 {
                     shell.publish(m);
+                    if self.labels_child {
+                        focus_first_child(&mut self.content, tree, layout, renderer);
+                    }
                 }
                 shell.capture_event();
             }
@@ -552,6 +623,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
                         shell.publish(m);
                     }
                     shell.capture_event();
+                    if self.labels_child {
+                        focus_first_child(&mut self.content, tree, layout, renderer);
+                        shell.request_redraw();
+                    }
                 }
             }
             _ => {}
@@ -606,11 +681,17 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
         let state = tree.state.downcast_ref::<State>();
         let t = if self.disabled { 0.0 } else { state.t };
         let rest = (self.style)(Status::Rest);
-        let s = if t > 0.0 {
+        let mut s = if t > 0.0 {
             rest.lerp(&(self.style)(Status::Hover), t)
         } else {
             rest
         };
+        if let Some(ring) = &self.ring
+            && state.focus.ring_visible()
+            && self.is_focusable()
+        {
+            s.rings = ring.layers();
+        }
         let b = snap_rect(layout.bounds());
         let content_style = renderer::Style {
             text_color: s.fg.unwrap_or(style.text_color),
@@ -663,6 +744,14 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
+        let focusable = self.is_focusable();
+        tree.state.downcast_mut::<State>().focus.report(
+            operation,
+            self.id.as_ref(),
+            layout.bounds(),
+            focusable,
+            self.tab_stop,
+        );
         self.content.as_widget_mut().operate(
             &mut tree.children[0],
             layout.children().next().unwrap(),
@@ -694,5 +783,25 @@ impl<'a, Message: Clone + 'a> From<Surface<'a, Message>>
 {
     fn from(s: Surface<'a, Message>) -> Self {
         Element::new(s)
+    }
+}
+
+/// `<label>` activation: focus the first focusable widget inside.
+fn focus_first_child<Message>(
+    content: &mut Element<'_, Message, iced::Theme, iced::Renderer>,
+    tree: &mut Tree,
+    layout: Layout<'_>,
+    renderer: &iced::Renderer,
+) {
+    let child = layout.children().next().unwrap();
+    let mut col = crate::focus::Collect::default();
+    content
+        .as_widget_mut()
+        .operate(&mut tree.children[0], child, renderer, &mut col);
+    if let Some(i) = col.entries.iter().position(|e| e.tab_stop) {
+        let mut apply = crate::focus::Apply::new(Some(i));
+        content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], child, renderer, &mut apply);
     }
 }

@@ -472,10 +472,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 wrap(Msg::Dismiss(id))
             }));
         }
-        stack(layers)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        crate::focus::focus_root(stack(layers).width(Length::Fill).height(Length::Fill)).into()
     }
 }
 

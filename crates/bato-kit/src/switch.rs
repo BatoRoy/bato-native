@@ -1,16 +1,18 @@
 //! `Switch` (spec §4.4): 36×20 pill, 16 px white knob with
 //! `0 1px 3px #000@.3`, track colour and knob slide over 200 ms. Taps toggle
-//! like clicks. (Label click, disabled and focus ring come with B1.)
+//! like clicks. Focusable (a click focuses it, Tab reaches it, Enter / Space
+//! toggle) with `focusRing`. (Label click and disabled come with B1.)
 
 use std::time::Instant;
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::{self, Quad, Renderer as _};
-use iced::advanced::widget::{Tree, Widget, tree};
+use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::{Border, Color, Element, Event, Length, Rectangle, Shadow, Size, Vector, mouse, window};
 
 use crate::anim::{ease_standard, fade};
+use crate::focus::{FocusState, Ring, paint_ring};
 use crate::style::lerp;
 
 pub struct Switch<'a, Message> {
@@ -18,6 +20,8 @@ pub struct Switch<'a, Message> {
     on_toggle: Box<dyn Fn(bool) -> Message + 'a>,
     off_color: Color,
     on_color: Color,
+    ring: Option<Ring>,
+    id: Option<widget::Id>,
 }
 
 /// A switch in the theme's colours (`app-control` off, `app-accent` on).
@@ -32,6 +36,7 @@ pub fn switch<'a, Message>(
         crate::style::c(cx.p().accent),
         f,
     )
+    .focus_ring(Ring::focus(cx))
 }
 
 impl<'a, Message> Switch<'a, Message> {
@@ -46,7 +51,19 @@ impl<'a, Message> Switch<'a, Message> {
             on_toggle: Box::new(f),
             off_color,
             on_color,
+            ring: None,
+            id: None,
         }
+    }
+    /// The `:focus-visible` ring.
+    pub fn focus_ring(mut self, ring: Ring) -> Self {
+        self.ring = Some(ring);
+        self
+    }
+    /// For [`crate::focus::focus`].
+    pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.id = Some(id.into());
+        self
     }
 }
 
@@ -59,6 +76,7 @@ struct State {
     started: Option<Instant>,
     pressed: bool,
     finger: Option<u64>,
+    focus: FocusState,
 }
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Message> {
@@ -95,9 +113,22 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
         _r: &iced::Renderer,
         _c: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-        _v: &Rectangle,
+        viewport: &Rectangle,
     ) {
         let st = tree.state.downcast_mut::<State>();
+        let inside = match event {
+            Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
+                layout.bounds().contains(*position) && viewport.contains(*position)
+            }
+            _ => cursor.is_over(layout.bounds()),
+        };
+        if st.focus.pointer(event, inside, true) {
+            shell.request_redraw();
+        }
+        if st.focus.activation(event, shell) {
+            shell.publish((self.on_toggle)(!self.on));
+            return;
+        }
         if st.shown_on != self.on {
             st.shown_on = self.on;
             st.from = st.t;
@@ -152,6 +183,22 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
         }
     }
 
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        tree.state.downcast_mut::<State>().focus.report(
+            operation,
+            self.id.as_ref(),
+            layout.bounds(),
+            true,
+            true,
+        );
+    }
+
     fn mouse_interaction(
         &self,
         _t: &Tree,
@@ -179,6 +226,11 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
     ) {
         let st = tree.state.downcast_ref::<State>();
         let b = crate::scale::snap_rect(layout.bounds());
+        if let Some(ring) = &self.ring
+            && st.focus.ring_visible()
+        {
+            paint_ring(renderer, b, 10.0, ring);
+        }
         renderer.fill_quad(
             Quad {
                 bounds: b,

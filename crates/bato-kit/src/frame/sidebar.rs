@@ -9,6 +9,7 @@ use iced::{Alignment, Length, Padding};
 use super::{Dialog, Frame, Msg};
 use crate::El;
 use crate::ctx::Ctx;
+use crate::focus::Ring;
 use crate::icon::{Ico, icon};
 use crate::kbd::{app_mark, kbd};
 use crate::label::label;
@@ -21,7 +22,8 @@ use crate::surface::{BoxStyle, Status, surface};
 pub const MOD_K: &str = "Ctrl K";
 
 /// One nav / footer row: 36 px, icon 16, 13 px label; active `text@.07`,
-/// hover `text@.05`; a rail tip when collapsed.
+/// hover `text@.05`; a rail tip when collapsed. Focus-visible: `ring-2`
+/// accentBright, no offset.
 fn nav_row<'a, M: Clone + 'a>(
     cx: &Ctx,
     collapsed: bool,
@@ -55,6 +57,7 @@ fn nav_row<'a, M: Clone + 'a>(
         })
         .center_y()
         .on_press(msg)
+        .focus_ring(Ring::plain(cx))
         .style(move |st| {
             let p = &t.p;
             if active {
@@ -119,10 +122,13 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 items.push(kbd(&cx.on(cx.wash(0.03)), MOD_K));
             }
             let t = cx.t.clone();
+            // A button in React (it opens the command palette): a Tab stop.
             let s = surface(row(items).spacing(8).align_y(Alignment::Center))
                 .width(Length::Fill)
                 .height(32)
                 .center_y()
+                .focusable(true)
+                .focus_ring(Ring::plain(cx))
                 .style(move |st| {
                     let p = &t.p;
                     let bg = t.wash(if st == Status::Hover { 0.06 } else { 0.03 }, p.bg);

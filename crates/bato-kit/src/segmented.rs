@@ -8,12 +8,19 @@
 //! segmented(&cx, role, vec![Segment::rich(Role::Admin, [("Admin", false), (" 3", true)])], Msg::Role).sm()
 //! tabs(&cx, tab, vec![(Tab::Inputs, "Inputs"), …], Msg::Tab)
 //! ```
+//!
+//! Focus: every segment / tab is a Tab stop, as in React (buttons with
+//! `role=radio`, no roving): Enter / Space select, arrows scroll the page.
+//! Segments ring with `focusRing` (offset in the page bg), tabs with a plain
+//! `ring-2`. `.roving()` opts into the ARIA radio-group keys instead: one
+//! Tab stop (the selected segment), arrows move the selection.
 
 use iced::widget::row;
 use iced::{Length, Padding};
 
 use crate::El;
 use crate::ctx::Ctx;
+use crate::focus::{Ring, roving};
 use crate::label::{Span, label, rich};
 use crate::style::c;
 use crate::surface::{BoxStyle, Status, surface};
@@ -103,6 +110,7 @@ pub struct Segmented<'a, T, M> {
     options: Vec<Segment<T>>,
     on_change: Box<dyn Fn(T) -> M + 'a>,
     size: SegSize,
+    roving: bool,
 }
 
 pub fn segmented<'a, T: Copy + PartialEq + 'a, M: Clone + 'a>(
@@ -117,6 +125,7 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a, M: Clone + 'a>(
         options: options.into_iter().collect(),
         on_change: Box::new(on_change),
         size: SegSize::Md,
+        roving: false,
     }
 }
 
@@ -129,6 +138,12 @@ impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> Segmented<'a, T, M> {
         self.size = s;
         self
     }
+    /// Radio-group keys: only the selected segment is a Tab stop; arrows
+    /// move focus and the selection (wrapping). Not what React does.
+    pub fn roving(mut self) -> Self {
+        self.roving = true;
+        self
+    }
 }
 
 impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> From<Segmented<'a, T, M>> for El<'a, M> {
@@ -139,6 +154,8 @@ impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> From<Segmented<'a, T, M>> for 
             SegSize::Sm => (24.0, 10.0),
             SegSize::Md => (28.0, 12.0),
         };
+        let ring = Ring::focus(&s.cx);
+        let any_active = s.options.iter().any(|o| o.value == s.value);
         let segs: Vec<El<'a, M>> = s
             .options
             .iter()
@@ -150,6 +167,8 @@ impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> From<Segmented<'a, T, M>> for 
                     .center()
                     .on_press((s.on_change)(o.value))
                     .style(seg_style(&tcx, active, 6.0))
+                    .focus_ring(ring)
+                    .tab_stop(!s.roving || active || !any_active)
                     .into()
             })
             .collect();
@@ -157,7 +176,16 @@ impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> From<Segmented<'a, T, M>> for 
             .bg(c(track))
             .border(c(s.cx.t.line_on(track)))
             .radius(8.0);
-        surface(row(segs)).padding(3).fixed(box_style).into()
+        let segs: El<'a, M> = if s.roving {
+            let values: Vec<T> = s.options.iter().map(|o| o.value).collect();
+            let on_change = s.on_change;
+            roving(row(segs))
+                .on_move(move |i| on_change(values[i]))
+                .into()
+        } else {
+            row(segs).into()
+        };
+        surface(segs).padding(3).fixed(box_style).into()
     }
 }
 
@@ -182,6 +210,7 @@ pub fn tabs<'a, T: Copy + PartialEq + 'a, M: Clone + 'a>(
                 .center()
                 .on_press(on_change(o.value))
                 .style(seg_style(&tcx, active, 8.0))
+                .focus_ring(Ring::plain(cx))
                 .into()
         })
         .collect();

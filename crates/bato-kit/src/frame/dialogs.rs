@@ -78,6 +78,7 @@ fn swatch<'a, M: Clone + 'a>(
         .center()
         .hover_scale(1.1)
         .on_press(msg)
+        .focus_ring(crate::focus::Ring::offset_on(cx, p.card))
         .fixed(st)
         .into()
 }
