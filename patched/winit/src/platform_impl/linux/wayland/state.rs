@@ -12,6 +12,7 @@ use sctk::reexports::client::protocol::wl_surface::WlSurface;
 use sctk::reexports::client::{Connection, Proxy, QueueHandle};
 
 use sctk::compositor::{CompositorHandler, CompositorState};
+use sctk::data_device_manager::DataDeviceManagerState;
 use sctk::output::{OutputHandler, OutputState};
 use sctk::registry::{ProvidesRegistryState, RegistryState};
 use sctk::seat::pointer::ThemedPointer;
@@ -115,6 +116,12 @@ pub struct WinitState {
     /// Whether we have dispatched events to the user thus we want to
     /// send `AboutToWait` and normally wakeup the user.
     pub dispatched_events: bool,
+
+    /// bato-native: `wl_data_device_manager`, for file drops.
+    pub data_device_manager: Option<DataDeviceManagerState>,
+
+    /// bato-native: the file drag in progress.
+    pub dnd: crate::platform_impl::wayland::dnd::DndState,
 }
 
 impl WinitState {
@@ -143,9 +150,13 @@ impl WinitState {
 
         let seat_state = SeatState::new(globals, queue_handle);
 
+        let data_device_manager = DataDeviceManagerState::bind(globals, queue_handle).ok();
         let mut seats = AHashMap::default();
         for seat in seat_state.seats() {
-            seats.insert(seat.id(), WinitSeatState::new());
+            let mut state = WinitSeatState::new();
+            state.data_device =
+                data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
+            seats.insert(seat.id(), state);
         }
 
         let (viewporter_state, fractional_scaling_manager) =
@@ -192,6 +203,8 @@ impl WinitState {
             loop_handle,
             // Make it true by default.
             dispatched_events: true,
+            data_device_manager,
+            dnd: Default::default(),
         })
     }
 

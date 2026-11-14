@@ -1,0 +1,483 @@
+From 22724c6f6f148e8b1ffeb34b754fae9384054bc5 Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sat, 14 Nov 2026 11:35:19 +0100
+Subject: [PATCH] Wayland: desktop file drops (wl_data_device text/uri-list ->
+ HoveredFile/DroppedFile/HoveredFileCancelled)
+
+---
+ src/bato_uri_list.rs                        |  94 ++++++++
+ src/lib.rs                                  |   4 +
+ src/platform_impl/linux/wayland/dnd.rs      | 251 ++++++++++++++++++++
+ src/platform_impl/linux/wayland/mod.rs      |   1 +
+ src/platform_impl/linux/wayland/seat/mod.rs |  10 +-
+ src/platform_impl/linux/wayland/state.rs    |  15 +-
+ 6 files changed, 372 insertions(+), 3 deletions(-)
+ create mode 100644 src/bato_uri_list.rs
+ create mode 100644 src/platform_impl/linux/wayland/dnd.rs
+
+diff --git a/src/bato_uri_list.rs b/src/bato_uri_list.rs
+new file mode 100644
+index 0000000..9f4e0e7
+--- /dev/null
++++ b/src/bato_uri_list.rs
+@@ -0,0 +1,94 @@
++//! bato-native: `text/uri-list` (RFC 2483) to local paths, for desktop file
++//! drops on Wayland (`wl_data_device`, see
++//! `platform_impl/linux/wayland/dnd.rs`).
++
++use std::path::PathBuf;
++
++/// The local files of a `text/uri-list`: one URI per line (CRLF or LF),
++/// `#` comment lines and blank lines skipped, only `file:` URIs (`file:///p`,
++/// `file://localhost/p`, `file://<hostname>/p`, `file:/p`), percent-decoded
++/// byte-wise (paths need not be UTF-8). Other schemes and other hosts are
++/// dropped.
++pub fn parse(list: &[u8], hostname: Option<&str>) -> Vec<PathBuf> {
++    list.split(|&b| b == b'\n')
++        .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
++        .map(trim)
++        .filter(|line| !line.is_empty() && line[0] != b'#')
++        .filter_map(|uri| file_path(uri, hostname))
++        .collect()
++}
++
++fn trim(mut s: &[u8]) -> &[u8] {
++    while let [b' ' | b'\t', rest @ ..] = s {
++        s = rest;
++    }
++    while let [rest @ .., b' ' | b'\t'] = s {
++        s = rest;
++    }
++    s
++}
++
++/// The path of one `file:` URI.
++fn file_path(uri: &[u8], hostname: Option<&str>) -> Option<PathBuf> {
++    if uri.len() < 5 || !uri[..5].eq_ignore_ascii_case(b"file:") {
++        return None;
++    }
++    let rest = &uri[5..];
++    let path = if let Some(after) = rest.strip_prefix(b"//") {
++        // `//host/path`: the authority ends at the next `/`.
++        let slash = after.iter().position(|&b| b == b'/')?;
++        let host = &after[..slash];
++        let local = host.is_empty()
++            || host.eq_ignore_ascii_case(b"localhost")
++            || hostname.is_some_and(|h| host.eq_ignore_ascii_case(h.as_bytes()));
++        if !local {
++            return None;
++        }
++        &after[slash..]
++    } else if rest.starts_with(b"/") {
++        rest
++    } else {
++        return None;
++    };
++    // A query or fragment is not part of the path.
++    let end = path.iter().position(|&b| b == b'?' || b == b'#').unwrap_or(path.len());
++    let bytes = percent_decode(&path[..end]);
++    if bytes.is_empty() {
++        return None;
++    }
++    Some(from_bytes(bytes))
++}
++
++fn percent_decode(s: &[u8]) -> Vec<u8> {
++    let hex = |b: u8| match b {
++        b'0'..=b'9' => Some(b - b'0'),
++        b'a'..=b'f' => Some(b - b'a' + 10),
++        b'A'..=b'F' => Some(b - b'A' + 10),
++        _ => None,
++    };
++    let mut out = Vec::with_capacity(s.len());
++    let mut i = 0;
++    while i < s.len() {
++        if s[i] == b'%' && i + 2 < s.len() {
++            if let (Some(h), Some(l)) = (hex(s[i + 1]), hex(s[i + 2])) {
++                out.push(h << 4 | l);
++                i += 3;
++                continue;
++            }
++        }
++        out.push(s[i]);
++        i += 1;
++    }
++    out
++}
++
++#[cfg(unix)]
++fn from_bytes(bytes: Vec<u8>) -> PathBuf {
++    use std::os::unix::ffi::OsStringExt;
++    PathBuf::from(std::ffi::OsString::from_vec(bytes))
++}
++
++#[cfg(not(unix))]
++fn from_bytes(bytes: Vec<u8>) -> PathBuf {
++    PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index 6b0e2c1..b48d359 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -212,6 +212,10 @@ pub mod keyboard;
+ pub mod monitor;
+ mod platform_impl;
+ mod utils;
++
++/// bato-native: `text/uri-list` parsing for Wayland file drops.
++#[doc(hidden)]
++pub mod bato_uri_list;
+ pub mod window;
+ 
+ pub mod platform;
+diff --git a/src/platform_impl/linux/wayland/dnd.rs b/src/platform_impl/linux/wayland/dnd.rs
+new file mode 100644
+index 0000000..c6093e4
+--- /dev/null
++++ b/src/platform_impl/linux/wayland/dnd.rs
+@@ -0,0 +1,251 @@
++//! bato-native: desktop → window file drops on Wayland.
++//!
++//! winit 0.30 only reports file drops on X11, Windows and macOS. This binds
++//! `wl_data_device_manager`, gets a `wl_data_device` per seat and turns a
++//! drag that offers `text/uri-list` into the events the X11 backend sends:
++//!
++//! | wl_data_device | winit |
++//! |---|---|
++//! | `enter` (uri-list offered) | accept `text/uri-list`, action copy; read the list; `HoveredFile` per file once read |
++//! | `enter`, `motion` | `CursorMoved` (the pointer is grabbed by the drag, so the window gets no `wl_pointer` motion) |
++//! | `leave` before a drop | `HoveredFileCancelled`, `CursorLeft` |
++//! | `drop` | `DroppedFile` per file (once the list is read), then `wl_data_offer.finish` |
++//!
++//! Only the copy action is offered: accepting "move" would let a file
++//! manager delete the originals. The list is read through the event loop
++//! (the pipe is a calloop source), never blocking.
++
++use std::io::{ErrorKind, Read};
++use std::path::PathBuf;
++
++use sctk::compositor::SurfaceData;
++use sctk::data_device_manager::data_device::{DataDeviceData, DataDeviceHandler};
++use sctk::data_device_manager::data_offer::{DataOfferHandler, DragOffer};
++use sctk::data_device_manager::ReadPipe;
++use sctk::reexports::calloop::{PostAction, RegistrationToken};
++use sctk::reexports::client::protocol::wl_data_device::WlDataDevice;
++use sctk::reexports::client::protocol::wl_data_device_manager::DndAction;
++use sctk::reexports::client::protocol::wl_surface::WlSurface;
++use sctk::reexports::client::{Connection, Proxy, QueueHandle};
++use tracing::warn;
++
++use crate::dpi::{LogicalPosition, PhysicalPosition};
++use crate::event::WindowEvent;
++use crate::platform_impl::wayland::state::WinitState;
++use crate::platform_impl::wayland::{self, DeviceId, WindowId};
++
++const URI_LIST: &str = "text/uri-list";
++
++/// The file drag in progress, if any.
++#[derive(Debug, Default)]
++pub struct DndState {
++    /// The window under the drag, and the offer.
++    target: Option<(WindowId, DragOffer)>,
++    /// The offered files, once the list is read.
++    paths: Option<Vec<PathBuf>>,
++    /// The pipe being read.
++    reading: Option<RegistrationToken>,
++    /// The compositor's latest action for the offer.
++    action: Option<DndAction>,
++    /// Dropped: deliver and finish once the list is read.
++    dropped: bool,
++    /// `HoveredFile` was sent for this drag.
++    hovered: bool,
++    /// Bumped per drag, so a read of an older drag is ignored.
++    serial: u64,
++}
++
++fn device_id() -> crate::event::DeviceId {
++    crate::event::DeviceId(crate::platform_impl::DeviceId::Wayland(DeviceId))
++}
++
++fn hostname() -> Option<String> {
++    std::fs::read_to_string("/proc/sys/kernel/hostname").ok().map(|h| h.trim().to_owned())
++}
++
++impl WinitState {
++    fn dnd_push(&mut self, event: WindowEvent, window_id: WindowId) {
++        self.events_sink.push_window_event(event, window_id);
++        self.dispatched_events = true;
++    }
++
++    /// The pointer position during the drag (surface-local, logical).
++    fn dnd_cursor(&mut self, window_id: WindowId, x: f64, y: f64) {
++        let scale = match self.windows.get_mut().get(&window_id) {
++            Some(w) => w.lock().unwrap().scale_factor(),
++            None => return,
++        };
++        let position: PhysicalPosition<f64> = LogicalPosition::new(x, y).to_physical(scale);
++        self.dnd_push(WindowEvent::CursorMoved { device_id: device_id(), position }, window_id);
++    }
++
++    /// Forget the drag (and stop reading its list).
++    fn dnd_reset(&mut self) {
++        if let Some(token) = self.dnd.reading.take() {
++            self.loop_handle.remove(token);
++        }
++        let serial = self.dnd.serial;
++        self.dnd = DndState { serial, ..DndState::default() };
++    }
++
++    fn dnd_read(&mut self, pipe: ReadPipe) {
++        let serial = self.dnd.serial;
++        let mut list = Vec::new();
++        let token = self.loop_handle.insert_source(pipe, move |_, file, state| {
++            let mut chunk = [0u8; 4096];
++            // SAFETY: the file is only read, never replaced or closed here.
++            match unsafe { file.get_mut() }.read(&mut chunk) {
++                Ok(0) => {
++                    state.dnd_list(serial, std::mem::take(&mut list));
++                    PostAction::Remove
++                },
++                Ok(n) => {
++                    list.extend_from_slice(&chunk[..n]);
++                    PostAction::Continue
++                },
++                Err(e) if matches!(e.kind(), ErrorKind::Interrupted | ErrorKind::WouldBlock) => {
++                    PostAction::Continue
++                },
++                Err(e) => {
++                    warn!("reading a dropped text/uri-list failed: {e}");
++                    state.dnd_list(serial, Vec::new());
++                    PostAction::Remove
++                },
++            }
++        });
++        match token {
++            Ok(token) => self.dnd.reading = Some(token),
++            Err(e) => warn!("cannot read a dropped text/uri-list: {e}"),
++        }
++    }
++
++    /// The list of drag `serial` is in.
++    fn dnd_list(&mut self, serial: u64, list: Vec<u8>) {
++        if serial != self.dnd.serial {
++            return;
++        }
++        self.dnd.reading = None;
++        let Some((window_id, _)) = &self.dnd.target else { return };
++        let window_id = *window_id;
++        let paths = crate::bato_uri_list::parse(&list, hostname().as_deref());
++        if !self.dnd.dropped {
++            for p in &paths {
++                self.dnd_push(WindowEvent::HoveredFile(p.clone()), window_id);
++            }
++            self.dnd.hovered = !paths.is_empty();
++        }
++        self.dnd.paths = Some(paths);
++        self.dnd_finish();
++    }
++
++    /// After the drop, once the list is read: deliver the files, finish.
++    fn dnd_finish(&mut self) {
++        if !self.dnd.dropped || self.dnd.paths.is_none() {
++            return;
++        }
++        let paths = self.dnd.paths.take().unwrap_or_default();
++        if let Some((window_id, offer)) = self.dnd.target.take() {
++            for p in paths {
++                self.dnd_push(WindowEvent::DroppedFile(p), window_id);
++            }
++            // `finish` is only valid for an accepted copy (else a protocol error).
++            if self.dnd.action == Some(DndAction::Copy) {
++                offer.finish();
++            }
++            offer.destroy();
++        }
++        self.dnd_reset();
++    }
++}
++
++impl DataDeviceHandler for WinitState {
++    fn enter(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        device: &WlDataDevice,
++        x: f64,
++        y: f64,
++        surface: &WlSurface,
++    ) {
++        self.dnd_reset();
++        let Some(offer) = device.data::<DataDeviceData>().and_then(|d| d.drag_offer()) else {
++            return;
++        };
++        let parent = surface
++            .data::<SurfaceData<()>>()
++            .and_then(|d| d.parent_surface())
++            .unwrap_or(surface);
++        let window_id = wayland::make_wid(parent);
++        let files = offer.with_mime_types(|m| m.iter().any(|t| t == URI_LIST));
++        if !files || !self.windows.get_mut().contains_key(&window_id) {
++            offer.accept_mime_type(offer.serial, None);
++            offer.set_actions(DndAction::empty(), DndAction::empty());
++            return;
++        }
++        offer.accept_mime_type(offer.serial, Some(URI_LIST.to_owned()));
++        offer.set_actions(DndAction::Copy, DndAction::Copy);
++        self.dnd.serial += 1;
++        self.dnd.target = Some((window_id, offer.clone()));
++        self.dnd_cursor(window_id, x, y);
++        // Reading before the drop is allowed; it lets HoveredFile name the files.
++        match offer.receive(URI_LIST.to_owned()) {
++            Ok(pipe) => self.dnd_read(pipe),
++            Err(e) => warn!("cannot receive a dropped text/uri-list: {e}"),
++        }
++    }
++
++    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
++        if self.dnd.dropped {
++            // The drop finishes (and destroys) the offer.
++            return;
++        }
++        if let Some((window_id, _)) = self.dnd.target.take() {
++            if self.dnd.hovered {
++                self.dnd_push(WindowEvent::HoveredFileCancelled, window_id);
++            }
++            self.dnd_push(WindowEvent::CursorLeft { device_id: device_id() }, window_id);
++        }
++        self.dnd_reset();
++    }
++
++    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, x: f64, y: f64) {
++        if let Some((window_id, _)) = &self.dnd.target {
++            let window_id = *window_id;
++            self.dnd_cursor(window_id, x, y);
++        }
++    }
++
++    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
++
++    fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
++        if self.dnd.target.is_none() {
++            return;
++        }
++        self.dnd.dropped = true;
++        self.dnd_finish();
++    }
++}
++
++impl DataOfferHandler for WinitState {
++    fn source_actions(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        _: &mut DragOffer,
++        _: DndAction,
++    ) {
++    }
++
++    fn selected_action(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        offer: &mut DragOffer,
++        action: DndAction,
++    ) {
++        if self.dnd.target.as_ref().is_some_and(|(_, o)| o.inner() == offer.inner()) {
++            self.dnd.action = Some(action);
++        }
++    }
++}
+diff --git a/src/platform_impl/linux/wayland/mod.rs b/src/platform_impl/linux/wayland/mod.rs
+index f78e55c..caddb5a 100644
+--- a/src/platform_impl/linux/wayland/mod.rs
++++ b/src/platform_impl/linux/wayland/mod.rs
+@@ -14,6 +14,7 @@ pub use event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+ pub use output::{MonitorHandle, VideoModeHandle};
+ pub use window::Window;
+ 
++mod dnd;
+ mod event_loop;
+ mod output;
+ mod seat;
+diff --git a/src/platform_impl/linux/wayland/seat/mod.rs b/src/platform_impl/linux/wayland/seat/mod.rs
+index d645100..532e99e 100644
+--- a/src/platform_impl/linux/wayland/seat/mod.rs
++++ b/src/platform_impl/linux/wayland/seat/mod.rs
+@@ -57,6 +57,9 @@ pub struct WinitSeatState {
+ 
+     /// Whether we have pending modifiers.
+     modifiers_pending: bool,
++
++    /// bato-native: the seat's data device (file drops).
++    pub data_device: Option<sctk::data_device_manager::data_device::DataDevice>,
+ }
+ 
+ impl WinitSeatState {
+@@ -202,10 +205,13 @@ impl SeatHandler for WinitState {
+     fn new_seat(
+         &mut self,
+         _connection: &Connection,
+-        _queue_handle: &QueueHandle<Self>,
++        queue_handle: &QueueHandle<Self>,
+         seat: WlSeat,
+     ) {
+-        self.seats.insert(seat.id(), WinitSeatState::new());
++        let mut state = WinitSeatState::new();
++        state.data_device =
++            self.data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
++        self.seats.insert(seat.id(), state);
+     }
+ 
+     fn remove_seat(
+diff --git a/src/platform_impl/linux/wayland/state.rs b/src/platform_impl/linux/wayland/state.rs
+index 7b33d12..d1a0c0f 100644
+--- a/src/platform_impl/linux/wayland/state.rs
++++ b/src/platform_impl/linux/wayland/state.rs
+@@ -12,6 +12,7 @@ use sctk::reexports::client::protocol::wl_surface::WlSurface;
+ use sctk::reexports::client::{Connection, Proxy, QueueHandle};
+ 
+ use sctk::compositor::{CompositorHandler, CompositorState};
++use sctk::data_device_manager::DataDeviceManagerState;
+ use sctk::output::{OutputHandler, OutputState};
+ use sctk::registry::{ProvidesRegistryState, RegistryState};
+ use sctk::seat::pointer::ThemedPointer;
+@@ -115,6 +116,12 @@ pub struct WinitState {
+     /// Whether we have dispatched events to the user thus we want to
+     /// send `AboutToWait` and normally wakeup the user.
+     pub dispatched_events: bool,
++
++    /// bato-native: `wl_data_device_manager`, for file drops.
++    pub data_device_manager: Option<DataDeviceManagerState>,
++
++    /// bato-native: the file drag in progress.
++    pub dnd: crate::platform_impl::wayland::dnd::DndState,
+ }
+ 
+ impl WinitState {
+@@ -143,9 +150,13 @@ impl WinitState {
+ 
+         let seat_state = SeatState::new(globals, queue_handle);
+ 
++        let data_device_manager = DataDeviceManagerState::bind(globals, queue_handle).ok();
+         let mut seats = AHashMap::default();
+         for seat in seat_state.seats() {
+-            seats.insert(seat.id(), WinitSeatState::new());
++            let mut state = WinitSeatState::new();
++            state.data_device =
++                data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
++            seats.insert(seat.id(), state);
+         }
+ 
+         let (viewporter_state, fractional_scaling_manager) =
+@@ -192,6 +203,8 @@ impl WinitState {
+             loop_handle,
+             // Make it true by default.
+             dispatched_events: true,
++            data_device_manager,
++            dnd: Default::default(),
+         })
+     }
+ 
+-- 
+2.56.0
+

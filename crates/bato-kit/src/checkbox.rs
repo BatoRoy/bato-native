@@ -2,7 +2,9 @@
 //! `app-control` border, accentBright border on hover; checked or
 //! indeterminate: accent fill with a 12 px Check / Minus at stroke 3 in
 //! `accent_ink`. The optional label (14 px subtext, gap 10) toggles too.
-//! Disabled: opacity .5 on the whole thing.
+//! Disabled: opacity .5 on the whole thing (composited as one layer: each
+//! colour blended at .5 over the backdrop, so the tick does not show the
+//! fill through it).
 //!
 //! Focus: the box is the focusable `<button>` (focusRing, Space / Enter
 //! toggle); a click on the label focuses it, as `<label>` does.
@@ -12,11 +14,10 @@
 //! checkbox(&cx, false, Msg::All).indeterminate(true)
 //! ```
 
+use iced::Alignment;
 use iced::widget::{Space, row};
-use iced::{Alignment, Element};
 
 use crate::El;
-use crate::anim::opacity;
 use crate::ctx::Ctx;
 use crate::cursor::Cursor;
 use crate::focus::Ring;
@@ -78,6 +79,14 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
         let t = cb.cx.t.clone();
         let over = cb.cx.over;
         let disabled = cb.disabled;
+        // `opacity-50` on the row, composited once.
+        let dim = move |rgb: bato_theme::Rgb| {
+            if disabled {
+                c(bato_theme::blend(rgb, 0.5, over))
+            } else {
+                c(rgb)
+            }
+        };
         let glyph: El<'a, M> = if cb.indeterminate {
             icon(Ico::Minus, 12.0).stroke_width(3.0).into()
         } else if cb.checked {
@@ -96,9 +105,9 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
                 let p = &t.p;
                 if filled {
                     BoxStyle::default()
-                        .bg(c(p.accent))
-                        .border(c(p.accent))
-                        .fg(c(p.accent_ink))
+                        .bg(dim(p.accent))
+                        .border(dim(p.accent))
+                        .fg(dim(p.accent_ink))
                         .radius(4.0)
                 } else {
                     let border = if st == Status::Hover && !disabled {
@@ -107,8 +116,8 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
                         p.control
                     };
                     BoxStyle::default()
-                        .bg(c(t.recessed(over)))
-                        .border(c(border))
+                        .bg(dim(t.recessed(over)))
+                        .border(dim(border))
                         .radius(4.0)
                 }
             });
@@ -117,7 +126,7 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
         }
         let mut items: Vec<El<'a, M>> = vec![boxed.into()];
         if let Some(l) = cb.label {
-            items.push(label(l, 14.0, 20.0).color(c(cb.cx.p().subtext)).into());
+            items.push(label(l, 14.0, 20.0).color(dim(cb.cx.p().subtext)).into());
         }
         let whole = surface(row(items).spacing(10).align_y(Alignment::Center))
             .on_press_maybe(msg)
@@ -128,10 +137,6 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
             } else {
                 Cursor::Pointer
             });
-        if disabled {
-            Element::from(opacity(0.5, whole))
-        } else {
-            whole.into()
-        }
+        whole.into()
     }
 }

@@ -261,6 +261,7 @@ pub struct Control<'a, M> {
     value: String,
     on_input: Option<Box<dyn Fn(String) -> M + 'a>>,
     on_submit: Option<M>,
+    on_focus: Option<Box<dyn Fn(bool) -> M + 'a>>,
     id: Option<widget::Id>,
     font: iced::Font,
     size: FieldSize,
@@ -286,6 +287,7 @@ pub fn text_control<'a, M: Clone + 'a>(
         value: value.to_string(),
         on_input: Some(Box::new(on_input)),
         on_submit: None,
+        on_focus: None,
         id: None,
         font: fonts::sans(),
         size: FieldSize::Md,
@@ -330,6 +332,11 @@ impl<'a, M: Clone + 'a> Control<'a, M> {
     }
     pub fn on_submit(mut self, m: M) -> Self {
         self.on_submit = Some(m);
+        self
+    }
+    /// `onFocus` (`true`) / `onBlur` (`false`) of the input.
+    pub fn on_focus(mut self, f: impl Fn(bool) -> M + 'a) -> Self {
+        self.on_focus = Some(Box::new(f));
         self
     }
     pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
@@ -436,6 +443,7 @@ impl<'a, M: Clone + 'a> From<Control<'a, M>> for El<'a, M> {
             error: f.error,
             disabled: f.disabled,
             focused: f.focused,
+            on_focus: f.on_focus,
         })
     }
 }
@@ -483,6 +491,7 @@ struct ControlBox<'a, M> {
     error: bool,
     disabled: bool,
     focused: Option<bool>,
+    on_focus: Option<Box<dyn Fn(bool) -> M + 'a>>,
 }
 
 impl<'a, M> ControlBox<'a, M> {
@@ -590,6 +599,9 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ControlBox<'a, M> {
         // The right group's buttons (clear, reveal) first, then the input:
         // icons and prefixes are `pointer-events-none`, the input spans the box.
         let kids: Vec<_> = layout.children().collect();
+        // Only a capture by the right group keeps the event from the input:
+        // a press captured elsewhere must still blur it.
+        let was_captured = shell.is_event_captured();
         if let Some(r) = &mut self.right {
             let i = kids.len() - 1;
             r.as_widget_mut().update(
@@ -603,7 +615,8 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ControlBox<'a, M> {
                 viewport,
             );
         }
-        if !shell.is_event_captured() && !esc {
+        let by_right = !was_captured && shell.is_event_captured();
+        if !by_right && !esc {
             self.input.as_widget_mut().update(
                 &mut tree.children[0],
                 event,
@@ -631,6 +644,9 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ControlBox<'a, M> {
             st.focused = focused;
             st.changed = Some(now);
             shell.request_redraw();
+            if let Some(f) = &self.on_focus {
+                shell.publish(f(focused));
+            }
         } else if let Event::Window(window::Event::RedrawRequested(at)) = event
             && st.running(*at)
         {

@@ -23,6 +23,35 @@ use bato_kit::prelude::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Toast(String, Tone),
+    /// A FileDropzone click: open the portal file chooser and send the
+    /// chosen paths back as `reply(paths)` (React's `onPaths`).
+    OpenFiles {
+        multiple: bool,
+        reply: Reply,
+    },
+}
+
+/// Where the chosen paths of [`Effect::OpenFiles`] go.
+#[derive(Clone, Copy)]
+pub struct Reply(pub fn(Vec<std::path::PathBuf>) -> Msg);
+
+impl PartialEq for Reply {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::fn_addr_eq(self.0, other.0)
+    }
+}
+
+impl std::fmt::Debug for Reply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Reply")
+    }
+}
+
+/// The overlay levels the Showcase has open, bottom first (the Triggers
+/// card's ConfirmDialog, Drawer and CommandPalette: plug
+/// `overlays::triggers::levels` in here).
+pub fn levels<'a>(_state: &'a State, _cx: &Ctx) -> Vec<bato_kit::modal::Modal<'a, Msg>> {
+    Vec::new()
 }
 
 /// Declares a tab's cards: `module: Variant => "card-id"`, in page order.
