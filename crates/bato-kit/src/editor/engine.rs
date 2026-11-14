@@ -5,6 +5,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use iced::advanced::{Clipboard, clipboard};
+
 use iced::advanced::graphics::text::cosmic_text as ct;
 use iced::advanced::graphics::text::cosmic_text::Edit as _;
 
@@ -24,7 +26,7 @@ const GROUP_DELAY: Duration = Duration::from_millis(500);
 
 pub(crate) enum Engine {
     Plain(Box<ct::SyntaxEditor<'static, 'static>>),
-    Vi(Box<ct::ViEditor<'static, 'static>>),
+    Vi(Box<super::vi::ViEditor<'static, 'static>>),
 }
 
 macro_rules! with_ed {
@@ -128,6 +130,16 @@ struct History {
 pub struct Outcome {
     pub changed: bool,
     pub moved: bool,
+    /// Scroll the cursor line to the middle of the view (vim's `zz`).
+    pub center: bool,
+}
+
+impl std::ops::BitOrAssign for Outcome {
+    fn bitor_assign(&mut self, o: Self) {
+        self.changed |= o.changed;
+        self.moved |= o.moved;
+        self.center |= o.center;
+    }
 }
 
 /// The editor's document and state. The app keeps it (like iced's
@@ -151,6 +163,10 @@ pub struct Doc {
     pub width: f32,
     /// The keys of the vim command being typed (`vim.status`).
     keys: String,
+    /// When `<leader>` (Space) was typed and its mapping is still pending.
+    leader: Option<Instant>,
+    /// The `+` / `*` register text last exchanged with the clipboard.
+    clip_seen: [Option<String>; 2],
 }
 
 impl Doc {
@@ -168,6 +184,8 @@ impl Doc {
             linewise: None,
             width: 0.0,
             keys: String::new(),
+            leader: None,
+            clip_seen: [None, None],
         }
     }
 
@@ -288,8 +306,7 @@ impl Doc {
         se.set_cursor(cursor);
         se.set_selection(selection);
         self.engine = Some(if vim {
-            let mut vi = ct::ViEditor::new(se);
-            vi.set_passthrough(false);
+            let mut vi = super::vi::ViEditor::new(se);
             // Normal mode: the cursor sits on a character.
             vi.set_selection(ct::Selection::None);
             Engine::Vi(Box::new(vi))
@@ -457,8 +474,8 @@ impl Doc {
                 self.history.broken = true;
             }
             return Outcome {
-                changed: false,
                 moved,
+                ..Outcome::default()
             };
         };
         if !matches!(cmd, Cmd::Move(Move::LineUp | Move::LineDown, _)) {
@@ -474,8 +491,8 @@ impl Doc {
         });
         let Some(change) = change.filter(|c| !c.items.is_empty()) else {
             return Outcome {
-                changed: false,
                 moved: before != after,
+                ..Outcome::default()
             };
         };
         self.version += 1;
@@ -485,6 +502,7 @@ impl Doc {
         Outcome {
             changed: true,
             moved: true,
+            center: false,
         }
     }
 
@@ -617,6 +635,397 @@ impl Doc {
         Outcome {
             changed,
             moved: before != (v.cursor(), v.selection()),
+            center: false,
+        }
+    }
+
+    // ── Vim: the host keymap (the user's Neovim config) ──────────────────
+
+    fn vi(&mut self) -> Option<&mut ViEditor> {
+        match &mut self.engine {
+            Some(Engine::Vi(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// The pending modit command (`"+3Delete`…); empty when idle.
+    fn vi_cmd(&self) -> String {
+        match &self.engine {
+            Some(Engine::Vi(v)) => v.parser().cmd.to_string(),
+            _ => String::new(),
+        }
+    }
+
+    fn vi_register_raw(&self, name: char) -> Option<Register> {
+        match &self.engine {
+            Some(Engine::Vi(v)) => v.register(name).cloned(),
+            _ => None,
+        }
+    }
+
+    /// A vim register (`"`, `+`, `a`…).
+    #[cfg(test)]
+    pub fn vi_register(&self, name: char) -> Option<Register> {
+        match &self.engine {
+            Some(Engine::Vi(v)) => v.register(name).cloned(),
+            _ => None,
+        }
+    }
+
+    /// When the pending `<leader>` times out (`timeoutlen`).
+    pub fn vim_deadline(&self) -> Option<Instant> {
+        self.leader.map(|t| t + TIMEOUTLEN)
+    }
+
+    /// The leader timed out: Space does what it does unmapped (`l`).
+    pub fn vim_timeout(&mut self, fs: &mut ct::FontSystem, clip: &mut dyn Clipboard) -> Outcome {
+        if self.leader.take().is_none() {
+            return Outcome::default();
+        }
+        self.feed(fs, ct::Action::Insert(LEADER), clip)
+    }
+
+    /// One key in vim mode, with the user's mappings (see [`VimKey`]).
+    /// `None`: not a vim key (the event goes on).
+    pub fn vim_input(
+        &mut self,
+        fs: &mut ct::FontSystem,
+        key: VimKey,
+        clip: &mut dyn Clipboard,
+        view_lines: usize,
+        read_only: bool,
+    ) -> Option<Outcome> {
+        let mode = self.vi_mode()?;
+        let insert = matches!(mode, ct::ViMode::Insert | ct::ViMode::Replace);
+        let visual = matches!(mode, ct::ViMode::Visual | ct::ViMode::VisualLine);
+        let normal = mode == ct::ViMode::Normal;
+        if read_only && insert {
+            return None;
+        }
+
+        // `<C-c>` is `<Esc>` in every mode (the user's insert-mode map,
+        // extended to visual and normal); it never copies.
+        if matches!(key, VimKey::Ctrl('c' | '[', _)) {
+            self.leader = None;
+            return Some(self.feed(fs, ct::Action::Escape, clip));
+        }
+
+        // A pending `<leader>`: its mappings, else Space as typed.
+        if let Some(at) = self.leader.take() {
+            if at.elapsed() < TIMEOUTLEN {
+                let mapped = match key {
+                    // `"+y`: yank to the system clipboard.
+                    VimKey::Char('y') => Some("\"+y"),
+                    // `"_d`: delete to the black hole.
+                    VimKey::Char('d') if !read_only => Some("\"_d"),
+                    // `"_dP`: paste over the selection, keeping the register.
+                    // Done as `p` with `""` put back afterwards: the same
+                    // without `"_dP`'s slip at a line end (the cursor steps
+                    // back onto the last character before `P`).
+                    VimKey::Char('p') if visual && !read_only => {
+                        self.keys.clear();
+                        let saved = self.vi_register_raw('"');
+                        let out = self.feed(fs, ct::Action::Insert('p'), clip);
+                        if let (Some(reg), Some(v)) = (saved, self.vi()) {
+                            v.set_register('"', reg);
+                        }
+                        return Some(out);
+                    }
+                    _ => None,
+                };
+                if let Some(keys) = mapped {
+                    self.keys.clear();
+                    return Some(self.feed_str(fs, keys, clip));
+                }
+                if matches!(key, VimKey::Action(ct::Action::Escape)) {
+                    self.keys.clear();
+                    return Some(Outcome::default());
+                }
+            }
+            self.keys.clear();
+            let mut out = self.feed(fs, ct::Action::Insert(LEADER), clip);
+            if let Some(o) = self.vim_input(fs, key, clip, view_lines, read_only) {
+                out |= o;
+            }
+            return Some(out);
+        }
+
+        let cmd = self.vi_cmd();
+        let idle = cmd.is_empty() && (normal || visual);
+        let count = (!cmd.is_empty() && cmd.chars().all(|c| c.is_ascii_digit()))
+            .then(|| cmd.parse::<usize>().ok())
+            .flatten();
+        let half = (view_lines / 2).max(1);
+        match key {
+            VimKey::Char(LEADER) if idle => {
+                self.leader = Some(Instant::now());
+                // Neovim's showcmd shows the pending Space as `<20>`.
+                self.keys = "<20>".into();
+                Some(Outcome::default())
+            }
+            // The terminal's paste: at the cursor in insert mode, else
+            // `"+p` (replacing a visual selection).
+            VimKey::Ctrl('v', true) if !read_only => {
+                let text = clip.read(clipboard::Kind::Standard)?.replace("\r\n", "\n");
+                if insert {
+                    return Some(self.vi_paste_outcome(&text));
+                }
+                if !(idle || count.is_some()) {
+                    return Some(Outcome::default());
+                }
+                Some(self.feed_str(fs, "\"+p", clip))
+            }
+            VimKey::Ctrl('v', false) | VimKey::ShiftInsert if insert => {
+                let text = clip.read(clipboard::Kind::Standard)?.replace("\r\n", "\n");
+                Some(self.vi_paste_outcome(&text))
+            }
+            VimKey::Ctrl('r', _) if !read_only => {
+                let changed = self.redo();
+                Some(Outcome {
+                    changed,
+                    moved: changed,
+                    center: false,
+                })
+            }
+            // `<C-d>zz` / `<C-u>zz`: half a page, then centre.
+            VimKey::Ctrl(c @ ('d' | 'u'), _) if normal || visual => {
+                let motion = if c == 'd' {
+                    ct::Motion::Down
+                } else {
+                    ct::Motion::Up
+                };
+                let mut out = Outcome::default();
+                for _ in 0..half {
+                    out |= self.feed(fs, ct::Action::Motion(motion), clip);
+                }
+                out.center = true;
+                Some(out)
+            }
+            VimKey::Ctrl(..) => None,
+            // `nzzzv` / `Nzzzv`: search, then centre.
+            VimKey::Char(c @ ('n' | 'N')) if normal && idle => {
+                let mut out = self.feed(fs, ct::Action::Insert(c), clip);
+                out.center = true;
+                Some(out)
+            }
+            // `mzJ`z`: join lines, the cursor stays.
+            VimKey::Char('J') if normal && (idle || count.is_some()) && !read_only => {
+                if count.is_some() {
+                    self.vi()?.reset_parser();
+                    self.keys.clear();
+                }
+                Some(self.join_lines(count.unwrap_or(2)))
+            }
+            // Visual `J` / `K`: move the selected lines (`:m '>+1` / `:m '<-2`, `gv`).
+            VimKey::Char(c @ ('J' | 'K')) if visual && idle && !read_only => {
+                Some(self.move_lines(c == 'J'))
+            }
+            VimKey::Char(ch) => {
+                if read_only && is_vi_edit(ch, &mode) && cmd.is_empty() {
+                    return Some(Outcome::default());
+                }
+                Some(self.feed(fs, ct::Action::Insert(ch), clip))
+            }
+            VimKey::Action(a) => {
+                if read_only
+                    && matches!(
+                        a,
+                        ct::Action::Backspace
+                            | ct::Action::Delete
+                            | ct::Action::Indent
+                            | ct::Action::Unindent
+                    )
+                {
+                    return Some(Outcome::default());
+                }
+                Some(self.feed(fs, a, clip))
+            }
+            VimKey::ShiftInsert => None,
+        }
+    }
+
+    /// Several keys, as typed.
+    fn feed_str(
+        &mut self,
+        fs: &mut ct::FontSystem,
+        keys: &str,
+        clip: &mut dyn Clipboard,
+    ) -> Outcome {
+        let mut out = Outcome::default();
+        for ch in keys.chars() {
+            out |= self.feed(fs, ct::Action::Insert(ch), clip);
+        }
+        out
+    }
+
+    /// One key to modit, with the clipboard registers synced around it:
+    /// `"+p` / `"*p` read the clipboard first, and a yank into `+` / `*`
+    /// writes it (`clipboard` is not `unnamedplus`, so `""` stays inside).
+    fn feed(
+        &mut self,
+        fs: &mut ct::FontSystem,
+        action: ct::Action,
+        clip: &mut dyn Clipboard,
+    ) -> Outcome {
+        let Some(Engine::Vi(v)) = &mut self.engine else {
+            return Outcome::default();
+        };
+        let putting = matches!(action, ct::Action::Insert('p' | 'P'))
+            && matches!(
+                v.parser().mode,
+                ct::ViMode::Normal | ct::ViMode::Visual | ct::ViMode::VisualLine
+            );
+        if putting && let Some(name @ ('+' | '*')) = v.pending_register() {
+            let kind = clip_kind(name);
+            if let Some(text) = clip.read(kind) {
+                let text = text.replace("\r\n", "\n");
+                v.set_register(name, register_from_clipboard(&text));
+                self.clip_seen[usize::from(name == '*')] = Some(text);
+            }
+        }
+        let out = self.vi_key(fs, action);
+        self.sync_clipboard(clip);
+        out
+    }
+
+    fn sync_clipboard(&mut self, clip: &mut dyn Clipboard) {
+        let Some(Engine::Vi(v)) = &self.engine else {
+            return;
+        };
+        for (i, name) in ['+', '*'].into_iter().enumerate() {
+            let Some(reg) = v.register(name) else {
+                continue;
+            };
+            let text = clipboard_text(reg);
+            if self.clip_seen[i].as_ref() != Some(&text) {
+                clip.write(clip_kind(name), text.clone());
+                self.clip_seen[i] = Some(text);
+            }
+        }
+    }
+
+    fn vi_paste_outcome(&mut self, text: &str) -> Outcome {
+        let changed = self.vi_paste(text);
+        Outcome {
+            changed,
+            moved: changed,
+            center: false,
+        }
+    }
+
+    /// `J` (`mzJ`z`): join `count` lines (at least two), removing the next
+    /// lines' indent and putting one space between (none before `)`, after
+    /// a blank, or for an empty line); the cursor stays. One undo step.
+    fn join_lines(&mut self, count: usize) -> Outcome {
+        let Some(Engine::Vi(v)) = &mut self.engine else {
+            return Outcome::default();
+        };
+        let c = v.cursor();
+        let n = line_count(&**v);
+        let joins = (count.max(2) - 1).min(n - 1 - c.line);
+        if joins == 0 {
+            return Outcome::default();
+        }
+        v.start_change();
+        for _ in 0..joins {
+            let line = line_of(&**v, c.line);
+            let next = line_of(&**v, c.line + 1);
+            let rest = next.trim_start_matches([' ', '\t']);
+            let space = !(rest.is_empty()
+                || rest.starts_with(')')
+                || line.is_empty()
+                || line.ends_with([' ', '\t']));
+            v.delete_range(
+                cur(c.line, line.len()),
+                cur(c.line + 1, next.len() - rest.len()),
+            );
+            if space {
+                v.insert_at(cur(c.line, line.len()), " ", None);
+            }
+        }
+        v.finish_change();
+        v.set_selection(ct::Selection::None);
+        v.set_cursor(c);
+        self.version += 1;
+        Outcome {
+            changed: true,
+            moved: true,
+            center: false,
+        }
+    }
+
+    /// Visual `J` / `K`: move the selected lines down / up one line,
+    /// keeping them selected (the user's `:m '>+1<CR>gv=gv`, without `=`:
+    /// modit has no reindent). One undo step.
+    fn move_lines(&mut self, down: bool) -> Outcome {
+        let Some(Engine::Vi(v)) = &mut self.engine else {
+            return Outcome::default();
+        };
+        let (cursor, sel) = (v.cursor(), v.selection());
+        let anchor = match sel {
+            ct::Selection::Normal(a) | ct::Selection::Line(a) => a,
+            _ => return Outcome::default(),
+        };
+        let (a, b) = if (anchor.line, anchor.index) <= (cursor.line, cursor.index) {
+            (anchor.line, cursor.line)
+        } else {
+            (cursor.line, anchor.line)
+        };
+        let n = line_count(&**v);
+        if (down && b + 1 >= n) || (!down && a == 0) {
+            return Outcome::default();
+        }
+        v.start_change();
+        if down {
+            let below = line_of(&**v, b + 1);
+            let last = line_of(&**v, b).len();
+            v.delete_range(cur(b, last), cur(b + 1, below.len()));
+            v.insert_at(cur(a, 0), &format!("{below}\n"), None);
+        } else {
+            let above = line_of(&**v, a - 1);
+            v.delete_range(cur(a - 1, 0), cur(a, 0));
+            let end = line_of(&**v, b - 1).len();
+            v.insert_at(cur(b - 1, end), &format!("\n{above}"), None);
+        }
+        v.finish_change();
+        let shift = |c: ct::Cursor| {
+            if down {
+                cur(c.line + 1, c.index)
+            } else {
+                cur(c.line - 1, c.index)
+            }
+        };
+        v.set_selection(match sel {
+            ct::Selection::Line(_) => ct::Selection::Line(shift(anchor)),
+            _ => ct::Selection::Normal(shift(anchor)),
+        });
+        v.set_cursor(shift(cursor));
+        self.version += 1;
+        Outcome {
+            changed: true,
+            moved: true,
+            center: false,
+        }
+    }
+
+    /// Middle-click: the primary selection at the cursor (just placed at
+    /// the pointer). Vim mode: inserted in insert mode, else `"*P`.
+    pub fn paste_primary(
+        &mut self,
+        fs: &mut ct::FontSystem,
+        text: &str,
+        clip: &mut dyn Clipboard,
+    ) -> Outcome {
+        match self.vi_mode() {
+            None => self.run(fs, &Cmd::Paste(text.to_string()), 0.0),
+            Some(ct::ViMode::Insert | ct::ViMode::Replace) => self.vi_paste_outcome(text),
+            Some(_) => {
+                if let Some(v) = self.vi() {
+                    v.reset_parser();
+                }
+                self.keys.clear();
+                self.feed_str(fs, "\"*P", clip)
+            }
         }
     }
 
@@ -630,6 +1039,69 @@ impl Doc {
         v.finish_change();
         self.version += 1;
         true
+    }
+}
+
+type ViEditor = super::vi::ViEditor<'static, 'static>;
+pub use super::vi::Register;
+
+/// `mapleader` (the user's `vim.g.mapleader = " "`).
+pub const LEADER: char = ' ';
+/// `timeoutlen`: Neovim's default (the user's `set.lua` keeps it).
+pub const TIMEOUTLEN: Duration = Duration::from_millis(1000);
+
+/// A key in vim mode, decoded by the widget.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VimKey {
+    /// A typed character (no Ctrl, Alt or Super).
+    Char(char),
+    /// Ctrl + a key (its Latin letter, lowercase); `true` with Shift.
+    Ctrl(char, bool),
+    /// Escape, Enter, Backspace, Delete, the arrows, Home / End,
+    /// PageUp / PageDown, Tab / Shift+Tab.
+    Action(ct::Action),
+    /// Shift+Insert.
+    ShiftInsert,
+}
+
+fn clip_kind(name: char) -> clipboard::Kind {
+    if name == '*' {
+        clipboard::Kind::Primary
+    } else {
+        clipboard::Kind::Standard
+    }
+}
+
+/// Clipboard text → register: a trailing newline makes it linewise (as
+/// Neovim's clipboard provider does).
+fn register_from_clipboard(text: &str) -> Register {
+    match text.strip_suffix('\n') {
+        Some(t) => Register {
+            text: t.to_string(),
+            linewise: true,
+        },
+        None => Register {
+            text: text.to_string(),
+            linewise: false,
+        },
+    }
+}
+
+/// Register → clipboard text (linewise ends with a newline).
+fn clipboard_text(reg: &Register) -> String {
+    if reg.linewise {
+        format!("{}\n", reg.text)
+    } else {
+        reg.text.clone()
+    }
+}
+
+/// Read-only vim: the keys that would edit (or enter insert mode).
+fn is_vi_edit(ch: char, mode: &ct::ViMode) -> bool {
+    match mode {
+        ct::ViMode::Normal => "iaIAoOsScCxXdDpPrRuJ~<>".contains(ch),
+        ct::ViMode::Visual | ct::ViMode::VisualLine => "dDcCsSxXpPrRJ~<>uU".contains(ch),
+        _ => false,
     }
 }
 

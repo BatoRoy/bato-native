@@ -15,6 +15,20 @@
 //! - Syntax sets load lazily, on the first editor layout ([`syntax`]).
 //! - The app owns a [`Content`] (like iced's `text_editor::Content`); the
 //!   widget edits it in place and reports the text through `on_change`.
+//! - Clipboard: iced's window clipboard. Plain mode has CodeMirror's keys
+//!   (Ctrl+C / X / V / A, Ctrl+Shift+V, Shift+Insert, Ctrl+Insert, Shift+
+//!   Delete), matched by the key's Latin letter on any layout; a selection
+//!   becomes the primary selection and middle-click pastes it.
+//! - Vim mode (`vi.rs`, cosmic-text's `ViEditor` vendored for vim's
+//!   register and operator semantics) plus the user's Neovim keymap
+//!   (`engine::Doc::vim_input`): `<leader>` = Space with `timeoutlen`
+//!   1000 ms (`<20>` in the status bar), `<leader>y` → `"+y`,
+//!   `<leader>d` → `"_d`, visual `<leader>p` (paste keeping `""`),
+//!   Ctrl+Shift+V (`"+p`, or at the cursor in insert mode), Ctrl+C = Esc,
+//!   visual `J` / `K`, `J`, `<C-d>` / `<C-u>` and `n` / `N` centred. Plain
+//!   `y` / `d` / `p` stay in vim's registers (no `unnamedplus`).
+//! - Under `BATO_SELFTEST` the widget uses a private clipboard (writes are
+//!   logged on stderr), so a scripted run never touches the desktop's.
 //!
 //! ```ignore
 //! code_editor(&cx, &state.code)
@@ -29,6 +43,7 @@ mod engine;
 mod status;
 pub mod syntax;
 pub mod text;
+pub(crate) mod vi;
 mod view;
 
 use std::cell::RefCell;
@@ -225,3 +240,5 @@ impl<'a, M: Clone + 'a> From<CodeEditor<'a, M>> for El<'a, M> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_keys;
