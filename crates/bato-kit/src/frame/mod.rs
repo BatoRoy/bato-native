@@ -693,10 +693,13 @@ mod tests {
         let mut f = frame();
         assert_eq!(f.update(Msg::ToggleSidebar), Action::SaveSettings);
         assert!(f.settings().sidebar_collapsed);
-        assert!(f.sidebar.is_running(Instant::now()));
+        // Read against the tween's own start: a test thread descheduled
+        // for longer than the animation must not fail it.
+        let start = f.sidebar.start;
+        assert!(f.sidebar.is_running(start));
         assert_eq!(f.sidebar.to, COLLAPSED);
         assert_eq!(
-            f.sidebar.value(Instant::now() + Duration::from_millis(250)),
+            f.sidebar.value(start + Duration::from_millis(250)),
             COLLAPSED
         );
     }

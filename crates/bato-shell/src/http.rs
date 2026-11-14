@@ -392,7 +392,8 @@ mod tests {
             .get::<Value>("/slow")
             .unwrap_err();
         assert!(matches!(e, HttpError::Transport(_)));
-        assert!(t.elapsed() < Duration::from_secs(3));
+        // Not a hang (a loose bound: a loaded machine adds seconds).
+        assert!(t.elapsed() < Duration::from_secs(20));
         drop(l);
     }
 

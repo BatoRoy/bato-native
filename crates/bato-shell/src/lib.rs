@@ -74,5 +74,8 @@ pub mod supervisor;
 #[cfg(feature = "iced")]
 pub mod iced_ext;
 
+#[cfg(test)]
+mod test_support;
+
 pub use identity::{AppIdentity, Brand};
 pub use settings::{Settings, SettingsExt};

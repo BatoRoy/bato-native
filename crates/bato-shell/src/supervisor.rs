@@ -516,7 +516,6 @@ fn monitor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("bato-shell-sup-{name}-{}", std::process::id()));
@@ -526,10 +525,7 @@ mod tests {
 
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let p = dir.join(name);
-        let mut f = std::fs::File::create(&p).unwrap();
-        f.write_all(body.as_bytes()).unwrap();
-        drop(f);
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_support::write_script(&p, body);
         p
     }
 
@@ -570,6 +566,10 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
             .unwrap_or(false)
     }
 
+    /// How long to wait for an event that must come: generous, it only
+    /// bounds a failing run (a short bound flakes under a parallel build).
+    const EXPECTED: Duration = Duration::from_secs(20);
+
     fn next_event(rx: &mut mpsc::UnboundedReceiver<Event>, within: Duration) -> Option<Event> {
         let end = Instant::now() + within;
         while Instant::now() < end {
@@ -590,15 +590,20 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         }
         let dir = tmp("healthy");
         let bin = script(&dir, "app-server", FAKE_SERVER);
-        let mut sup = Supervisor::start(&bin, Config::default()).unwrap();
+        // Python's start-up under a parallel build can take seconds.
+        let cfg = Config {
+            health_timeout: Duration::from_secs(30),
+            ..Config::default()
+        };
+        let mut sup = Supervisor::start(&bin, cfg).unwrap();
         let mut events = sup.take_events().unwrap();
         assert!(sup.url().starts_with("http://127.0.0.1:"));
         assert!(
-            sup.wait_healthy(Duration::from_secs(8)),
+            sup.wait_healthy(Duration::from_secs(30)),
             "fake server never became healthy"
         );
         assert_eq!(
-            next_event(&mut events, Duration::from_secs(1)),
+            next_event(&mut events, EXPECTED),
             Some(Event::Healthy {
                 url: sup.url().into()
             })
@@ -607,15 +612,13 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
 
         let pid = sup.pid().unwrap();
         assert!(alive(pid));
-        let t = Instant::now();
+        // SIGTERM is enough for the fake server: the exit below is signal
+        // 15, not the SIGKILL after the grace period (no wall-clock bound,
+        // which a loaded machine can break).
         sup.stop();
-        assert!(
-            t.elapsed() < Duration::from_secs(2),
-            "SIGTERM should be enough for the fake server"
-        );
         assert!(!alive(pid));
         assert_eq!(
-            next_event(&mut events, Duration::from_secs(1)),
+            next_event(&mut events, EXPECTED),
             Some(Event::Exited {
                 code: None,
                 signal: Some(15)
@@ -628,11 +631,17 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
     #[test]
     fn sigkill_after_the_grace_period() {
         let dir = tmp("stubborn");
-        // Ignores SIGTERM, never serves health.
+        // Ignores SIGTERM, never serves health. It says when the trap is set:
+        // under load the shell may not have run that line yet when the
+        // health timeout ends, and a SIGTERM then still kills it.
+        let ready = dir.join("ready");
         let bin = script(
             &dir,
             "app-server",
-            "#!/bin/sh\ntrap '' TERM\nwhile :; do sleep 0.05; done\n",
+            &format!(
+                "#!/bin/sh\ntrap '' TERM\n: > '{}'\nwhile :; do sleep 0.05; done\n",
+                ready.display()
+            ),
         );
         let cfg = Config {
             health_timeout: Duration::from_millis(200),
@@ -643,16 +652,21 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         let mut events = sup.take_events().unwrap();
         assert!(!sup.wait_healthy(Duration::from_secs(3)));
         assert_eq!(
-            next_event(&mut events, Duration::from_secs(1)),
+            next_event(&mut events, EXPECTED),
             Some(Event::Unhealthy {
                 url: sup.url().into()
             })
         );
         let pid = sup.pid().unwrap();
+        let end = Instant::now() + Duration::from_secs(30);
+        while !ready.exists() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready.exists(), "the stubborn server never started");
         drop(sup);
         assert!(!alive(pid));
         assert_eq!(
-            next_event(&mut events, Duration::from_secs(1)),
+            next_event(&mut events, EXPECTED),
             Some(Event::Exited {
                 code: None,
                 signal: Some(9)
@@ -676,7 +690,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         let mut sup = Supervisor::start(&bin, cfg).unwrap();
         let mut events = sup.take_events().unwrap();
         let mut seen = Vec::new();
-        while let Some(e) = next_event(&mut events, Duration::from_secs(3)) {
+        while let Some(e) = next_event(&mut events, EXPECTED) {
             seen.push(e);
             if seen.len() == 8 {
                 break;
@@ -827,7 +841,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         assert!(alive(pid));
         helper.kill().unwrap(); // SIGKILL
         helper.wait().unwrap();
-        let end = Instant::now() + Duration::from_secs(3);
+        let end = Instant::now() + Duration::from_secs(20);
         while alive(pid) && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(20));
         }

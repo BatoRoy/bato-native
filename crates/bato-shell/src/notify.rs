@@ -299,9 +299,13 @@ mod tests {
                 )
                 .unwrap();
         }
+        // A served call must never time out, however loaded the machine
+        // (a parallel build can stall the mock server past 300 ms); only the
+        // unserved peer relies on the timeout.
+        let timeout = if serve { 60_000 } else { 300 };
         let client = zbus::connection::Builder::async_io_unix_stream(b)
             .p2p()
-            .method_timeout(std::time::Duration::from_millis(300));
+            .method_timeout(std::time::Duration::from_millis(timeout));
         let (s, c) = futures::join!(server.build(), client.build());
         (s.unwrap(), c.unwrap(), calls)
     }

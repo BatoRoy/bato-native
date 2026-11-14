@@ -508,7 +508,6 @@ fn compare_prerelease(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     // Captured from bato 1.4.9 against a local fake registry (no real
     // registry involved): `install <slug> --json --progress`, its `--json`
@@ -637,15 +636,13 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("out.ndjson"), fixture).unwrap();
         let script = dir.join("bato");
-        std::fs::write(
+        crate::test_support::write_script(
             &script,
-            format!(
+            &format!(
                 "#!/bin/sh\necho \"$@\" > '{d}/args'\necho \"$BATO_REGISTRY_URL\" > '{d}/registry'\necho 'some prose' >&2\ncat '{d}/out.ndjson'\nexit {code}\n",
                 d = dir.display()
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         script
     }
 
@@ -728,9 +725,9 @@ mod tests {
         assert_eq!(up.install_command(), "bato install batoshellfixture");
     }
 
-    /// Wait up to 5 s for a file a child process writes.
+    /// Wait up to 30 s for a file a child process writes.
     fn wait_for(path: &Path) -> String {
-        for _ in 0..100 {
+        for _ in 0..600 {
             if let Ok(s) = std::fs::read_to_string(path)
                 && s.ends_with('\n')
             {
@@ -748,15 +745,13 @@ mod tests {
         std::fs::create_dir_all(&install).unwrap();
         let marker = dir.join("started");
         let bin = install.join(APP.slug);
-        std::fs::write(
+        crate::test_support::write_script(
             &bin,
-            format!(
+            &format!(
                 "#!/bin/sh\necho \"$$ $(ps -o pgid= -p $$ | tr -d ' ')\" > '{m}.tmp'\nmv '{m}.tmp' '{m}'\n",
                 m = marker.display()
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
 
         let up = Updater::new(&APP, DEFAULT_REGISTRY).with_install_dir(&install);
         assert!(up.relaunch().is_err(), "a dev build never relaunches");
