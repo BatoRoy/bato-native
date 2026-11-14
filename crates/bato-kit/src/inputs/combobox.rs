@@ -117,8 +117,8 @@ impl<'a, M> ControlFrame<'a, M> {
         self.blur_on_panel_press = on;
         self
     }
-    /// Inside a popover panel: focusing it never scrolls the page (the
-    /// overlay's window coordinates are not the page's).
+    /// Never scroll into view on focus. (Not needed in popover panels: a
+    /// reveal from an overlay scrolls only the overlay's own scroll area.)
     pub fn in_panel(mut self) -> Self {
         self.in_panel = true;
         self
@@ -447,7 +447,6 @@ pub fn search_field<'a, E: Clone + 'a>(
     control_frame(cx, stack![input, glyph].width(Length::Fill))
         .radius(6.0)
         .text(true)
-        .in_panel()
         .into()
 }
 

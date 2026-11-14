@@ -135,6 +135,22 @@ thread_local! {
     static SHIFT: Cell<bool> = const { Cell::new(false) };
     static SYNTHETIC_LOST: Cell<bool> = const { Cell::new(false) };
     static PAGE: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
+    static IN_UI: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run `f` as part of the UI's own `update` (the focus root's, base tree
+/// and overlay layers): a reveal posted there with no scroller around it has
+/// nothing to scroll.
+pub fn in_ui<R>(f: impl FnOnce() -> R) -> R {
+    let was = IN_UI.with(|c| c.replace(true));
+    let r = f();
+    IN_UI.with(|c| c.set(was));
+    r
+}
+
+/// Is a widget `update` under the focus root running?
+pub fn is_in_ui() -> bool {
+    IN_UI.with(Cell::get)
 }
 
 /// The page scroller (the one owning the autoscroll bus) was drawn at these

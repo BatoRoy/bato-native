@@ -714,8 +714,7 @@ impl<'a, M: Clone + 'a> From<ColorPicker<'a, M>> for El<'a, M> {
                         .padding(Padding::from([7.0, 9.0])),
                     )
                     .radius(6.0)
-                    .text(true)
-                    .in_panel();
+                    .text(true);
                     let mut grid = Grid::columns(6).gap(6.0);
                     for preset in &presets {
                         let st = BoxStyle::default()

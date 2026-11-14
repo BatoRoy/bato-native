@@ -358,9 +358,97 @@ fn request(target: Target, how: Reveal, rect: Option<Rectangle>) {
 /// `shell.request_redraw()` too. Called from an app's `update`, the next
 /// frame does it, and the scroller whose content contains `rect` is guessed:
 /// prefer [`scroll_to`] with a container id there.
+///
+/// From a widget with no kit scroller around it (fixed chrome, a modal
+/// layer, an overlay panel without a scroll area of its own) this does
+/// nothing: its window coordinates are no scroller's content coordinates,
+/// and the page must not move. Inside an overlay's scroll area, that area
+/// scrolls, never the page (an overlay's update runs outside the page's).
 pub fn reveal(rect: Rectangle, how: Reveal) {
     let inside = !chain::stack().is_empty();
+    if !inside && chain::is_in_ui() {
+        return;
+    }
     request(Target::Rect(rect), how, inside.then_some(rect));
+}
+
+/// Wraps an overlay so its `update` (and its nested overlays') counts as the
+/// UI's ([`chain::in_ui`]); the focus root wraps every overlay with it.
+pub(crate) fn ui_overlay<'b, M>(
+    inner: overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+) -> overlay::Element<'b, M, iced::Theme, iced::Renderer>
+where
+    M: 'b,
+{
+    overlay::Element::new(Box::new(UiOverlay { inner }))
+}
+
+struct UiOverlay<'b, M> {
+    inner: overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+}
+
+impl<M> overlay::Overlay<M, iced::Theme, iced::Renderer> for UiOverlay<'_, M> {
+    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
+        self.inner.as_overlay_mut().layout(renderer, bounds)
+    }
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        self.inner
+            .as_overlay()
+            .draw(renderer, theme, style, layout, cursor);
+    }
+    fn operate(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.inner
+            .as_overlay_mut()
+            .operate(layout, renderer, operation);
+    }
+    fn update(
+        &mut self,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, M>,
+    ) {
+        chain::in_ui(|| {
+            self.inner
+                .as_overlay_mut()
+                .update(event, layout, cursor, renderer, clipboard, shell);
+        });
+    }
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.inner
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+    fn overlay<'c>(
+        &'c mut self,
+        layout: Layout<'c>,
+        renderer: &iced::Renderer,
+    ) -> Option<overlay::Element<'c, M, iced::Theme, iced::Renderer>> {
+        let nested = self.inner.as_overlay_mut().overlay(layout, renderer)?;
+        Some(ui_overlay(nested))
+    }
+    fn index(&self) -> f32 {
+        self.inner.as_overlay().index()
+    }
 }
 
 /// Smooth scroll-into-view of `rect` (see [`reveal`]).
@@ -444,6 +532,62 @@ pub fn offsets_of(id: &widget::Id) -> Option<(f32, f32)> {
 pub fn page_offset() -> Vector {
     let (x, y) = chain::page();
     Vector::new(x, y)
+}
+
+/// What a kit scroller hands every operation (`Operation::custom`) right
+/// before it traverses its content: the content's layout bounds are drawn
+/// `offset` up/left of where `operate` reports them. An operation that wants
+/// window coordinates keeps a [`Translation`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollFrame {
+    pub offset: Vector,
+}
+
+/// The scroll translation at the current point of an operation's walk: feed
+/// it every `custom` state and wrap `traverse` with [`Translation::enter`] /
+/// [`Translation::leave`];
+/// `to_window` then maps layout bounds to where they are drawn, through every
+/// scroller around them (page, nested, horizontal).
+#[derive(Debug, Default, Clone)]
+pub struct Translation {
+    total: Vector,
+    pending: Option<Vector>,
+}
+
+impl Translation {
+    /// Call from `Operation::custom`.
+    pub fn custom(&mut self, state: &dyn std::any::Any) {
+        if let Some(f) = state.downcast_ref::<ScrollFrame>() {
+            self.pending = Some(f.offset);
+        }
+    }
+
+    /// Call from `Operation::traverse` before `operate(self)`; hand the
+    /// result to [`Translation::leave`] after it.
+    pub fn enter(&mut self) -> Option<Vector> {
+        let pushed = self.pending.take();
+        if let Some(o) = pushed {
+            self.total += o;
+        }
+        pushed
+    }
+
+    /// Call from `Operation::traverse` after `operate(self)`.
+    pub fn leave(&mut self, entered: Option<Vector>) {
+        if let Some(o) = entered {
+            self.total -= o;
+        }
+    }
+
+    /// The accumulated scroll offset here.
+    pub fn offset(&self) -> Vector {
+        self.total
+    }
+
+    /// Layout bounds reported here, in window coordinates.
+    pub fn to_window(&self, bounds: Rectangle) -> Rectangle {
+        bounds - self.total
+    }
 }
 
 // ── State ───────────────────────────────────────────────────────────────
@@ -1585,12 +1729,19 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        self.content.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout.children().next().unwrap(),
-            renderer,
-            operation,
-        );
+        // Announce the scroll offset, then traverse: an operation that wants
+        // window coordinates (see [`ScrollFrame`]) applies it to everything
+        // inside.
+        let offset = tree.state.downcast_ref::<State>().offset();
+        operation.custom(None, layout.bounds(), &mut ScrollFrame { offset });
+        operation.traverse(&mut |operation| {
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout.children().next().unwrap(),
+                renderer,
+                operation,
+            );
+        });
     }
 
     fn overlay<'b>(

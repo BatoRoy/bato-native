@@ -413,16 +413,18 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
             }
             _ => {}
         }
-        self.content.as_widget_mut().update(
-            &mut tree.children[0],
-            event,
-            layout,
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        );
+        crate::scroller::chain::in_ui(|| {
+            self.content.as_widget_mut().update(
+                &mut tree.children[0],
+                event,
+                layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        });
         if press {
             end_press();
         }
@@ -520,13 +522,16 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, iced::Theme, iced::Renderer>> {
-        self.content.as_widget_mut().overlay(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            viewport,
-            translation,
-        )
+        self.content
+            .as_widget_mut()
+            .overlay(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                viewport,
+                translation,
+            )
+            .map(crate::scroller::ui_overlay)
     }
 }
 

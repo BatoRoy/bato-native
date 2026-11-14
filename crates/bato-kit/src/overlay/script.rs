@@ -11,6 +11,7 @@
 //! Between steps the wrapper only asks for a redraw at the next step's
 //! deadline; when the script is over it asks for nothing (idle stays idle).
 
+use std::any::Any;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -136,20 +137,30 @@ struct State {
     done: bool,
 }
 
-/// Finds a container's bounds by id.
+/// Finds a container's bounds by id, in window coordinates (through every
+/// kit scroller around it).
 struct Find<'a> {
     id: &'a widget::Id,
     found: Option<Rectangle>,
+    translation: crate::scroller::Translation,
 }
 
 impl widget::Operation for Find<'_> {
     fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn widget::Operation)) {
+        if self.found.is_some() {
+            return;
+        }
+        let entered = self.translation.enter();
         operate(self);
+        self.translation.leave(entered);
     }
     fn container(&mut self, id: Option<&widget::Id>, bounds: Rectangle) {
         if self.found.is_none() && id == Some(self.id) {
-            self.found = Some(bounds);
+            self.found = Some(self.translation.to_window(bounds));
         }
+    }
+    fn custom(&mut self, _id: Option<&widget::Id>, _bounds: Rectangle, state: &mut dyn Any) {
+        self.translation.custom(state);
     }
 }
 
@@ -169,11 +180,12 @@ impl<'a, M: Clone + 'a> Script<'a, M> {
         viewport: &Rectangle,
         id: &widget::Id,
     ) -> Option<Rectangle> {
-        let mut op = Find { id, found: None };
-        // Containers in the base tree report content coordinates: inside
-        // the page scroller they sit `page_offset` lower than on screen.
-        // (Assumes base-tree targets are page content.)
-        let page = crate::scroller::page_offset();
+        let mut op = Find {
+            id,
+            found: None,
+            translation: Default::default(),
+        };
+        // The top layer first, like a hit test.
         if let Some(ov) = self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
@@ -186,10 +198,10 @@ impl<'a, M: Clone + 'a> Script<'a, M> {
             nested.operate(Layout::new(&node), renderer, &mut op);
         }
         if op.found.is_none() {
+            op.translation = Default::default();
             self.content
                 .as_widget_mut()
                 .operate(&mut tree.children[0], layout, renderer, &mut op);
-            return op.found.map(|b| b - page);
         }
         op.found
     }
@@ -627,6 +639,247 @@ mod tests {
         };
         assert_eq!(text.as_deref(), Some("k"));
         assert!(modifiers.command());
+    }
+
+    // ── Targets and reveals through real scrollers ──────────────────────
+
+    use crate::scroller::{scroll_offset, scroller};
+    use iced::Color;
+    use iced::advanced::clipboard;
+    use iced::advanced::renderer::Headless;
+    use iced::widget::{Space, column, container, row};
+
+    const VIEW: Size = Size::new(800.0, 600.0);
+
+    fn renderer() -> iced::Renderer {
+        let fut = <iced::Renderer as Headless>::new(
+            iced::Font::DEFAULT,
+            iced::Pixels(16.0),
+            Some("tiny-skia"),
+        );
+        let mut fut = std::pin::pin!(fut);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        loop {
+            if let std::task::Poll::Ready(r) = fut.as_mut().poll(&mut cx) {
+                return r.expect("tiny-skia renderer");
+            }
+        }
+    }
+
+    fn id(name: &'static str) -> widget::Id {
+        widget::Id::new(name)
+    }
+
+    fn boxed(name: &'static str, w: f32, h: f32) -> El<'static, ()> {
+        container(Space::new().width(w).height(h))
+            .id(id(name))
+            .into()
+    }
+
+    fn page(content: El<'static, ()>) -> crate::scroller::Scroller<'static, ()> {
+        scroller(content, Color::BLACK, Color::WHITE)
+    }
+
+    struct Ui {
+        s: Script<'static, ()>,
+        tree: Tree,
+        r: iced::Renderer,
+    }
+
+    impl Ui {
+        fn new(content: El<'static, ()>) -> Self {
+            let s = script(content, Vec::new());
+            let tree = Tree::new(&s as &dyn Widget<(), iced::Theme, iced::Renderer>);
+            Self {
+                s,
+                tree,
+                r: renderer(),
+            }
+        }
+        fn layout(&mut self) -> layout::Node {
+            self.tree
+                .diff(&self.s as &dyn Widget<(), iced::Theme, iced::Renderer>);
+            self.s.layout(
+                &mut self.tree,
+                &self.r,
+                &layout::Limits::new(Size::ZERO, VIEW),
+            )
+        }
+        fn send(&mut self, event: Event) {
+            let node = self.layout();
+            let mut msgs = Vec::new();
+            let mut shell = Shell::new(&mut msgs);
+            self.s.content.as_widget_mut().update(
+                &mut self.tree.children[0],
+                &event,
+                Layout::new(&node),
+                mouse::Cursor::Available(Point::new(5.0, 5.0)),
+                &self.r,
+                &mut clipboard::Null,
+                &mut shell,
+                &Rectangle::with_size(VIEW),
+            );
+        }
+        fn moved(&mut self) {
+            self.send(Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(5.0, 5.0),
+            }));
+        }
+        /// Window bounds, as a `Target::Id` resolves them.
+        fn window(&mut self, name: &'static str) -> Rectangle {
+            let node = self.layout();
+            let viewport = Rectangle::with_size(VIEW);
+            self.s
+                .find(
+                    &mut self.tree,
+                    Layout::new(&node),
+                    &self.r,
+                    &viewport,
+                    &id(name),
+                )
+                .expect("found")
+        }
+        /// Layout bounds (no scroll applied).
+        fn laid_out(&mut self, name: &'static str) -> Rectangle {
+            struct Raw(widget::Id, Option<Rectangle>);
+            impl widget::Operation for Raw {
+                fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn widget::Operation)) {
+                    operate(self);
+                }
+                fn container(&mut self, id: Option<&widget::Id>, bounds: Rectangle) {
+                    if id == Some(&self.0) {
+                        self.1 = Some(bounds);
+                    }
+                }
+            }
+            let node = self.layout();
+            let mut op = Raw(id(name), None);
+            self.s.content.as_widget_mut().operate(
+                &mut self.tree.children[0],
+                Layout::new(&node),
+                &self.r,
+                &mut op,
+            );
+            op.1.expect("laid out")
+        }
+    }
+
+    #[test]
+    fn id_targets_are_window_points_inside_any_scroller() {
+        let nested = page(row![Space::new().width(900.0), boxed("in-h", 40.0, 20.0)].into())
+            .horizontal()
+            .id(id("h"))
+            .width(300.0)
+            .height(40.0);
+        let content = column![
+            Space::new().height(500.0),
+            boxed("in-page", 50.0, 20.0),
+            nested,
+            Space::new().height(1000.0),
+        ];
+        let mut ui = Ui::new(
+            column![
+                boxed("chrome", 100.0, 40.0),
+                page(content.into()).initial(Some(200.0)).height(400.0),
+            ]
+            .into(),
+        );
+        ui.moved();
+        scroll_offset(id("h"), Some(150.0), None, false);
+        ui.moved();
+
+        // Outside any scroller: as laid out (B4's page-offset shift moved it).
+        assert_eq!(ui.window("chrome"), ui.laid_out("chrome"));
+        // In the page: 200 px higher.
+        assert_eq!(
+            ui.window("in-page"),
+            ui.laid_out("in-page") - Vector::new(0.0, 200.0)
+        );
+        // In a horizontal scroller inside the page: both offsets.
+        assert_eq!(
+            ui.window("in-h"),
+            ui.laid_out("in-h") - Vector::new(150.0, 200.0)
+        );
+    }
+
+    /// Calls `focus_into_view` with its own bounds on every press.
+    struct Revealer;
+
+    impl Widget<(), iced::Theme, iced::Renderer> for Revealer {
+        fn size(&self) -> Size<Length> {
+            Size::new(Length::Fill, Length::Fixed(40.0))
+        }
+        fn layout(
+            &mut self,
+            _tree: &mut Tree,
+            _renderer: &iced::Renderer,
+            limits: &layout::Limits,
+        ) -> layout::Node {
+            layout::Node::new(Size::new(limits.max().width, 40.0))
+        }
+        fn draw(
+            &self,
+            _tree: &Tree,
+            _renderer: &mut iced::Renderer,
+            _theme: &iced::Theme,
+            _style: &renderer::Style,
+            _layout: Layout<'_>,
+            _cursor: mouse::Cursor,
+            _viewport: &Rectangle,
+        ) {
+        }
+        fn update(
+            &mut self,
+            _tree: &mut Tree,
+            event: &Event,
+            layout: Layout<'_>,
+            _cursor: mouse::Cursor,
+            _renderer: &iced::Renderer,
+            _clipboard: &mut dyn Clipboard,
+            _shell: &mut Shell<'_, ()>,
+            _viewport: &Rectangle,
+        ) {
+            if let Event::Keyboard(keyboard::Event::KeyPressed { .. }) = event {
+                crate::scroller::focus_into_view(layout.bounds());
+            }
+        }
+    }
+
+    /// A page at 1000 px, and a widget outside it (a fixed bar, a modal
+    /// layer) whose window bounds fall inside the page's content range.
+    fn bar_under_page(rooted: bool) -> Vector {
+        let content = column![
+            Space::new().height(1000.0),
+            boxed("in-page", 50.0, 20.0),
+            Space::new().height(1000.0),
+        ];
+        let tree = column![
+            page(content.into()).initial(Some(1000.0)).height(400.0),
+            El::new(Revealer),
+        ];
+        let el: El<'static, ()> = if rooted {
+            crate::focus::focus_root(tree).into()
+        } else {
+            tree.into()
+        };
+        let mut ui = Ui::new(el);
+        ui.moved();
+        let before = ui.window("in-page");
+        for e in key_events(Key::Named(key::Named::Tab), Modifiers::default()) {
+            ui.send(e);
+        }
+        ui.moved();
+        ui.moved();
+        ui.window("in-page").position() - before.position()
+    }
+
+    #[test]
+    fn reveal_with_no_scroller_around_never_moves_the_page() {
+        // Under the focus root (every app): nothing to scroll.
+        assert_eq!(bar_under_page(true), Vector::ZERO);
+        // Without it (an app's `update`), the guess still runs: this layout
+        // is exactly the one it got wrong.
+        assert_ne!(bar_under_page(false), Vector::ZERO);
     }
 
     #[test]
