@@ -199,6 +199,17 @@ pub fn to_window() -> (f32, f32) {
     })
 }
 
+/// What to add to a position a scroller's *content* received to get window
+/// coordinates (all running scrollers' offsets): for widgets inside a
+/// scroller that latch wheel gestures themselves (the node graph).
+pub fn content_to_window() -> (f32, f32) {
+    with(|s| {
+        s.shifts
+            .iter()
+            .fold((0.0, 0.0), |a, o| (a.0 - o.0, a.1 - o.1))
+    })
+}
+
 /// Is the running scroller the outermost one?
 pub fn is_root() -> bool {
     with(|s| s.stack.len() <= 1)
