@@ -4,3 +4,5 @@
 crate::showcase::tab_cards! {
     dashboard: Dashboard => "dashboard",
 }
+
+pub mod selftest;

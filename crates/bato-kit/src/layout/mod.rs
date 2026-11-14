@@ -17,6 +17,7 @@
 //! | `AppShell` (header, sidebar, footer, scrolling main) | [`app_shell()`] |
 //! | `PanelGroup` / `ResizablePanels` (draggable splits) | [`panel_group()`], [`resizable_panels()`] |
 //! | `EditorTabs` (sortable, closable tab strip) | [`editor_tabs()`] |
+//! | `Dashboard` (editable widget grid, Snap / Free) | [`dashboard()`] |
 //!
 //! Every cell is stretched like CSS's default `align-items: stretch`.
 
@@ -25,6 +26,7 @@ mod app_shell;
 mod aspect;
 mod clip;
 mod collapse;
+pub mod dashboard;
 mod editor_tabs;
 mod grid;
 mod lines;
@@ -43,6 +45,7 @@ pub use stretch::{StretchColumn, stretch_column};
 pub use app_shell::{AppShell, app_shell};
 pub use clip::{RoundedClip, rounded_clip};
 pub use collapse::{COLLAPSE, Collapse, collapse};
+pub use dashboard::{Dashboard, DashboardItem, DashboardMsg, Mode, WidgetType, dashboard};
 pub use editor_tabs::{EditorTab, EditorTabs, editor_tabs};
 pub use panels::{
     Direction, PanelGroup, bar_size, drag_sizes, initial_sizes, panel_group, resizable_panels,

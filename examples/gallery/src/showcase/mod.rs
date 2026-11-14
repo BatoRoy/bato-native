@@ -278,6 +278,7 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
         })),
         "dnd" => Some(data::sortable::selftest()),
         "dnd-tabs" => Some(layout::editor_tabs::selftest()),
+        "dashboard" => Some(map(dashboard::selftest::steps(), Msg::Dashboard)),
         n if n.starts_with("data:") => data::table::b6_selftest(&n[5..]).map(|v| map(v, Msg::Data)),
         _ => None,
     }
