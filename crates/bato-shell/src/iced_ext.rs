@@ -166,42 +166,83 @@ pub fn supervisor_events(
     }
 }
 
-/// The dialog parent for a window: its X11 id on X11. On Wayland a parent
-/// needs an xdg-foreign export, which is not wired up yet, so dialogs open
-/// unparented there (still in front, just not attached).
+/// The dialog parent for a window: its X11 id, or on Wayland an xdg-foreign
+/// export of its toplevel ([`crate::dialogs::Parent::from_window`]). The
+/// task yields nothing if the window closed meanwhile.
 #[cfg(feature = "dialogs")]
 pub fn dialog_parent(id: window::Id) -> Task<crate::dialogs::Parent> {
-    use raw_window_handle::RawWindowHandle;
-    window::run(id, |w| match w.window_handle().map(|h| h.as_raw()) {
-        Ok(RawWindowHandle::Xlib(h)) => {
-            // c_ulong: u64 here, u32 on 32-bit targets.
-            #[allow(clippy::unnecessary_cast)]
-            crate::dialogs::Parent::X11(h.window as u64)
-        }
-        Ok(RawWindowHandle::Xcb(h)) => crate::dialogs::Parent::X11(u64::from(h.window.get())),
-        _ => crate::dialogs::Parent::None,
+    window::run(id, |w| crate::dialogs::Parent::from_window(w))
+}
+
+/// [`dialog_parent`] of the most recently opened window (the app window),
+/// `Parent::None` without one.
+#[cfg(feature = "dialogs")]
+pub fn latest_dialog_parent() -> Task<crate::dialogs::Parent> {
+    window::latest().then(|id| match id {
+        Some(id) => dialog_parent(id),
+        None => Task::done(crate::dialogs::Parent::None),
     })
 }
 
+/// `parent`, or the app window's when it is `None`, then `open`.
+#[cfg(feature = "dialogs")]
+fn parented<O, T>(
+    o: O,
+    parent: impl Fn(&mut O) -> &mut crate::dialogs::Parent + Send + 'static,
+    open: fn(O) -> Task<T>,
+) -> Task<T>
+where
+    O: Clone + Send + 'static,
+    T: Send + 'static,
+{
+    let mut o = o;
+    if *parent(&mut o) != crate::dialogs::Parent::None {
+        return open(o);
+    }
+    latest_dialog_parent().then(move |p| {
+        let mut o = o.clone();
+        *parent(&mut o) = p;
+        open(o)
+    })
+}
+
+/// [`crate::dialogs::open_files`], modal to the app window unless
+/// `o.parent` names another one.
 #[cfg(feature = "dialogs")]
 pub fn open_files(
     o: crate::dialogs::OpenFiles,
 ) -> Task<Result<Vec<PathBuf>, crate::dialogs::DialogError>> {
-    Task::future(crate::dialogs::open_files(o))
+    parented(
+        o,
+        |o| &mut o.parent,
+        |o| Task::future(crate::dialogs::open_files(o)),
+    )
 }
 
+/// [`crate::dialogs::open_directory`], modal to the app window unless
+/// `o.parent` names another one.
 #[cfg(feature = "dialogs")]
 pub fn open_directory(
     o: crate::dialogs::OpenDirectory,
 ) -> Task<Result<Option<PathBuf>, crate::dialogs::DialogError>> {
-    Task::future(crate::dialogs::open_directory(o))
+    parented(
+        o,
+        |o| &mut o.parent,
+        |o| Task::future(crate::dialogs::open_directory(o)),
+    )
 }
 
+/// [`crate::dialogs::save_file`], modal to the app window unless `o.parent`
+/// names another one.
 #[cfg(feature = "dialogs")]
 pub fn save_file(
     o: crate::dialogs::SaveFile,
 ) -> Task<Result<Option<PathBuf>, crate::dialogs::DialogError>> {
-    Task::future(crate::dialogs::save_file(o))
+    parented(
+        o,
+        |o| &mut o.parent,
+        |o| Task::future(crate::dialogs::save_file(o)),
+    )
 }
 
 /// Frame events while `BATO_SMOKE` is on, for [`crate::hooks::Smoke`].

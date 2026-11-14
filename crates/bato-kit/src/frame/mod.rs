@@ -29,9 +29,15 @@
 //!     Action::SaveSettings => save(frame.settings()),
 //!     Action::TestServer(url) => return Task::perform(health(url), |ok| Msg::Frame(frame::Msg::ServerTested(ok))),
 //!     Action::ServerSaved => { save(frame.settings()); return ping(); }
-//!     Action::CheckUpdates => frame.set_update_note(Some("…".into())),
+//!     Action::CheckUpdates => return check_update(&updater).map(Msg::Update),
+//!     Action::RestartToUpdate => return restart_to_update(&updater, Msg::RestartFailed),
 //!     Action::None | Action::Navigated(_) => {}
 //! }
+//! // the updater's phases (bato-shell `iced_ext::update_status`)
+//! Msg::Update(phase) => frame.set_update_status(match phase {
+//!     UpdatePhase::Downloaded { version } => UpdateStatus::Downloaded { version },
+//!     /* … one arm per phase */
+//! }),
 //!
 //! // view
 //! let cx = frame.ctx();
@@ -45,8 +51,10 @@
 
 mod dialogs;
 mod sidebar;
+mod update;
 
 pub use sidebar::MOD_K;
+pub use update::UpdateStatus;
 
 use std::time::{Duration, Instant};
 
@@ -158,6 +166,10 @@ pub enum Msg<P> {
     SaveServer,
     SavedReset,
     CheckUpdates,
+    /// The updater's status (also [`Frame::set_update_status`]).
+    UpdateStatus(UpdateStatus),
+    /// "Restart to install vX" in About, "Restart" in the sidebar card.
+    RestartToUpdate,
     Rescaled(f32),
 }
 
@@ -176,6 +188,9 @@ pub enum Action<P> {
     ServerSaved,
     /// "Check for updates" in About.
     CheckUpdates,
+    /// "Restart to install vX": start the installed release and exit
+    /// (bato-shell `iced_ext::restart_to_update`).
+    RestartToUpdate,
 }
 
 /// Where the frame starts (from `BATO_VIEW` or the app).
@@ -210,6 +225,7 @@ pub struct Frame<P> {
     test: TestState,
     saved_at: Option<Instant>,
     update_note: Option<String>,
+    update: UpdateStatus,
     start: Start,
     window_scale: f32,
     autoscroll: AutoscrollBus,
@@ -241,6 +257,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             test: TestState::Idle,
             saved_at: None,
             update_note: None,
+            update: UpdateStatus::Idle,
             start: Start::default(),
             window_scale: 1.0,
             autoscroll: new_bus(),
@@ -298,9 +315,20 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         self.toasts.push(text, tone);
     }
 
-    /// The line under "Check for updates" in About.
+    /// The line under "Check for updates" in About, over the status's own
+    /// (React's `unsupported`: "Updates apply to packaged builds only.").
+    /// Cleared by the next check and when About opens.
     pub fn set_update_note(&mut self, note: Option<String>) {
         self.update_note = note;
+    }
+
+    /// The updater's status: About's button and note, the sidebar card.
+    pub fn set_update_status(&mut self, status: UpdateStatus) {
+        self.update = status;
+    }
+
+    pub fn update_status(&self) -> &UpdateStatus {
+        &self.update
     }
 
     pub fn navigate(&mut self, page: P) {
@@ -363,6 +391,9 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 self.dialog = Some(d);
                 self.dialog_opened = Instant::now();
                 self.update_note = None;
+                if d == Dialog::About {
+                    self.update = self.update.on_about_open();
+                }
                 if d == Dialog::Options {
                     self.server_url = backend_url(&self.settings);
                     self.test = TestState::Idle;
@@ -430,7 +461,12 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 return Action::ServerSaved;
             }
             Msg::SavedReset => self.saved_at = None,
-            Msg::CheckUpdates => return Action::CheckUpdates,
+            Msg::CheckUpdates => {
+                self.update_note = None;
+                return Action::CheckUpdates;
+            }
+            Msg::UpdateStatus(s) => self.update = s,
+            Msg::RestartToUpdate => return Action::RestartToUpdate,
             Msg::Rescaled(f) => {
                 self.window_scale = f;
                 set_device_scale(f * self.settings.scale_factor());
@@ -564,6 +600,26 @@ mod tests {
         assert_eq!(f.update(Msg::SaveServer), Action::ServerSaved);
         assert_eq!(f.settings().backend_url.as_deref(), Some("http://h:1"));
         assert_eq!(f.update(Msg::CheckUpdates), Action::CheckUpdates);
+    }
+
+    #[test]
+    fn update_status_and_restart() {
+        let mut f = frame();
+        assert_eq!(f.update_status(), &UpdateStatus::Idle);
+        f.set_update_note(Some("Updates apply to packaged builds only.".into()));
+        assert_eq!(f.update(Msg::CheckUpdates), Action::CheckUpdates);
+        assert_eq!(f.update_note, None, "a new check clears `unsupported`");
+        let done = UpdateStatus::Downloaded {
+            version: "1.3.0".into(),
+        };
+        assert_eq!(f.update(Msg::UpdateStatus(done.clone())), Action::None);
+        assert_eq!(f.update(Msg::RestartToUpdate), Action::RestartToUpdate);
+        // Reopening About keeps a pending restart, forgets a finished check.
+        f.update(Msg::Open(Dialog::About));
+        assert_eq!(f.update_status(), &done);
+        f.set_update_status(UpdateStatus::UpToDate);
+        f.update(Msg::Open(Dialog::About));
+        assert_eq!(f.update_status(), &UpdateStatus::Idle);
     }
 
     #[test]
