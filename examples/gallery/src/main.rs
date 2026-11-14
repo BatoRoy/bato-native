@@ -84,7 +84,7 @@ struct App {
     backend_version: Option<String>,
     smoke: Smoke,
     /// `BATO_SELFTEST=<name>`: a scripted input run (see `interaction`).
-    selftest: Option<Vec<bato_kit::overlay::script::Step<Msg>>>,
+    script: Option<Vec<bato_kit::overlay::script::Step<Msg>>>,
 }
 
 /// The page, Showcase tab and `card=` anchor a `BATO_VIEW` asks for.
@@ -149,7 +149,7 @@ impl App {
             status: Status::Checking,
             backend_version: None,
             smoke: Smoke::default(),
-            selftest: std::env::var("BATO_SELFTEST")
+            script: std::env::var("BATO_SELFTEST")
                 .ok()
                 .and_then(|n| gallery::interaction::selftest(&n))
                 .map(|steps| steps.into_iter().map(|s| s.map(Msg::Interaction)).collect()),
@@ -337,7 +337,7 @@ impl App {
             Vec::new()
         };
         let root = self.frame.view_with(page, levels, Msg::Frame);
-        match &self.selftest {
+        match &self.script {
             Some(steps) => bato_kit::overlay::script::script(root, steps.clone()).into(),
             None => root,
         }

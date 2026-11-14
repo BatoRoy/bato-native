@@ -582,9 +582,14 @@ pub fn selftest() -> Vec<Step<Msg>> {
     let left = mouse::Button::Left;
     let click = |name: &'static str| Step::Click(Target::Center(id(name)), left);
     let outside = Step::Click(Target::Center(id(BLANK)), left);
-    // A menu row: 1 px border + 4 px padding, rows 32 px tall.
-    let row =
-        |menu: &'static str, i: f32| Target::Id(id(menu), Vector::new(60.0, 5.0 + 16.0 + 32.0 * i));
+    // The centre of a menu row: 1 px border + 4 px padding, 32 px rows,
+    // 9 px per separator above it.
+    let row = |menu: &'static str, rows: f32, seps: f32| {
+        Target::Id(
+            id(menu),
+            Vector::new(60.0, 5.0 + 32.0 * rows + 9.0 * seps + 16.0),
+        )
+    };
     vec![
         Step::Shot("rest"),
         // Popover: open, dismiss with an outside press.
@@ -603,7 +608,7 @@ pub fn selftest() -> Vec<Step<Msg>> {
         Step::Key(Named::ArrowDown, none),
         Step::Wait(Duration::from_millis(300)),
         Step::Shot("dropdown-keys"),
-        Step::Move(row(MENU, 4.25)),
+        Step::Move(row(MENU, 3.0, 1.0)),
         Step::Wait(Duration::from_millis(300)),
         Step::Shot("dropdown-hover-danger"),
         Step::Key(Named::Home, none),
