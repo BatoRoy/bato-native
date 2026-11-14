@@ -433,6 +433,28 @@ pub fn scroll_offset(id: impl Into<widget::Id>, x: Option<f32>, y: Option<f32>, 
     );
 }
 
+/// Drag auto-scroll (dnd-kit's `autoScroll`), from a widget's `update`
+/// during a drag: the innermost scroller around the widget whose edge band
+/// (20 % of its viewport) holds `at` (layout coordinates) scrolls, at up to
+/// 10 px per 5 ms, for `ms` milliseconds; `intent` (x−, x+, y−, y+) are the
+/// directions the pointer has moved in. Returns at once; read
+/// [`chain::take_edge_scrolled`] on the next frame to know whether one moved.
+pub fn edge_scroll(at: Point, ms: f32, intent: [bool; 4]) {
+    let stack = chain::stack();
+    if stack.is_empty() {
+        return;
+    }
+    chain::push(Request {
+        target: Target::Edge { at, ms, intent },
+        align: (Align::Nearest, Align::Nearest),
+        smooth: false,
+        margin: 0.0,
+        chain: Some(stack),
+        rect: None,
+        tries: 1,
+    });
+}
+
 /// The offsets (CSS px) the scroller with this id was last drawn at
 /// (self-tests and debugging).
 pub fn offsets_of(id: &widget::Id) -> Option<(f32, f32)> {
@@ -852,6 +874,52 @@ impl<'a, Message: 'a> Scroller<'a, Message> {
         let origin = content.bounds();
         let mut keep = Vec::new();
         for mut r in reqs {
+            if let Target::Edge { at, ms, intent } = r.target {
+                // Innermost first: only the last scroller left in the chain.
+                let Some(ch) = r.chain.as_mut().filter(|c| c.last() == Some(&id)) else {
+                    keep.push(r);
+                    continue;
+                };
+                ch.pop();
+                let st = tree.state.downcast_mut::<State>();
+                let clip = st.clip(d.layout.bounds());
+                let off = st.offset();
+                let s = device_scale();
+                let mut moved = false;
+                for horizontal in [true, false] {
+                    let (ax, on, lo, len, p, back, fwd) = if horizontal {
+                        let x = (clip.x + off.x, clip.width, at.x, intent[0], intent[1]);
+                        (&mut st.x, self.axis.x(), x.0, x.1, x.2, x.3, x.4)
+                    } else {
+                        let y = (clip.y + off.y, clip.height, at.y, intent[2], intent[3]);
+                        (&mut st.y, self.axis.y(), y.0, y.1, y.2, y.3, y.4)
+                    };
+                    if !on || ax.max() <= 0.0 {
+                        continue;
+                    }
+                    let (o, max) = (ax.offset(), ax.max());
+                    let v = crate::dnd::edge_speed(lo, len, p, o <= 0.0, o >= max);
+                    if v == 0.0 || (v < 0.0 && !back) || (v > 0.0 && !fwd) {
+                        continue;
+                    }
+                    ax.stop();
+                    ax.set_offset((o + v * ms / crate::dnd::EDGE_INTERVAL_MS * s).clamp(0.0, max));
+                    moved = true;
+                }
+                if moved {
+                    st.log("edge", format!("{at:?}"));
+                    chain::edge_scrolled();
+                    d.shell.request_redraw();
+                } else if !ch.is_empty() {
+                    r.target = Target::Edge {
+                        at: Point::new(at.x - off.x, at.y - off.y),
+                        ms,
+                        intent,
+                    };
+                    keep.push(r);
+                }
+                continue;
+            }
             match &r.target {
                 Target::Offset(name, ox, oy) => {
                     if self.id.as_ref() == Some(name) {
