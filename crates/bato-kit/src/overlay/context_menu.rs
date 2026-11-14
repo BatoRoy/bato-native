@@ -125,13 +125,15 @@ fn piece_len(p: &Piece) -> f32 {
 pub fn dash_intervals(length: f32, dash: f32, gap: f32) -> Vec<(f32, f32)> {
     let gap = best_dash_gap(length, dash, gap);
     let period = dash + gap;
-    let mut v = Vec::new();
-    let mut s = 0.0;
-    while s < length - 1e-3 {
-        v.push((s, (s + dash).min(length)));
-        s += period;
-    }
-    v
+    // A whole number of periods fits (closed path); count, don't step, so
+    // rounding never adds a sliver of a dash at the end.
+    let n = (length / period).round().max(1.0) as usize;
+    (0..n)
+        .map(|k| {
+            let s = k as f32 * period;
+            (s, (s + dash).min(length))
+        })
+        .collect()
 }
 
 /// Paint a `width` px dashed border inside `outer` with corner `radius`
@@ -395,6 +397,8 @@ mod tests {
         // The 10th dash starts 0.8 px before the top edge (x 357): 356.2.
         let top = 80.0 + FRAC_PI_2 * 7.0;
         assert!((357.0 + d[9].0 - top - 356.2).abs() < 0.01);
+        // The last gap closes the loop exactly.
+        assert!((total - d[177].1 - gap).abs() < 1e-2);
     }
 
     #[test]
