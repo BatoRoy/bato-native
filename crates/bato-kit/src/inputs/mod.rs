@@ -4,3 +4,8 @@
 //! `crate::field` (F2).
 //!
 //! Phase 3 batches add one file per component here and one `mod` line below.
+
+pub mod color_picker;
+pub mod combobox;
+pub mod multiselect;
+pub mod search;

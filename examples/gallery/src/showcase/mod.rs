@@ -227,6 +227,14 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
     page(col, wide, 24)
 }
 
+/// `BATO_SELFTEST=<name>`: the Showcase batches' scripted runs.
+pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>> {
+    match name {
+        "pickers" => Some(overlays::triggers::selftest()),
+        _ => None,
+    }
+}
+
 /// A card that is not ported yet: the real Card look, its title, and
 /// "Not ported yet".
 pub fn stub<'a, M: Clone + 'a>(cx: &Ctx, title: &str) -> El<'a, M> {

@@ -392,6 +392,12 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for Anchored<'a, 
         if let Some(p) = at {
             shell.publish(on_context(Point::new(p.x - b.x, p.y - b.y)));
             shell.capture_event();
+            // The press also dismissed the open menu (outside press) and the
+            // app reopens it here in the same update: React keeps it mounted
+            // and moves it, so it must be dismissable again.
+            let st = tree.state.downcast_mut::<FloatState>();
+            st.dismissed = false;
+            st.origin = None;
         }
     }
 

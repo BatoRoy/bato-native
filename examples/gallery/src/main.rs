@@ -149,10 +149,14 @@ impl App {
             status: Status::Checking,
             backend_version: None,
             smoke: Smoke::default(),
-            script: std::env::var("BATO_SELFTEST")
-                .ok()
-                .and_then(|n| gallery::interaction::selftest(&n))
-                .map(|steps| steps.into_iter().map(|s| s.map(Msg::Interaction)).collect()),
+            script: std::env::var("BATO_SELFTEST").ok().and_then(|n| {
+                gallery::interaction::selftest(&n)
+                    .map(|steps| steps.into_iter().map(|s| s.map(Msg::Interaction)).collect())
+                    .or_else(|| {
+                        showcase::selftest(&n)
+                            .map(|steps| steps.into_iter().map(|s| s.map(Msg::Showcase)).collect())
+                    })
+            }),
         };
         let mut task = app.ping();
         match app.selftest.clone() {
