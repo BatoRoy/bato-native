@@ -18,7 +18,7 @@
 //! | [`layout`] | Grid with spans and tracks, AutoGrid, Masonry, AspectRatio, absolute placement, hairlines, page |
 //! | [`anim`] | Easings, tweens, pulse, hold-repeat, group opacity |
 //! | [`cursor`], [`datefmt`], [`kv`], [`fonts`], [`scale`] | Cursors, date formatting, UI-state store, bundled fonts, device pixels |
-//! | [`inputs`], [`overlay`], [`feedback`], [`data`], [`date`], [`dnd`] | Phase 2/3 component batches |
+//! | [`inputs`], [`overlay`], [`feedback`], [`data`], [`date`], [`dnd`], [`graph`] | Phase 2/3 component batches |
 //!
 //! Sizes are CSS px at 100 %; the UI scale is iced's application scale
 //! factor ([`frame::Frame::scale_factor`]).
@@ -42,6 +42,7 @@ pub mod floating;
 pub mod focus;
 pub mod fonts;
 pub mod frame;
+pub mod graph;
 pub mod hotkeys;
 pub mod icon;
 pub mod input;

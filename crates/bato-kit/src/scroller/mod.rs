@@ -909,6 +909,16 @@ impl<'a, Message: 'a> Scroller<'a, Message> {
                 st.hover = hover_after(st.hover, out, shifted);
                 if fwd == Forward::Pass {
                     self.forward(tree, &here, at, d);
+                    // Claimed on press by an inner widget (the node graph's
+                    // `touch-action: none`): step aside now, so a second
+                    // finger reaches it before the first one moves.
+                    let st = tree.state.downcast_mut::<State>();
+                    if out != TouchOutcome::Ignored
+                        && chain::touch_holder(finger).is_some_and(|h| h != id)
+                    {
+                        st.touch.step_aside(axes!(st));
+                        st.log("touch", "claimed on press by the content".into());
+                    }
                 }
             }
             itouch::Event::FingerMoved { .. } => match mine {

@@ -86,7 +86,7 @@ impl TouchRouter {
         axes: Axes,
     ) -> (TouchOutcome, Forward) {
         if self.finger.is_some() {
-            return (TouchOutcome::Ignored, Forward::Swallow);
+            return (TouchOutcome::Ignored, self.other_finger());
         }
         if !inside {
             return (TouchOutcome::Ignored, Forward::Pass);
@@ -183,7 +183,8 @@ impl TouchRouter {
 
     /// An event of a finger this router does not track.
     pub fn other_finger(&self) -> Forward {
-        if self.finger.is_some() {
+        // An inner widget holds the first finger (a pinch): it gets the rest.
+        if self.finger.is_some() && self.phase != Some(Phase::SteppedAside) {
             Forward::Swallow
         } else {
             Forward::Pass
