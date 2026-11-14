@@ -35,13 +35,16 @@ compilation fails rather than silently losing the fix. Build with `--locked`.
 
 ## Using bato-native in an app
 
-`[patch]` is honoured only in the root manifest, so each app carries the block itself. All six
-`tag`s must match (`make native-bump TAG=…` in the template keeps them in step):
+`[patch]` is honoured only in the root manifest, so each app carries the block itself. Every
+bato-native `tag` must match: the template's `app-client-native/Cargo.toml` has seven (kit,
+shell, gallery and the four patches); `make native-bump TAG=…` keeps them in step and `make lint`
+fails if they disagree:
 
 ```toml
 [dependencies]
 bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
 bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
+gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }  # Examples + Scroll lab pages
 
 [patch.crates-io]
 winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
@@ -57,6 +60,7 @@ Working on the kit and an app together, without tagging: in the app, a git-ignor
 [patch."https://github.com/BatoRoy/bato-native"]
 bato-kit   = { path = "/home/batoroy/Code/BatoApps/bato-native/crates/bato-kit" }
 bato-shell = { path = "/home/batoroy/Code/BatoApps/bato-native/crates/bato-shell" }
+gallery    = { path = "/home/batoroy/Code/BatoApps/bato-native/examples/gallery" }
 ```
 
 ## Develop
