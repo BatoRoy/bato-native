@@ -35,6 +35,7 @@ pub enum Page {
     Home,
     Examples,
     ScrollLab,
+    Interaction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +49,7 @@ pub enum Status {
 pub enum Msg {
     Frame(frame::Msg<Page>),
     Showcase(showcase::Msg),
+    Interaction(gallery::interaction::Msg),
     Name(String),
     AutoUpdate(bool),
     Ping,
@@ -62,6 +64,7 @@ pub enum Msg {
 struct App {
     frame: Frame<Page>,
     showcase: showcase::State,
+    interaction: gallery::interaction::State,
     notifier: Notifier,
     name: String,
     auto_update: bool,
@@ -74,6 +77,7 @@ struct App {
 fn route(view: &BootView) -> (Page, Tab, Option<iced::widget::Id>) {
     let page = match view.view.as_deref() {
         Some("scroll-lab") => Page::ScrollLab,
+        Some("interaction") => Page::Interaction,
         Some("examples") => Page::Examples,
         _ => Page::Home,
     };
@@ -100,6 +104,7 @@ impl App {
             NavItem::new(Page::Home, Ico::Home, "Home"),
             NavItem::new(Page::Examples, Ico::LayoutGrid, "Examples"),
             NavItem::new(Page::ScrollLab, Ico::Rows3, "Scroll lab"),
+            NavItem::new(Page::Interaction, Ico::Command, "Interaction lab"),
         ];
         let start = Start {
             dialog: view.modal.as_deref().and_then(Dialog::parse),
@@ -121,6 +126,7 @@ impl App {
         let app = App {
             frame,
             showcase: showcase::State::new(tab),
+            interaction: Default::default(),
             notifier: Notifier::new(&APP),
             name: String::new(),
             auto_update: true,
@@ -166,6 +172,10 @@ impl App {
                     .frame
                     .set_update_note(Some("Updates apply to packaged builds only.".into())),
             },
+            Msg::Interaction(m) => {
+                return gallery::interaction::update(&mut self.interaction, m)
+                    .map(Msg::Interaction);
+            }
             Msg::Showcase(m) => {
                 if let Some(Effect::Toast(text, tone)) = showcase::update(&mut self.showcase, m) {
                     self.frame.toast(text, tone);
@@ -236,6 +246,9 @@ impl App {
             ),
             Page::Examples => showcase::view(&self.showcase, cx, wide).map(Msg::Showcase),
             Page::ScrollLab => gallery::scroll_lab::view(cx, wide),
+            Page::Interaction => {
+                gallery::interaction::view(&self.interaction, cx, wide).map(Msg::Interaction)
+            }
         };
         self.frame.view(page, Msg::Frame)
     }
