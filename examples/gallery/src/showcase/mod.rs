@@ -227,6 +227,20 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
     page(col, wide, 24)
 }
 
+/// `BATO_SELFTEST=<name>` scripts of the Showcase tabs (open the tab with
+/// `BATO_VIEW`).
+pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>> {
+    use bato_kit::overlay::script::Step;
+    fn map<M>(steps: Vec<Step<M>>, f: fn(M) -> Msg) -> Vec<Step<Msg>> {
+        steps.into_iter().map(|s| s.map(f)).collect()
+    }
+    match name {
+        "feedback" => Some(map(feedback::selftest::steps(), Msg::Feedback)),
+        "layout" => Some(map(layout::selftest::steps(), Msg::Layout)),
+        _ => None,
+    }
+}
+
 /// A card that is not ported yet: the real Card look, its title, and
 /// "Not ported yet".
 pub fn stub<'a, M: Clone + 'a>(cx: &Ctx, title: &str) -> El<'a, M> {
