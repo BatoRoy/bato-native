@@ -128,7 +128,13 @@ fn typed(s: &str) -> Vec<Step<Msg>> {
 /// Rest; click after the last line and type a block with auto-closed
 /// brackets and indentation; select a word with Shift+Ctrl+→ (its other
 /// occurrence lights up); undo; gutter off; TypeScript; vim: normal (block
-/// cursor), `dw`, insert, visual.
+/// cursor), `dw`, insert, visual; then the user's Neovim keys: a pending
+/// `<leader>` (`<20>` in the status bar, then `"+y`), `<leader>yy` to the
+/// clipboard and
+/// Ctrl+Shift+V putting it below the last line, visual `<leader>p` twice
+/// with the same register, `<leader>yiw`, Ctrl+Shift+V in insert mode and
+/// Ctrl+C back to normal mode. (Under `BATO_SELFTEST` the editor uses a
+/// private clipboard and logs its writes on stderr.)
 pub fn selftest() -> Vec<Step<Msg>> {
     let mut s = vec![Step::Shot("rest"), click(at_char(5, 20))];
     s.extend(typed("\nif (x) {\nlog('hi'"));
@@ -157,5 +163,36 @@ pub fn selftest() -> Vec<Step<Msg>> {
     s.extend(typed("ve"));
     s.push(Step::Wait(Duration::from_millis(1000)));
     s.push(Step::Shot("vim-visual"));
+    let ctrl_shift_v = || Step::Char('v', Modifiers::CTRL | Modifiers::SHIFT);
+    s.push(key(Named::Escape));
+    s.extend(typed("gg0"));
+    s.push(key(Named::Space));
+    s.push(Step::Wait(Duration::from_millis(300)));
+    s.push(Step::Shot("vim-leader-pending"));
+    // The shot outlasts `timeoutlen`: Space has moved right (`l`) by now.
+    s.extend(typed("0"));
+    s.push(key(Named::Space));
+    s.extend(typed("y"));
+    s.push(Step::Wait(Duration::from_millis(300)));
+    s.push(Step::Shot("vim-leader-y-pending"));
+    s.extend(typed("yG"));
+    s.push(ctrl_shift_v());
+    s.push(Step::Wait(Duration::from_millis(1000)));
+    s.push(Step::Shot("vim-leader-yy-ctrl-shift-v"));
+    // `greet` over `name` and over `hello`: the register is kept.
+    s.extend(typed("ggwyiwfnviw"));
+    s.push(key(Named::Space));
+    s.extend(typed("pjfhviw"));
+    s.push(key(Named::Space));
+    s.extend(typed("p"));
+    s.push(Step::Wait(Duration::from_millis(1000)));
+    s.push(Step::Shot("vim-visual-leader-p"));
+    s.extend(typed("0fs"));
+    s.push(key(Named::Space));
+    s.extend(typed("yiwox "));
+    s.push(ctrl_shift_v());
+    s.push(Step::Char('c', Modifiers::CTRL));
+    s.push(Step::Wait(Duration::from_millis(1000)));
+    s.push(Step::Shot("vim-insert-paste-ctrl-c"));
     s
 }

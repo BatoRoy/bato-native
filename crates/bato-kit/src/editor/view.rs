@@ -19,7 +19,7 @@ use iced::{Border, Color, Element, Event, Length, Point, Rectangle, Size, Vector
 
 use bato_theme::Palette;
 
-use super::engine::{Cmd, LINE_HEIGHT, Move, Outcome, Pointer};
+use super::engine::{Cmd, LINE_HEIGHT, Move, Outcome, Pointer, VimKey};
 use super::{Content, syntax::Language, text};
 use crate::focus::FocusState;
 use crate::scale::device_scale;
@@ -82,6 +82,8 @@ struct State {
     to_content: Vector,
     /// The drag's last window point.
     drag_at: Option<Point>,
+    /// The text this editor last made the primary selection.
+    primary: Option<String>,
     /// The one-line buffers drawn this frame (`fill_raw` holds weak
     /// references until the frame is prepared).
     frame: std::cell::RefCell<Vec<Arc<ct::Buffer>>>,
@@ -100,6 +102,7 @@ impl Default for State {
             esc: None,
             to_content: Vector::ZERO,
             drag_at: None,
+            primary: None,
             frame: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -315,6 +318,8 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
     ) {
         let st = tree.state.downcast_mut::<State>();
         let b = layout.bounds();
+        let mut clip = Clip::new(clipboard);
+        let clipboard: &mut dyn Clipboard = &mut clip;
         // The visible part of the content box: clicks below the last line
         // still land in the editor (`min-height: 100%`).
         let area = Rectangle {
@@ -328,6 +333,20 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
 
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
+                // vim's `timeoutlen` for a pending `<leader>`.
+                let deadline = self.content.0.borrow().vim_deadline();
+                if let Some(at) = deadline {
+                    if *now >= at {
+                        let outcome = {
+                            let mut fs = font_system().write().expect("font system");
+                            let mut doc = self.content.0.borrow_mut();
+                            doc.vim_timeout(fs.raw(), clipboard)
+                        };
+                        self.after(outcome, st, b, shell);
+                    } else {
+                        shell.request_redraw_at(at);
+                    }
+                }
                 if st.focus.is_focused() {
                     let phase =
                         now.saturating_duration_since(st.blink).as_millis() % BLINK.as_millis();
@@ -384,6 +403,34 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
                 shell.request_redraw();
                 return;
             }
+            // X11 / Wayland primary selection: middle-click pastes it at
+            // the pointer.
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)) => {
+                let Some(p) = cursor.position().filter(|p| area.contains(*p)) else {
+                    return;
+                };
+                if self.read_only {
+                    return;
+                }
+                if st.focus.pointer(event, true, true) {
+                    shell.request_redraw();
+                }
+                let Some(text) = clipboard.read(clipboard::Kind::Primary) else {
+                    return;
+                };
+                let text = text.replace("\r\n", "\n");
+                let o = self.origin(b, st);
+                let outcome = {
+                    let mut fs = font_system().write().expect("font system");
+                    let mut doc = self.content.0.borrow_mut();
+                    doc.pointer(fs.raw(), Pointer::Click, p.x - o.x, p.y - o.y);
+                    doc.paste_primary(fs.raw(), &text, clipboard)
+                };
+                st.blink = Instant::now();
+                shell.capture_event();
+                self.after(outcome, st, b, shell);
+                return;
+            }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if let Some(p) = cursor.position() {
                     st.to_content = p - *position;
@@ -416,6 +463,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
                 if std::mem::take(&mut st.dragging) {
                     st.drag_at = None;
                     shell.capture_event();
+                    self.own_primary(st, clipboard);
                 }
                 return;
             }
@@ -441,11 +489,14 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
             key,
             modifiers,
             text,
+            physical_key,
             ..
         }) = event
         else {
             return;
         };
+        // Shortcuts by their Latin letter, whatever the layout.
+        let latin = key.to_latin(*physical_key);
         MODS.with(|c| c.set(*modifiers));
         if matches!(key, Key::Named(Named::Escape)) {
             st.esc = Some(Instant::now());
@@ -455,14 +506,15 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
 
         let page = (self.view_h - 2.0 * PAD_Y).max(LINE_HEIGHT);
         let handled = if self.vim {
-            self.vim_key(key, *modifiers, text.as_deref(), clipboard)
+            let lines = (page / LINE_HEIGHT).floor().max(1.0) as usize;
+            self.vim_key(key, latin, *modifiers, text.as_deref(), clipboard, lines)
         } else {
             let tab_focus = matches!(key, Key::Named(Named::Tab))
                 && st.esc.is_some_and(|t| t.elapsed() < TAB_FOCUS);
             if tab_focus {
                 None
             } else {
-                self.plain_key(key, *modifiers, text.as_deref(), clipboard, page)
+                self.plain_key(key, latin, *modifiers, text.as_deref(), clipboard, page)
             }
         };
         let Some(outcome) = handled else {
@@ -470,26 +522,10 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
         };
         shell.capture_event();
         st.blink = Instant::now();
-        shell.request_redraw();
-        if outcome.changed {
-            shell.invalidate_layout();
-            if let Some(f) = &self.on_change {
-                shell.publish(f(self.content.text()));
-            }
+        if !self.vim && (outcome.moved || outcome.changed) {
+            self.own_primary(st, clipboard);
         }
-        if outcome.changed || outcome.moved {
-            // `scrollIntoView` of the caret (CodeMirror's 5 px margins).
-            if let Some(r) = self.caret_rect(b, st) {
-                crate::scroller::reveal(
-                    r,
-                    crate::scroller::Reveal {
-                        smooth: false,
-                        margin: 5.0,
-                        ..Default::default()
-                    },
-                );
-            }
-        }
+        self.after(outcome, st, b, shell);
     }
 
     fn mouse_interaction(
@@ -889,6 +925,43 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
     }
 }
 
+/// The clipboard the editor uses: the window's, or with `BATO_SELFTEST`
+/// set a private in-process one, so a scripted run never reads or writes
+/// the desktop's clipboard (its writes are logged on stderr instead).
+struct Clip<'a> {
+    real: &'a mut dyn Clipboard,
+    sandbox: bool,
+}
+
+static SANDBOX: std::sync::Mutex<[Option<String>; 2]> = std::sync::Mutex::new([None, None]);
+
+impl<'a> Clip<'a> {
+    fn new(real: &'a mut dyn Clipboard) -> Self {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let sandbox = *ON.get_or_init(|| std::env::var_os("BATO_SELFTEST").is_some());
+        Self { real, sandbox }
+    }
+}
+
+impl Clipboard for Clip<'_> {
+    fn read(&self, kind: clipboard::Kind) -> Option<String> {
+        if self.sandbox {
+            let slots = SANDBOX.lock().expect("sandbox clipboard");
+            return slots[usize::from(kind == clipboard::Kind::Primary)].clone();
+        }
+        self.real.read(kind)
+    }
+    fn write(&mut self, kind: clipboard::Kind, contents: String) {
+        if self.sandbox {
+            eprintln!("SELFTEST clipboard {kind:?} {contents:?}");
+            let mut slots = SANDBOX.lock().expect("sandbox clipboard");
+            slots[usize::from(kind == clipboard::Kind::Primary)] = Some(contents);
+            return;
+        }
+        self.real.write(kind, contents);
+    }
+}
+
 thread_local! {
     static MODS: std::cell::Cell<keyboard::Modifiers> = const { std::cell::Cell::new(keyboard::Modifiers::empty()) };
 }
@@ -901,6 +974,67 @@ fn window_point(event: &Event) -> Option<Point> {
 }
 
 impl<M> DocView<'_, M> {
+    /// Redraw, report a text change, keep the caret in view (or centre its
+    /// line, vim's `zz`).
+    fn after(&self, outcome: Outcome, st: &mut State, b: Rectangle, shell: &mut Shell<'_, M>) {
+        shell.request_redraw();
+        if let Some(at) = self.content.0.borrow().vim_deadline() {
+            shell.request_redraw_at(at);
+        }
+        if outcome.changed {
+            shell.invalidate_layout();
+            if let Some(f) = &self.on_change {
+                shell.publish(f(self.content.text()));
+            }
+        }
+        if !(outcome.changed || outcome.moved || outcome.center) {
+            return;
+        }
+        let Some(r) = self.caret_rect(b, st) else {
+            return;
+        };
+        if outcome.center {
+            // A view-tall band centred on the line: the editor scrolls it
+            // into place; the page around only if the editor is off-screen.
+            crate::scroller::reveal(
+                Rectangle {
+                    y: r.y + LINE_HEIGHT / 2.0 - self.view_h / 2.0,
+                    height: self.view_h,
+                    ..r
+                },
+                crate::scroller::Reveal {
+                    smooth: false,
+                    ..Default::default()
+                },
+            );
+        } else {
+            // `scrollIntoView` of the caret (CodeMirror's 5 px margins).
+            crate::scroller::reveal(
+                r,
+                crate::scroller::Reveal {
+                    smooth: false,
+                    margin: 5.0,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    /// A selection made in plain mode becomes the primary selection (X11 /
+    /// Wayland), so a middle-click elsewhere pastes it.
+    fn own_primary(&self, st: &mut State, clipboard: &mut dyn Clipboard) {
+        if self.vim {
+            return;
+        }
+        let Some(t) = self.content.0.borrow().selected_text() else {
+            return;
+        };
+        if st.primary.as_ref() != Some(&t) {
+            clipboard.write(clipboard::Kind::Primary, t.clone());
+            st.primary = Some(t);
+        }
+    }
+
     /// The caret's rectangle in content coordinates.
     fn caret_rect(&self, b: Rectangle, st: &State) -> Option<Rectangle> {
         let doc = self.content.0.borrow();
@@ -918,9 +1052,10 @@ impl<M> DocView<'_, M> {
         })
     }
 
-    fn plain_key(
+    pub(super) fn plain_key(
         &self,
         key: &Key,
+        latin: Option<char>,
         m: keyboard::Modifiers,
         text: Option<&str>,
         clipboard: &mut dyn Clipboard,
@@ -981,6 +1116,7 @@ impl<M> DocView<'_, M> {
                     return Some(Outcome {
                         changed: true,
                         moved: true,
+                        center: false,
                     });
                 }
                 Named::Delete => Some(if ctrl {
@@ -1008,7 +1144,9 @@ impl<M> DocView<'_, M> {
                 _ => None,
             },
             Key::Character(ch) if ctrl && !alt => {
-                let ch = ch.to_lowercase();
+                let ch = latin
+                    .map(|c| c.to_ascii_lowercase().to_string())
+                    .unwrap_or_else(|| ch.to_lowercase());
                 match ch.as_str() {
                     "a" => Some(Cmd::SelectAll),
                     "c" => {
@@ -1028,6 +1166,7 @@ impl<M> DocView<'_, M> {
                         return Some(Outcome {
                             changed: true,
                             moved: true,
+                            center: false,
                         });
                     }
                     "v" => clipboard
@@ -1050,101 +1189,73 @@ impl<M> DocView<'_, M> {
         Some(doc.run(fs, &cmd, page))
     }
 
-    fn vim_key(
+    pub(super) fn vim_key(
         &self,
         key: &Key,
+        latin: Option<char>,
         m: keyboard::Modifiers,
         text: Option<&str>,
         clipboard: &mut dyn Clipboard,
+        view_lines: usize,
+    ) -> Option<Outcome> {
+        let vk = if m.control() {
+            let ch = match key {
+                Key::Named(Named::Space) => ' ',
+                _ => latin.or_else(|| match key {
+                    Key::Character(c) => c.chars().next(),
+                    _ => None,
+                })?,
+            };
+            VimKey::Ctrl(ch.to_ascii_lowercase(), m.shift())
+        } else {
+            match key {
+                Key::Named(Named::Space) => VimKey::Char(' '),
+                Key::Named(Named::Insert) if m.shift() => VimKey::ShiftInsert,
+                Key::Named(named) => VimKey::Action(match named {
+                    Named::Escape => ct::Action::Escape,
+                    Named::Enter => ct::Action::Enter,
+                    Named::Backspace => ct::Action::Backspace,
+                    Named::Delete => ct::Action::Delete,
+                    Named::ArrowLeft => ct::Action::Motion(ct::Motion::Left),
+                    Named::ArrowRight => ct::Action::Motion(ct::Motion::Right),
+                    Named::ArrowUp => ct::Action::Motion(ct::Motion::Up),
+                    Named::ArrowDown => ct::Action::Motion(ct::Motion::Down),
+                    Named::Home => ct::Action::Motion(ct::Motion::Home),
+                    Named::End => ct::Action::Motion(ct::Motion::End),
+                    Named::PageUp => ct::Action::Motion(ct::Motion::PageUp),
+                    Named::PageDown => ct::Action::Motion(ct::Motion::PageDown),
+                    Named::Tab if m.shift() => ct::Action::Unindent,
+                    Named::Tab => ct::Action::Indent,
+                    _ => return None,
+                }),
+                _ if m.alt() || m.logo() => return None,
+                _ => {
+                    let t = text.filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))?;
+                    let keys: Vec<VimKey> = t.chars().map(VimKey::Char).collect();
+                    return self.vim_keys(&keys, clipboard, view_lines);
+                }
+            }
+        };
+        self.vim_keys(&[vk], clipboard, view_lines)
+    }
+
+    fn vim_keys(
+        &self,
+        keys: &[VimKey],
+        clipboard: &mut dyn Clipboard,
+        view_lines: usize,
     ) -> Option<Outcome> {
         let mut fs = font_system().write().expect("font system");
         let fs = fs.raw();
         let mut doc = self.content.0.borrow_mut();
-        let insert = matches!(
-            doc.vi_mode(),
-            Some(ct::ViMode::Insert | ct::ViMode::Replace)
-        );
-        if self.read_only && insert {
-            return None;
-        }
-        let action = match key {
-            Key::Named(named) => match named {
-                Named::Escape => ct::Action::Escape,
-                Named::Enter => ct::Action::Enter,
-                Named::Backspace => ct::Action::Backspace,
-                Named::Delete => ct::Action::Delete,
-                Named::ArrowLeft => ct::Action::Motion(ct::Motion::Left),
-                Named::ArrowRight => ct::Action::Motion(ct::Motion::Right),
-                Named::ArrowUp => ct::Action::Motion(ct::Motion::Up),
-                Named::ArrowDown => ct::Action::Motion(ct::Motion::Down),
-                Named::Home => ct::Action::Motion(ct::Motion::Home),
-                Named::End => ct::Action::Motion(ct::Motion::End),
-                Named::PageUp => ct::Action::Motion(ct::Motion::PageUp),
-                Named::PageDown => ct::Action::Motion(ct::Motion::PageDown),
-                Named::Tab if m.shift() => ct::Action::Unindent,
-                Named::Tab => ct::Action::Indent,
-                Named::Space => ct::Action::Insert(' '),
-                Named::Insert if m.shift() && insert => {
-                    let t = clipboard.read(clipboard::Kind::Standard)?;
-                    doc.vi_paste(&t.replace("\r\n", "\n"));
-                    return Some(Outcome {
-                        changed: true,
-                        moved: true,
-                    });
-                }
-                _ => return None,
-            },
-            Key::Character(ch) if m.control() => match ch.to_lowercase().as_str() {
-                "r" if !self.read_only => return Some(redo(&mut doc)),
-                "[" => ct::Action::Escape,
-                "v" if insert => {
-                    let t = clipboard.read(clipboard::Kind::Standard)?;
-                    doc.vi_paste(&t.replace("\r\n", "\n"));
-                    return Some(Outcome {
-                        changed: true,
-                        moved: true,
-                    });
-                }
-                "c" => {
-                    let t = doc.selected_text()?;
-                    clipboard.write(clipboard::Kind::Standard, t);
-                    return Some(Outcome::default());
-                }
-                _ => return None,
-            },
-            _ if m.alt() || m.logo() => return None,
-            _ => {
-                let t = text.filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))?;
-                let mut out = Outcome::default();
-                for ch in t.chars() {
-                    if self.read_only && is_vi_edit(ch, &doc) {
-                        continue;
-                    }
-                    let o = doc.vi_key(fs, ct::Action::Insert(ch));
-                    out.changed |= o.changed;
-                    out.moved |= o.moved;
-                }
-                return Some(out);
+        let mut out: Option<Outcome> = None;
+        for &k in keys {
+            if let Some(o) = doc.vim_input(fs, k, clipboard, view_lines, self.read_only) {
+                *out.get_or_insert_default() |= o;
             }
-        };
-        if self.read_only
-            && matches!(
-                action,
-                ct::Action::Backspace
-                    | ct::Action::Delete
-                    | ct::Action::Indent
-                    | ct::Action::Unindent
-            )
-        {
-            return Some(Outcome::default());
         }
-        Some(doc.vi_key(fs, action))
+        out
     }
-}
-
-/// Read-only vim: the keys that would edit (or enter insert mode).
-fn is_vi_edit(ch: char, doc: &super::engine::Doc) -> bool {
-    matches!(doc.vi_mode(), Some(ct::ViMode::Normal)) && "iaIAoOsScCxXdDpPrRuJ~<>".contains(ch)
 }
 
 fn undo(doc: &mut super::engine::Doc) -> Outcome {
@@ -1152,6 +1263,7 @@ fn undo(doc: &mut super::engine::Doc) -> Outcome {
     Outcome {
         changed,
         moved: changed,
+        center: false,
     }
 }
 
@@ -1160,6 +1272,7 @@ fn redo(doc: &mut super::engine::Doc) -> Outcome {
     Outcome {
         changed,
         moved: changed,
+        center: false,
     }
 }
 
