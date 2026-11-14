@@ -216,12 +216,16 @@ mod utils;
 /// bato-native: `text/uri-list` parsing for Wayland file drops.
 #[doc(hidden)]
 pub mod bato_uri_list;
+/// bato-native: NumLock-aware `key_without_modifiers` for keypad keys.
+#[doc(hidden)]
+pub mod bato_keypad;
 pub mod window;
 
 pub mod platform;
 
 /// bato-native tripwire: this crate is the patched copy from bato-native/patched/winit
-/// (value120 wheel deltas on Wayland (iced winit fork) + smol_str 0.2 + Wayland file drops). bato-kit references it, so a build that silently falls back to
+/// (value120 wheel deltas on Wayland (iced winit fork) + smol_str 0.2 + Wayland file drops
+/// + NumLock-aware keypad keys). bato-kit references it, so a build that silently falls back to
 /// the unpatched crates.io release fails to compile instead of losing the fix.
 #[doc(hidden)]
 pub const BATO_PATCH: &str = "winit";

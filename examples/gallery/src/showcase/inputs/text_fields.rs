@@ -146,6 +146,7 @@ pub fn b1_selftest(card: &str) -> Option<Vec<Step<Infallible>>> {
         "sliders-color" => super::sliders_color::selftest(),
         "time-input" => super::time_input::selftest(),
         "toggles-upload" => super::toggles_upload::selftest(),
+        "numpad" => super::specialized::numpad_selftest(),
         _ => return None,
     };
     Some(steps)

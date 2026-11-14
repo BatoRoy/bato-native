@@ -283,11 +283,7 @@ impl<'a, M: Clone + 'a> From<TextField<'a, M>> for El<'a, M> {
         if let Some(cb) = f.on_focus {
             ctl = ctl.on_focus(cb);
         }
-        let controlled = Element::new(Controlled {
-            content: ctl.into(),
-            value: f.value.clone(),
-            typed,
-        });
+        let controlled = controlled(ctl.into(), f.value.clone(), typed);
         let mut fld = field(&cx, controlled)
             .required(f.required)
             .error(f.error.as_deref());
@@ -307,6 +303,22 @@ impl<'a, M: Clone + 'a> From<TextField<'a, M>> for El<'a, M> {
 }
 
 // ── Controlled value: caret to the end on a script-set value ────────────
+
+/// `content` (a text input whose `on_input` stores each typed value in
+/// `typed`) as a controlled React input: when `value` changes to something
+/// other than what was typed (a mask, a reformat, an accepted completion),
+/// the caret goes to the end, as Chromium does for a script-set value.
+pub(super) fn controlled<'a, M: 'a>(
+    content: El<'a, M>,
+    value: String,
+    typed: Rc<RefCell<Option<String>>>,
+) -> El<'a, M> {
+    Element::new(Controlled {
+        content,
+        value,
+        typed,
+    })
+}
 
 struct Controlled<'a, M> {
     content: El<'a, M>,

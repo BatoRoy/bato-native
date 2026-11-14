@@ -1,0 +1,216 @@
+From 36d6ebd25dd3b320ac40c7a986744f0413558c46 Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sat, 14 Nov 2026 14:44:51 +0100
+Subject: [PATCH] xkb: NumLock-aware key_without_modifiers for keypad keys
+ (KP_4 is "4" with NumLock on, not ArrowLeft)
+
+---
+ src/bato_keypad.rs                           | 59 ++++++++++++++++++++
+ src/lib.rs                                   |  3 +
+ src/platform_impl/linux/common/xkb/keymap.rs | 29 ++++++++++
+ src/platform_impl/linux/common/xkb/mod.rs    | 44 +++++++++++++++
+ src/platform_impl/linux/common/xkb/state.rs  |  7 +++
+ 5 files changed, 142 insertions(+)
+
+diff --git a/src/bato_keypad.rs b/src/bato_keypad.rs
+new file mode 100644
+index 0000000..13e353f
+--- /dev/null
++++ b/src/bato_keypad.rs
+@@ -0,0 +1,59 @@
++//! bato-native: NumLock-aware `key_without_modifiers` for keypad keys on X11
++//! and Wayland (both go through `platform_impl/linux/common/xkb`).
++//!
++//! Upstream reads `key_without_modifiers` from shift level 1 of the key with
++//! every modifier ignored. That is right for Shift, Ctrl, Alt and AltGr, but
++//! NumLock is a lock that changes which key a keypad key *is*: level 1 of
++//! `<KP4>` is `KP_Left`, so with NumLock on keypad 4 still reported
++//! `Named(ArrowLeft)` while `logical_key` and the text were "4". iced fills
++//! `keyboard::Event::KeyPressed::key` from `key_without_modifiers`, so every
++//! text field moved the caret instead of typing the digit.
++//!
++//! For a key whose level-1 keysym is a keypad keysym, the key now reports
++//! the keysym the xkb state yields for it (the level NumLock, and the Shift
++//! that inverts it, select: `KP_4` / `KP_Left`, `KP_Decimal` / `KP_Delete`,
++//! `KP_Separator` or `comma` on layouts whose keypad decimal is a comma), as
++//! Chromium's `KeyboardEvent.key` does, provided that keysym is itself a
++//! keypad keysym or a plain character. Every other key, and a keypad key
++//! whose current keysym is something else (Ctrl+Alt+KP_Subtract's
++//! `XF86Prev_VMode`), keeps level 1.
++
++/// `true` for the `KP_*` keysyms (`KP_Space` 0xff80 to `KP_Equal` 0xffbd).
++pub fn is_keypad(keysym: u32) -> bool {
++    (0xff80..=0xffbd).contains(&keysym)
++}
++
++/// A keysym that is a printable character: Latin-1 or a Unicode keysym.
++fn is_character(keysym: u32) -> bool {
++    matches!(keysym, 0x20..=0x7e | 0xa0..=0xff) || (0x0100_00a0..=0x0110_ffff).contains(&keysym)
++}
++
++/// The keysym `key_without_modifiers` reports for a key whose level-1
++/// keysym is `base` and whose keysym under the current xkb state (NumLock
++/// included) is `current`.
++pub fn key_without_modifiers_keysym(base: u32, current: u32) -> u32 {
++    if is_keypad(base) && (is_keypad(current) || is_character(current)) {
++        current
++    } else {
++        base
++    }
++}
++
++/// What one key press turned into on the real xkb path (`process_key_event`).
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Probe {
++    pub key_without_modifiers: crate::keyboard::Key,
++    pub logical_key: crate::keyboard::Key,
++    pub text: Option<String>,
++    pub location: crate::keyboard::KeyLocation,
++}
++
++/// Press the key with Linux evdev code `evdev` on the xkb `layout` ("us",
++/// "de", rules `evdev`, model `pc105`, no options, environment ignored) with
++/// NumLock locked or not and Shift held or not, through the same
++/// `process_key_event` X11 and Wayland use. `None` when libxkbcommon or the
++/// keymap is not available. For tests.
++#[cfg(any(x11_platform, wayland_platform))]
++pub fn probe(layout: &str, evdev: u32, num_lock: bool, shift: bool) -> Option<Probe> {
++    crate::platform_impl::common::xkb::bato_probe(layout, evdev, num_lock, shift)
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index 4b73c00..e30bf65 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -216,6 +216,9 @@ mod utils;
+ /// bato-native: `text/uri-list` parsing for Wayland file drops.
+ #[doc(hidden)]
+ pub mod bato_uri_list;
++/// bato-native: NumLock-aware `key_without_modifiers` for keypad keys.
++#[doc(hidden)]
++pub mod bato_keypad;
+ pub mod window;
+ 
+ pub mod platform;
+diff --git a/src/platform_impl/linux/common/xkb/keymap.rs b/src/platform_impl/linux/common/xkb/keymap.rs
+index 67aac5c..7308c60 100644
+--- a/src/platform_impl/linux/common/xkb/keymap.rs
++++ b/src/platform_impl/linux/common/xkb/keymap.rs
+@@ -951,6 +951,35 @@ impl XkbKeymap {
+         Some(Self::new_inner(keymap, core_keyboard_id))
+     }
+ 
++    /// bato-native: the keymap of an RMLVO `layout` (rules `evdev`, model
++    /// `pc105`, no variant or options) for `bato_keypad::probe`.
++    #[cfg(any(x11_platform, wayland_platform))]
++    pub fn bato_from_layout(context: &XkbContext, layout: &str) -> Option<Self> {
++        let layout = std::ffi::CString::new(layout).ok()?;
++        let names = xkb::xkb_rule_names {
++            rules: b"evdev\0".as_ptr().cast(),
++            model: b"pc105\0".as_ptr().cast(),
++            layout: layout.as_ptr(),
++            variant: b"\0".as_ptr().cast(),
++            options: b"\0".as_ptr().cast(),
++        };
++        let keymap = unsafe {
++            (XKBH.xkb_keymap_new_from_names)(
++                context.as_ptr(),
++                &names,
++                xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS,
++            )
++        };
++        Some(Self::new_inner(NonNull::new(keymap)?, 0))
++    }
++
++    /// bato-native: the mask of the modifier `name` (0 when the keymap has
++    /// none).
++    #[cfg(any(x11_platform, wayland_platform))]
++    pub fn bato_mod_mask(&self, name: &[u8]) -> u32 {
++        mod_index_for_name(self.keymap, name).map_or(0, |i| 1 << i)
++    }
++
+     fn new_inner(keymap: NonNull<xkb_keymap>, _core_keyboard_id: i32) -> Self {
+         let mods_indices = ModsIndices {
+             shift: mod_index_for_name(keymap, xkb::XKB_MOD_NAME_SHIFT),
+diff --git a/src/platform_impl/linux/common/xkb/mod.rs b/src/platform_impl/linux/common/xkb/mod.rs
+index 706397f..2370510 100644
+--- a/src/platform_impl/linux/common/xkb/mod.rs
++++ b/src/platform_impl/linux/common/xkb/mod.rs
+@@ -293,6 +293,8 @@ impl<'a, 'b> KeyEventResults<'a, 'b> {
+         // deallocate it.
+         let layout = self.context.state.layout(self.keycode);
+         let keysym = self.context.keymap.first_keysym_by_level(layout, self.keycode);
++        // bato-native: NumLock is a lock, not a modifier (see `bato_keypad`).
++        let keysym = crate::bato_keypad::key_without_modifiers_keysym(keysym, self.keysym);
+ 
+         match self.keysym_to_key(keysym) {
+             Ok((key, location)) => (key, location),
+@@ -344,6 +346,48 @@ impl<'a, 'b> KeyEventResults<'a, 'b> {
+     }
+ }
+ 
++/// bato-native: see `crate::bato_keypad::probe`.
++#[cfg(any(x11_platform, wayland_platform))]
++pub fn bato_probe(
++    layout: &str,
++    evdev: u32,
++    num_lock: bool,
++    shift: bool,
++) -> Option<crate::bato_keypad::Probe> {
++    xkb::xkbcommon_option()?;
++    let context = NonNull::new(unsafe {
++        (XKBH.xkb_context_new)(xkb_context_flags::XKB_CONTEXT_NO_ENVIRONMENT_NAMES)
++    })?;
++    let context = XkbContext { context };
++    let mut keymap = XkbKeymap::bato_from_layout(&context, layout)?;
++    let mut state = XkbState::bato_new(&keymap)?;
++    let num = keymap.bato_mod_mask(xkb::XKB_MOD_NAME_NUM);
++    let shift_mask = keymap.bato_mod_mask(xkb::XKB_MOD_NAME_SHIFT);
++    state.update_modifiers(
++        if shift { shift_mask } else { 0 },
++        0,
++        if num_lock { num } else { 0 },
++        0,
++        0,
++        0,
++    );
++    let mut scratch_buffer = Vec::new();
++    let mut key_context = KeyContext {
++        state: &mut state,
++        keymap: &mut keymap,
++        compose_state1: None,
++        compose_state2: None,
++        scratch_buffer: &mut scratch_buffer,
++    };
++    let event = key_context.process_key_event(evdev + 8, ElementState::Pressed, false);
++    Some(crate::bato_keypad::Probe {
++        key_without_modifiers: event.platform_specific.key_without_modifiers,
++        logical_key: event.logical_key,
++        text: event.text.map(|t| t.to_string()),
++        location: event.location,
++    })
++}
++
+ #[derive(Debug)]
+ pub struct XkbContext {
+     context: NonNull<xkb_context>,
+diff --git a/src/platform_impl/linux/common/xkb/state.rs b/src/platform_impl/linux/common/xkb/state.rs
+index 27c055a..7f382d6 100644
+--- a/src/platform_impl/linux/common/xkb/state.rs
++++ b/src/platform_impl/linux/common/xkb/state.rs
+@@ -37,6 +37,13 @@ impl XkbState {
+         Some(Self::new_inner(state))
+     }
+ 
++    /// bato-native: a plain state for `bato_keypad::probe`.
++    #[cfg(any(x11_platform, wayland_platform))]
++    pub fn bato_new(keymap: &XkbKeymap) -> Option<Self> {
++        let state = NonNull::new(unsafe { (XKBH.xkb_state_new)(keymap.as_ptr()) })?;
++        Some(Self::new_inner(state))
++    }
++
+     fn new_inner(state: NonNull<xkb_state>) -> Self {
+         let modifiers = ModifiersState::default();
+         let mut this = Self { state, modifiers };
+-- 
+2.56.0
+

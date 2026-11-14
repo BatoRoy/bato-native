@@ -160,3 +160,97 @@ pub(crate) fn selftest() -> Vec<Step<Infallible>> {
     s.push(Step::Shot("tags-committed"));
     s
 }
+
+/// The key events the (patched) winit sends for a keypad key: with NumLock
+/// on, the character (`key`, `modified_key` and `text` alike); off, the
+/// navigation key. `'\r'` is the keypad Enter.
+pub(crate) fn numpad(ch: char, num_lock: bool) -> Vec<Step<Infallible>> {
+    use bato_kit::iced::keyboard::key::{Code, Physical};
+    use bato_kit::iced::keyboard::{self, Key, Location, Modifiers};
+    use bato_kit::iced::Event;
+    let code = match ch {
+        '0' => Code::Numpad0,
+        '1' => Code::Numpad1,
+        '2' => Code::Numpad2,
+        '3' => Code::Numpad3,
+        '4' => Code::Numpad4,
+        '5' => Code::Numpad5,
+        '6' => Code::Numpad6,
+        '7' => Code::Numpad7,
+        '8' => Code::Numpad8,
+        '9' => Code::Numpad9,
+        '.' => Code::NumpadDecimal,
+        '+' => Code::NumpadAdd,
+        '-' => Code::NumpadSubtract,
+        _ => Code::NumpadEnter,
+    };
+    let nav = match ch {
+        '4' => Some(Named::ArrowLeft),
+        '6' => Some(Named::ArrowRight),
+        '8' => Some(Named::ArrowUp),
+        '2' => Some(Named::ArrowDown),
+        '7' => Some(Named::Home),
+        '1' => Some(Named::End),
+        '9' => Some(Named::PageUp),
+        '3' => Some(Named::PageDown),
+        '0' => Some(Named::Insert),
+        '.' => Some(Named::Delete),
+        _ => None,
+    };
+    let (key, text) = match (ch, nav) {
+        ('\r', _) => (Key::Named(Named::Enter), Some("\r".into())),
+        (_, Some(n)) if !num_lock => (Key::Named(n), None),
+        ('5', None) if !num_lock => (Key::Unidentified, None),
+        _ => (Key::Character(ch.to_string().into()), Some(ch.to_string().into())),
+    };
+    let physical_key = Physical::Code(code);
+    let modifiers = Modifiers::default();
+    vec![
+        Step::Event(Event::Keyboard(keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key.clone(),
+            physical_key,
+            location: Location::Numpad,
+            modifiers,
+            text,
+            repeat: false,
+        })),
+        Step::Event(Event::Keyboard(keyboard::Event::KeyReleased {
+            key: key.clone(),
+            modified_key: key,
+            physical_key,
+            location: Location::Numpad,
+            modifiers,
+        })),
+    ]
+}
+
+fn numpad_str(s: &str, num_lock: bool) -> Vec<Step<Infallible>> {
+    s.chars().flat_map(|c| numpad(c, num_lock)).collect()
+}
+
+/// `BATO_SELFTEST=inputs:numpad` (same card): keypad keys type like the
+/// main row with NumLock on (Quantity `7.5` + keypad Enter, Phone masks,
+/// OTP advances) and navigate with it off (keypad 4 moves the OTP box left,
+/// keypad 6 right); Price takes the keypad decimal point.
+pub(crate) fn numpad_selftest() -> Vec<Step<Infallible>> {
+    let mut s = vec![click(544.0, 122.0), key(Named::End), key(Named::Backspace)];
+    s.extend(numpad_str("7.5\r", true));
+    s.push(click(955.0, 122.0));
+    s.extend(numpad_str("5551234567", true));
+    s.push(click(778.0, 207.0));
+    s.extend(numpad_str("1234", true));
+    s.extend(numpad_str("44", false));
+    s.push(Step::Wait(Duration::from_millis(300)));
+    s.push(Step::Shot("numlock-on-typed-off-left"));
+    s.extend(numpad_str("6", false));
+    s.push(Step::Wait(Duration::from_millis(300)));
+    s.push(Step::Shot("numlock-off-right"));
+    // Price (raw while focused): keypad decimal point and digits.
+    s.push(click(544.0, 198.0));
+    s.push(key(Named::End));
+    s.extend(numpad_str(".25", true));
+    s.push(Step::Wait(Duration::from_millis(300)));
+    s.push(Step::Shot("price-decimal"));
+    s
+}

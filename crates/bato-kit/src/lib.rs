@@ -133,4 +133,66 @@ mod tests {
             ["winit", "cosmic-text", "cryoglyph", "iced_wgpu"]
         );
     }
+
+    /// The winit patch: NumLock picks what a keypad key is, so iced's
+    /// `KeyPressed::key` (winit's `key_without_modifiers`) is a digit with
+    /// NumLock on and a navigation key with it off, like the logical key.
+    #[test]
+    fn keypad_follows_num_lock() {
+        use winit::bato_keypad::{key_without_modifiers_keysym as kwm, probe};
+        use winit::keyboard::{Key, KeyLocation, NamedKey};
+        let (kp_left, kp_4, kp_delete, kp_subtract) = (0xff96, 0xffb4, 0xff9f, 0xffad);
+        assert_eq!(kwm(kp_left, kp_4), kp_4, "NumLock on");
+        assert_eq!(kwm(kp_left, kp_left), kp_left, "NumLock off");
+        assert_eq!(kwm(kp_delete, 0x2c), 0x2c, "a comma keypad decimal");
+        assert_eq!(kwm(kp_subtract, 0x1008fe23), kp_subtract, "Ctrl+Alt+KP-");
+        assert_eq!(kwm(0x34, 0x24), 0x34, "Shift+4 on the main row is still 4");
+
+        // The real xkb path (libxkbcommon + xkeyboard-config); skipped
+        // where they are missing. Evdev codes: KEY_4 5, KEY_KP4 75,
+        // KEY_KP6 77, KEY_KP0 82, KEY_KPDOT 83, KEY_KPENTER 96,
+        // KEY_KPPLUS 78, KEY_KPMINUS 74.
+        if probe("us", 5, false, false).is_none() {
+            eprintln!("skipped the xkb probe: no libxkbcommon or keymap");
+            return;
+        }
+        let ch = |s: &str| Key::Character(s.into());
+        let named = Key::Named;
+        let k = |code, num, shift| {
+            let p = probe("us", code, num, shift).unwrap();
+            (p.key_without_modifiers, p.logical_key, p.text)
+        };
+        let t = |s: &str| Some(s.to_string());
+        assert_eq!(k(75, true, false), (ch("4"), ch("4"), t("4")));
+        assert_eq!(k(77, true, false), (ch("6"), ch("6"), t("6")));
+        assert_eq!(k(82, true, false), (ch("0"), ch("0"), t("0")));
+        assert_eq!(k(83, true, false), (ch("."), ch("."), t(".")));
+        let left = named(NamedKey::ArrowLeft);
+        assert_eq!(k(75, false, false), (left.clone(), left, None));
+        // Shift with NumLock on yields whatever the keymap's keypad type
+        // says (xkeyboard-config: the digit, or the arrow with the "Shift
+        // releases NumLock" option); the key always agrees with it.
+        let (key, logical, _) = k(75, true, true);
+        assert_eq!(key, logical);
+        let del = named(NamedKey::Delete);
+        assert_eq!(k(83, false, false).0, del);
+        let enter = named(NamedKey::Enter);
+        assert_eq!(k(96, true, false).0, enter);
+        assert_eq!(k(96, false, false).0, enter);
+        for num in [true, false] {
+            assert_eq!(k(78, num, false), (ch("+"), ch("+"), t("+")));
+            assert_eq!(k(74, num, false), (ch("-"), ch("-"), t("-")));
+        }
+        // The main row is untouched: NumLock does nothing, Shift is dropped.
+        assert_eq!(k(5, true, false), (ch("4"), ch("4"), t("4")));
+        assert_eq!(k(5, false, true), (ch("4"), ch("$"), t("$")));
+        assert_eq!(
+            probe("us", 75, true, false).unwrap().location,
+            KeyLocation::Numpad
+        );
+        // A comma keypad decimal (German) types its comma.
+        if let Some(p) = probe("de", 83, true, false) {
+            assert_eq!(p.key_without_modifiers, ch(","));
+        }
+    }
 }

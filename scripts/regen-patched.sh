@@ -78,8 +78,10 @@ crate iced_wgpu 0.14.0 ff144a999b0ca0f8a10257934500060240825c42e950ec0ebee9c8ae3
   iced_wgpu-0.14.0-surface-copy-src.patch
 
 # iced's winit fork (value120 wheel deltas on Wayland), pinned, with smol_str 0.2,
-# and desktop file drops on Wayland (wl_data_device text/uri-list).
+# desktop file drops on Wayland (wl_data_device text/uri-list), and keypad keys
+# that honour NumLock in key_without_modifiers (X11 and Wayland, xkb).
 git clone -q --no-checkout "$WINIT_REPO" "$work/winit"
 git -C "$work/winit" -c advice.detachedHead=false checkout -q "$WINIT_REV"
-finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch winit-wayland-file-drop.patch
+finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch winit-wayland-file-drop.patch \
+  winit-xkb-keypad-numlock.patch
 rm -rf "$out/winit/.git"

@@ -37,6 +37,13 @@ impl XkbState {
         Some(Self::new_inner(state))
     }
 
+    /// bato-native: a plain state for `bato_keypad::probe`.
+    #[cfg(any(x11_platform, wayland_platform))]
+    pub fn bato_new(keymap: &XkbKeymap) -> Option<Self> {
+        let state = NonNull::new(unsafe { (XKBH.xkb_state_new)(keymap.as_ptr()) })?;
+        Some(Self::new_inner(state))
+    }
+
     fn new_inner(state: NonNull<xkb_state>) -> Self {
         let modifiers = ModifiersState::default();
         let mut this = Self { state, modifiers };

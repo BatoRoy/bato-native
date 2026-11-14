@@ -294,6 +294,9 @@ pub fn selftest() -> Vec<Step<showcase::Msg>> {
         Step::Shot("search-ghost"),
         Step::Key(Named::Tab, none),
         wait(300),
+        // The caret went to the end of the completion: `!` lands after it.
+        Step::Char('!', none),
+        wait(300),
         Step::Shot("search-accepted"),
         // Overlays tab.
         Step::Message(showcase::Msg::Tab(Tab::Overlays)),

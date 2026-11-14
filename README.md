@@ -20,7 +20,7 @@ fix to text, scrolling, theme or a widget is made once and reaches an app when i
 
 | Crate | Why |
 |---|---|
-| `winit` (iced's fork) | Wayland `axis_value120` hi-res wheel deltas |
+| `winit` (iced's fork) | Wayland `axis_value120` hi-res wheel deltas, Wayland file drops, keypad keys that honour NumLock (`key_without_modifiers`, X11 and Wayland) |
 | `cosmic-text` 0.15.0 | FreeType light hinting, so text matches Chromium |
 | `cryoglyph` 0.1.0 | Skia's gamma preblend in the glyph shader |
 | `iced_wgpu` 0.14.0 | `COPY_SRC` surface usage, for the dialog backdrop blur |

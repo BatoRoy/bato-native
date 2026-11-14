@@ -293,6 +293,8 @@ impl<'a, 'b> KeyEventResults<'a, 'b> {
         // deallocate it.
         let layout = self.context.state.layout(self.keycode);
         let keysym = self.context.keymap.first_keysym_by_level(layout, self.keycode);
+        // bato-native: NumLock is a lock, not a modifier (see `bato_keypad`).
+        let keysym = crate::bato_keypad::key_without_modifiers_keysym(keysym, self.keysym);
 
         match self.keysym_to_key(keysym) {
             Ok((key, location)) => (key, location),
@@ -342,6 +344,48 @@ impl<'a, 'b> KeyEventResults<'a, 'b> {
             _ => Err(()),
         }
     }
+}
+
+/// bato-native: see `crate::bato_keypad::probe`.
+#[cfg(any(x11_platform, wayland_platform))]
+pub fn bato_probe(
+    layout: &str,
+    evdev: u32,
+    num_lock: bool,
+    shift: bool,
+) -> Option<crate::bato_keypad::Probe> {
+    xkb::xkbcommon_option()?;
+    let context = NonNull::new(unsafe {
+        (XKBH.xkb_context_new)(xkb_context_flags::XKB_CONTEXT_NO_ENVIRONMENT_NAMES)
+    })?;
+    let context = XkbContext { context };
+    let mut keymap = XkbKeymap::bato_from_layout(&context, layout)?;
+    let mut state = XkbState::bato_new(&keymap)?;
+    let num = keymap.bato_mod_mask(xkb::XKB_MOD_NAME_NUM);
+    let shift_mask = keymap.bato_mod_mask(xkb::XKB_MOD_NAME_SHIFT);
+    state.update_modifiers(
+        if shift { shift_mask } else { 0 },
+        0,
+        if num_lock { num } else { 0 },
+        0,
+        0,
+        0,
+    );
+    let mut scratch_buffer = Vec::new();
+    let mut key_context = KeyContext {
+        state: &mut state,
+        keymap: &mut keymap,
+        compose_state1: None,
+        compose_state2: None,
+        scratch_buffer: &mut scratch_buffer,
+    };
+    let event = key_context.process_key_event(evdev + 8, ElementState::Pressed, false);
+    Some(crate::bato_keypad::Probe {
+        key_without_modifiers: event.platform_specific.key_without_modifiers,
+        logical_key: event.logical_key,
+        text: event.text.map(|t| t.to_string()),
+        location: event.location,
+    })
 }
 
 #[derive(Debug)]

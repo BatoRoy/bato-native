@@ -951,6 +951,35 @@ impl XkbKeymap {
         Some(Self::new_inner(keymap, core_keyboard_id))
     }
 
+    /// bato-native: the keymap of an RMLVO `layout` (rules `evdev`, model
+    /// `pc105`, no variant or options) for `bato_keypad::probe`.
+    #[cfg(any(x11_platform, wayland_platform))]
+    pub fn bato_from_layout(context: &XkbContext, layout: &str) -> Option<Self> {
+        let layout = std::ffi::CString::new(layout).ok()?;
+        let names = xkb::xkb_rule_names {
+            rules: b"evdev\0".as_ptr().cast(),
+            model: b"pc105\0".as_ptr().cast(),
+            layout: layout.as_ptr(),
+            variant: b"\0".as_ptr().cast(),
+            options: b"\0".as_ptr().cast(),
+        };
+        let keymap = unsafe {
+            (XKBH.xkb_keymap_new_from_names)(
+                context.as_ptr(),
+                &names,
+                xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS,
+            )
+        };
+        Some(Self::new_inner(NonNull::new(keymap)?, 0))
+    }
+
+    /// bato-native: the mask of the modifier `name` (0 when the keymap has
+    /// none).
+    #[cfg(any(x11_platform, wayland_platform))]
+    pub fn bato_mod_mask(&self, name: &[u8]) -> u32 {
+        mod_index_for_name(self.keymap, name).map_or(0, |i| 1 << i)
+    }
+
     fn new_inner(keymap: NonNull<xkb_keymap>, _core_keyboard_id: i32) -> Self {
         let mods_indices = ModsIndices {
             shift: mod_index_for_name(keymap, xkb::XKB_MOD_NAME_SHIFT),

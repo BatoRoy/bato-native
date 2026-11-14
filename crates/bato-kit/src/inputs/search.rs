@@ -11,11 +11,16 @@
 //! the active row, Enter or a press picks it (without taking focus from the
 //! input), Esc closes it. With `auto_complete`, the rest of the top result
 //! shows as `muted` ghost text after the query when it starts with it; Tab,
-//! or → with the caret at the end, accepts it.
+//! or → with the caret at the end, accepts it. The input is controlled like
+//! React's: a value the app sets (an accepted completion, a picked row)
+//! puts the caret at the end.
 //!
 //! ```ignore
 //! search_input(&on, &state.q, Msg::Q).suggestions(FRAMEWORKS).auto_complete(state.auto)
 //! ```
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
@@ -28,6 +33,7 @@ use iced::widget::{column, container, row, text_input};
 use iced::{Alignment, Color, Element, Event, Length, Padding, Rectangle, Size, Vector, mouse};
 
 use super::combobox::{bare_input, control_frame, option_row};
+use super::text_field::controlled;
 use crate::ctx::Ctx;
 use crate::field::field;
 use crate::focus::{Target, request};
@@ -357,14 +363,28 @@ impl<'a, M: Clone + 'a> From<SearchInput<'a, M>> for El<'a, M> {
                 let accept =
                     (!ghost.is_empty()).then(|| SearchEvent::Choose(format!("{value}{ghost}")));
                 let enter = results.get(s.active).cloned().map(SearchEvent::Choose);
-                let input = Element::new(EndKey {
-                    input: bare_input(&cx, &placeholder, &value, SearchEvent::Input)
-                        .id(user_id.clone().unwrap_or_else(|| s.id.clone()))
-                        .padding(Padding::from([0.0, 8.0]))
-                        .into(),
-                    value: value.clone(),
-                    accept: accept.clone(),
-                });
+                // Controlled like React's input: an accepted completion or a
+                // picked row puts the caret at the end of the new value.
+                let typed: Rc<RefCell<Option<String>>> = Rc::default();
+                let on_input = {
+                    let typed = typed.clone();
+                    move |v: String| {
+                        *typed.borrow_mut() = Some(v.clone());
+                        SearchEvent::Input(v)
+                    }
+                };
+                let input = controlled(
+                    Element::new(EndKey {
+                        input: bare_input(&cx, &placeholder, &value, on_input)
+                            .id(user_id.clone().unwrap_or_else(|| s.id.clone()))
+                            .padding(Padding::from([0.0, 8.0]))
+                            .into(),
+                        value: value.clone(),
+                        accept: accept.clone(),
+                    }),
+                    value.clone(),
+                    typed,
+                );
                 // The ghost layer is always there (empty without a completion)
                 // so the input keeps its place in the tree, and its focus.
                 // `pl-9` from the box's padding edge: 1 px right of the
