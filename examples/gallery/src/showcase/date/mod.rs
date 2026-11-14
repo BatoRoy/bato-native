@@ -106,6 +106,7 @@ pub fn selftest(name: &str) -> Option<Vec<Step<Msg>>> {
         at(panel, 256.0 / 7.0 * (col + 0.5), 64.0 + 34.0 * row + 16.0)
     };
     let settle = Step::Wait(Duration::from_millis(350));
+    let view = |x: f32, y: f32| Target::At(bato_kit::iced::Point::new(347.0 + x, 307.0 + y));
     Some(vec![
         Step::Shot("rest"),
         // DatePicker: open, hover a day, Escape.
@@ -131,8 +132,8 @@ pub fn selftest(name: &str) -> Option<Vec<Step<Msg>>> {
         click(pickers::DATETIME),
         settle.clone(),
         Step::Shot("datetime-open"),
-        // The hour one below the centre: picked, then centred.
-        Step::Click(at("pk-dt:panel", 294.0 + 22.0, 24.0 + 80.0 + 30.0), left),
+        // The hour two above the centre: picked, then centred.
+        Step::Click(at("pk-dt:panel", 294.0 + 22.0, 24.0 + 80.0 - 60.0), left),
         settle.clone(),
         Step::Shot("datetime-hour"),
         Step::Key(Named::Escape, none),
@@ -156,20 +157,25 @@ pub fn selftest(name: &str) -> Option<Vec<Step<Msg>>> {
         ),
         settle.clone(),
         Step::Shot("time-pick"),
-        // CalendarView: month, week, an event hovered.
+        // CalendarView: the last card stops where the page ends, as in the
+        // `date/calendar-view` reference (view at 347, 307). Window points:
+        // `Target::Id` resolves layout bounds, which ignore the page scroll.
         Step::Message(Msg::ScrollTo("calendar-view")),
         Step::Wait(Duration::from_millis(900)),
-        Step::Move(at(calendar_view::VIEW, 100.0, 120.0)),
+        Step::Move(view(100.0, 120.0)),
         settle.clone(),
         Step::Shot("month-hover"),
-        Step::Click(at(calendar_view::VIEW, 776.0, 16.0), left),
+        Step::Click(view(776.0, 16.0), left),
         settle.clone(),
         Step::Shot("week"),
-        Step::Move(at(calendar_view::VIEW, 400.0, 250.0)),
+        // Three notches down the hour grid, then hover Standup (10:00, Sat).
+        Step::Move(view(400.0, 250.0)),
         Step::Event(bato_kit::iced::Event::Mouse(mouse::Event::WheelScrolled {
             delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
         })),
-        Step::Wait(Duration::from_millis(600)),
+        Step::Wait(Duration::from_millis(700)),
+        Step::Move(view(640.0, 200.0)),
+        settle.clone(),
         Step::Shot("week-scrolled"),
     ])
 }

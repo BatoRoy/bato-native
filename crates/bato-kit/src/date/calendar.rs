@@ -227,6 +227,7 @@ fn day_cell<'a, M: Clone + 'a>(cx: &Ctx, d: NaiveDate, look: DayLook, msg: M) ->
         text.into()
     };
     let hover = c(cx.wash(0.06));
+    let over = c(cx.over);
     let between_bg = c(cx.tint(0.15));
     let style = move |s: Status| {
         let mut b = BoxStyle::default().radius(6.0);
@@ -235,10 +236,15 @@ fn day_cell<'a, M: Clone + 'a>(cx: &Ctx, d: NaiveDate, look: DayLook, msg: M) ->
         } else if look.between {
             b = b.bg(between_bg).fg(c(p.accent_bright)).radius(0.0);
         } else {
-            b = b.fg(c(if look.dim { p.muted } else { p.subtext }));
-            if s == Status::Hover && !look.disabled {
-                b = b.bg(hover);
-            }
+            // The backdrop colour at rest: the today ring is a quad behind
+            // the box, so the box must cover it.
+            b = b.fg(c(if look.dim { p.muted } else { p.subtext })).bg(
+                if s == Status::Hover && !look.disabled {
+                    hover
+                } else {
+                    over
+                },
+            );
         }
         if look.today && !look.selected {
             b = b.ring(1.0, c(p.accent_bright));

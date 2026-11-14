@@ -25,7 +25,7 @@ use super::calendar::{CalendarMsg, CalendarState, calendar, height as calendar_h
 use super::math::{DateRange, keep_time, trunc_seconds};
 use super::popover_panel;
 use super::time_picker::time_picker;
-use super::trigger::trigger;
+use super::trigger::{press_probe, trigger};
 use crate::El;
 use crate::ctx::Ctx;
 use crate::datefmt::{self, NaiveDate, NaiveDateTime};
@@ -388,7 +388,7 @@ impl<'a, M: Clone + 'a> From<Picker<'a, M>> for El<'a, M> {
                 "{}:panel",
                 pk.id.as_deref().unwrap_or("picker")
             )));
-            popover_panel(cx, body)
+            press_probe(popover_panel(cx, body))
         });
         let on = pk.on;
         let pop = anchored(button, panel)

@@ -376,20 +376,23 @@ impl<'a, M: Clone + 'a> CalendarView<'a, M> {
         let mut head = Grid::tracks(tracks()).push(Space::new());
         for d in &days {
             let today = *d == self.today;
-            head = head.push(row![
-                vline(line),
-                container(
-                    column![
-                        label(datefmt::format_date(*d, "EEE"), 12.0, 16.0).color(c(p.muted)),
-                        label(datefmt::format_date(*d, "d"), 14.0, 20.0)
-                            .medium()
-                            .color(c(if today { p.accent_bright } else { p.subtext })),
-                    ]
-                    .align_x(Alignment::Center)
-                )
-                .center_x(Length::Fill)
-                .padding([8, 0]),
-            ]);
+            head = head.push(
+                row![
+                    vline(line),
+                    container(
+                        column![
+                            label(datefmt::format_date(*d, "EEE"), 12.0, 16.0).color(c(p.muted)),
+                            label(datefmt::format_date(*d, "d"), 14.0, 20.0)
+                                .medium()
+                                .color(c(if today { p.accent_bright } else { p.subtext })),
+                        ]
+                        .align_x(Alignment::Center)
+                    )
+                    .center_x(Length::Fill)
+                    .padding([8, 0]),
+                ]
+                .height(52),
+            );
         }
         let header = header_band(cx, head.into(), 52.0);
 
@@ -430,6 +433,8 @@ impl<'a, M: Clone + 'a> CalendarView<'a, M> {
                 ];
                 let chip = stack![
                     surface(Space::new().width(Length::Fill).height(Length::Fill))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
                         .fixed(BoxStyle::default().bg(edge).radius(4.0)),
                     container(
                         surface(body)
@@ -457,7 +462,7 @@ impl<'a, M: Clone + 'a> CalendarView<'a, M> {
                         .width(Length::Fill),
                 );
             }
-            body = body.push(row![vline(line), layers]);
+            body = body.push(row![vline(line), layers].height(24.0 * HOUR_H));
         }
         let scroller = crate::scroller::scroll_area(cx, body).height(Length::Fill);
         column![header, hline(line), scroller]
