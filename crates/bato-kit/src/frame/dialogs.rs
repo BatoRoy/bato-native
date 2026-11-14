@@ -334,7 +334,6 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     pub(super) fn about_view<'a, M: Clone + 'a>(&'a self, wrap: fn(Msg<P>) -> M) -> El<'a, M> {
         let cx = self.cx.on_card();
         let p = cx.p();
-        let note = self.update_note.clone().unwrap_or_default();
         let body = column![
             app_mark(&cx, self.brand.icon, 56.0),
             vgap(12.0),
@@ -351,13 +350,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 .align(Align::Center)
                 .max_width(320.0),
             vgap(20.0),
-            button(&cx)
-                .secondary()
-                .icon(Ico::RefreshCw)
-                .label("Check for updates")
-                .on_press(wrap(Msg::CheckUpdates)),
-            vgap(8.0),
-            container(label(note, 12.0, 16.0).color(c(p.muted))).height(16),
+            self.about_update_view(&cx, wrap),
         ]
         .align_x(Alignment::Center)
         .width(Length::Fill);
