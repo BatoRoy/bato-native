@@ -4,3 +4,7 @@
 //! `crate::field` (F2).
 //!
 //! Phase 3 batches add one file per component here and one `mod` line below.
+
+pub mod file_dropzone;
+
+pub use file_dropzone::{FileDropzone, file_dropzone};

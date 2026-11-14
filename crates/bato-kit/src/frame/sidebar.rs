@@ -122,12 +122,13 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 items.push(kbd(&cx.on(cx.wash(0.03)), MOD_K));
             }
             let t = cx.t.clone();
-            // A button in React (it opens the command palette): a Tab stop.
+            // A button in React that opens the command palette: a Tab stop.
             let s = surface(row(items).spacing(8).align_y(Alignment::Center))
                 .width(Length::Fill)
                 .height(32)
                 .center_y()
                 .focusable(true)
+                .on_press(wrap(Msg::OpenPalette))
                 .focus_ring(Ring::plain(cx))
                 .style(move |st| {
                     let p = &t.p;
