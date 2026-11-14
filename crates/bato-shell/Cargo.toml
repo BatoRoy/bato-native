@@ -5,5 +5,41 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["iced", "dialogs", "notify"]
+# Task/Subscription wrappers and window settings for iced 0.14. Everything else
+# in the crate is toolkit-neutral (plain fns, futures, threads).
+iced = ["dep:iced", "dep:png", "dep:raw-window-handle"]
+# File dialogs through xdg-desktop-portal (no GTK at build or run time).
+dialogs = ["dep:ashpd"]
+# org.freedesktop.Notifications over the session bus.
+notify = ["dep:zbus"]
+# Sidecar supervisor for apps that bundle a Go server. Off by default: a native
+# app does local work in-process. Its code and tests always build under
+# `cargo test`, see lib.rs.
+supervisor = []
+
 [dependencies]
 bato-theme = { path = "../bato-theme" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# Blocking HTTP on worker threads. rustls with the platform verifier, so the
+# system trust store (which holds the mkcert root for https://*.bato.lan)
+# decides. `_ring` is ureq's crypto-provider switch without the webpki-roots
+# bundle that its `rustls` feature adds.
+ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier"] }
+
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"], optional = true }
+zbus = { version = "5", default-features = false, features = ["async-io"], optional = true }
+
+# Same version and features as bato-kit (the PoC's list plus x11), so the
+# workspace never builds two feature sets of iced.
+iced = { version = "=0.14.0", default-features = false, features = ["wgpu", "tiny-skia", "web-colors", "wayland", "x11", "thread-pool", "svg", "advanced"], optional = true }
+png = { version = "0.17", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
+[dev-dependencies]
+futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "p2p"] }
