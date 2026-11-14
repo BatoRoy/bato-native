@@ -82,6 +82,26 @@ the PoC, publishes to bato as `type: "desktop"`, installs with `bato install`, a
 
 **Checkpoint 1:** scaffold a throwaway native app, publish it, `bato install` it on the desktop and laptop, update it.
 
+#### Phase 1 status (2026-11-14)
+
+Done:
+
+| Step | Result | Where |
+|---|---|---|
+| 1.1 | bato-native created, tagged `v0.1.0` | `ddd77bb` |
+| 1.2 | Kit + gallery done (130 tests). The gallery replaces poc/iced and matches it pixel for pixel. FreeType is bundled. | — |
+| 1.3 | bato-shell | — |
+| 1.4 | `app-client-native/`, `new-app.sh --native`, Makefile, CI | template branch `native-poc` |
+| 1.5 | Fidelity harness | `tools/compare` + 39 Electron references |
+| 1.6 | BatoGit Ship infers native clients | BatoGit branch `native-client-ship` |
+| 1.6 | Skill docs | bato branch `native-flavor-docs` |
+
+Gaps carried into Phase 2:
+- About has no "Restart to update" button. A finished update shows a toast, and the next launch runs the new version.
+- No X11 window icon.
+- File dialogs open unparented on Wayland (needs an xdg-foreign export).
+- Fresh-clone CI hasn't run on GitHub yet.
+
 ### Phase 2: Interaction core (F2, 3 agents in parallel)
 
 | Agent | Scope (inventory INF ids) |
