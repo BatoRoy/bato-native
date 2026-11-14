@@ -57,7 +57,9 @@ pub fn config_dir(slug: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"));
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
+        });
     base.join(slug)
 }
 
@@ -109,7 +111,12 @@ pub fn backend_url(settings: &Settings) -> String {
     std::env::var("BATO_BACKEND_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| settings.backend_url.clone().filter(|s| !s.trim().is_empty()))
+        .or_else(|| {
+            settings
+                .backend_url
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+        })
         .unwrap_or_else(|| "http://localhost:8080".into())
         .trim()
         .trim_end_matches('/')
@@ -125,7 +132,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bato-theme-test-{}", std::process::id()));
         let path = dir.join("settings.json");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(&path, r#"{"backendUrl":"http://10.0.0.5:42100","electronOnly":{"x":1},"theme":"dim"}"#).unwrap();
+        fs::write(
+            &path,
+            r#"{"backendUrl":"http://10.0.0.5:42100","electronOnly":{"x":1},"theme":"dim"}"#,
+        )
+        .unwrap();
 
         let mut s = Settings::load_from(&path);
         assert_eq!(s.theme, ThemeId::Dim);

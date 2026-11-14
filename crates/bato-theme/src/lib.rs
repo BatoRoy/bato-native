@@ -52,7 +52,12 @@ impl Rgb {
 
     /// This color at `alpha`, for toolkits that composite themselves.
     pub fn alpha(self, a: f32) -> Rgba {
-        Rgba { r: self.r, g: self.g, b: self.b, a }
+        Rgba {
+            r: self.r,
+            g: self.g,
+            b: self.b,
+            a,
+        }
     }
 
     /// 0xRRGGBB, handy for toolkits that take a packed integer.
@@ -62,7 +67,11 @@ impl Rgb {
 
     /// Channels as 0.0..=1.0 floats.
     pub fn to_f32(self) -> [f32; 3] {
-        [self.r as f32 / 255.0, self.g as f32 / 255.0, self.b as f32 / 255.0]
+        [
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+        ]
     }
 }
 
@@ -92,7 +101,11 @@ fn clamp(n: f64) -> u8 {
 }
 
 fn map(c: Rgb, f: impl Fn(f64) -> f64) -> Rgb {
-    Rgb::new(clamp(f(c.r as f64)), clamp(f(c.g as f64)), clamp(f(c.b as f64)))
+    Rgb::new(
+        clamp(f(c.r as f64)),
+        clamp(f(c.g as f64)),
+        clamp(f(c.b as f64)),
+    )
 }
 
 pub fn mix_white(c: Rgb, t: f64) -> Rgb {
@@ -116,7 +129,11 @@ pub fn blend(fg: Rgb, a: f64, bg: Rgb) -> Rgb {
 pub fn luminance(c: Rgb) -> f64 {
     let ch = |v: u8| {
         let s = v as f64 / 255.0;
-        if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+        if s <= 0.03928 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
     };
     0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b)
 }
@@ -131,11 +148,19 @@ pub fn contrast(a: Rgb, b: Rgb) -> f64 {
 // ─── OKLCH ──────────────────────────────────────────────────────────────────
 
 fn to_linear(v: f64) -> f64 {
-    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 fn to_gamma(v: f64) -> f64 {
-    if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    if v <= 0.0031308 {
+        12.92 * v
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 /// (chroma, hue°) of a color in OKLCH.
@@ -193,16 +218,34 @@ impl ThemeId {
     fn neutrals(self) -> [[f64; 2]; 8] {
         match self {
             ThemeId::Dark => [
-                [0.192, 0.0045], [0.215, 0.0062], [0.233, 0.008], [0.262, 0.009],
-                [0.308, 0.011], [0.9674, 0.0013], [0.7118, 0.0129], [0.655, 0.0152],
+                [0.192, 0.0045],
+                [0.215, 0.0062],
+                [0.233, 0.008],
+                [0.262, 0.009],
+                [0.308, 0.011],
+                [0.9674, 0.0013],
+                [0.7118, 0.0129],
+                [0.655, 0.0152],
             ],
             ThemeId::Dim => [
-                [0.2238, 0.0077], [0.2499, 0.0094], [0.2711, 0.011], [0.298, 0.0115],
-                [0.3511, 0.012], [0.9674, 0.0013], [0.7405, 0.0114], [0.68, 0.015],
+                [0.2238, 0.0077],
+                [0.2499, 0.0094],
+                [0.2711, 0.011],
+                [0.298, 0.0115],
+                [0.3511, 0.012],
+                [0.9674, 0.0013],
+                [0.7405, 0.0114],
+                [0.68, 0.015],
             ],
             ThemeId::Light => [
-                [0.905, 0.003], [0.935, 0.0025], [0.935, 0.0025], [0.968, 0.0015],
-                [0.845, 0.005], [0.2103, 0.0059], [0.4, 0.0146], [0.475, 0.0138],
+                [0.905, 0.003],
+                [0.935, 0.0025],
+                [0.935, 0.0025],
+                [0.968, 0.0015],
+                [0.845, 0.005],
+                [0.2103, 0.0059],
+                [0.4, 0.0146],
+                [0.475, 0.0138],
             ],
         }
     }
@@ -220,8 +263,26 @@ pub struct Shadow {
     pub inset: bool,
 }
 
-const fn sh(x: f32, y: f32, blur: f32, spread: f32, r: u8, g: u8, b: u8, a: f32, inset: bool) -> Shadow {
-    Shadow { x, y, blur, spread, color: Rgba { r, g, b, a }, inset }
+#[allow(clippy::too_many_arguments)] // mirrors the CSS box-shadow tuple
+const fn sh(
+    x: f32,
+    y: f32,
+    blur: f32,
+    spread: f32,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: f32,
+    inset: bool,
+) -> Shadow {
+    Shadow {
+        x,
+        y,
+        blur,
+        spread,
+        color: Rgba { r, g, b, a },
+        inset,
+    }
 }
 
 /// Accent presets offered in App Options (label, hex).
@@ -302,7 +363,11 @@ fn warm_damping(hue: f64) -> f64 {
 
 fn ink_for(base: Rgb, hover: Rgb) -> Rgb {
     let score = |ink| contrast(ink, base).min(contrast(ink, hover));
-    if score(INK_LIGHT) >= score(INK_DARK) { INK_LIGHT } else { INK_DARK }
+    if score(INK_LIGHT) >= score(INK_DARK) {
+        INK_LIGHT
+    } else {
+        INK_DARK
+    }
 }
 
 fn hover_of(c: Rgb, white_ink: bool, is_light: bool) -> Rgb {
@@ -319,7 +384,11 @@ fn fill_for(accent: Rgb, ink: Rgb, is_light: bool, max_nudge: usize) -> Option<(
     let white_ink = ink == INK_LIGHT;
     (0..=max_nudge).find_map(|i| {
         let t = i as f64 / 100.0;
-        let fill = if white_ink { mix_black(accent, t) } else { mix_white(accent, t) };
+        let fill = if white_ink {
+            mix_black(accent, t)
+        } else {
+            mix_white(accent, t)
+        };
         let hover = hover_of(fill, white_ink, is_light);
         (contrast(ink, fill).min(contrast(ink, hover)) >= FILL_TARGET).then_some((fill, hover, ink))
     })
@@ -337,8 +406,17 @@ fn readable_fill(accent: Rgb, is_light: bool) -> (Rgb, Rgb, Rgb) {
 fn readable_text(accent: Rgb, is_light: bool, against: &[Rgb]) -> Rgb {
     for i in 0..=100 {
         let t = i as f64 / 100.0;
-        let c = if is_light { mix_black(accent, t) } else { mix_white(accent, t) };
-        if against.iter().map(|bg| contrast(c, *bg)).fold(f64::INFINITY, f64::min) >= TEXT_TARGET {
+        let c = if is_light {
+            mix_black(accent, t)
+        } else {
+            mix_white(accent, t)
+        };
+        if against
+            .iter()
+            .map(|bg| contrast(c, *bg))
+            .fold(f64::INFINITY, f64::min)
+            >= TEXT_TARGET
+        {
             return c;
         }
     }
@@ -351,7 +429,13 @@ pub fn readable_text_for(color: Rgb, p: &Palette) -> Rgb {
     readable_text(
         color,
         p.is_light(),
-        &[p.bg, p.surface, p.card, blend(color, 0.2, p.bg), blend(color, 0.2, p.card)],
+        &[
+            p.bg,
+            p.surface,
+            p.card,
+            blend(color, 0.2, p.bg),
+            blend(color, 0.2, p.card),
+        ],
     )
 }
 
@@ -360,7 +444,9 @@ pub fn palette(theme: ThemeId, accent: Rgb) -> Palette {
     let is_light = theme.is_light();
     let (c, h) = to_oklch(accent);
     let damp = warm_damping(h);
-    let n = theme.neutrals().map(|[l, ch]| from_oklch(l, (ch * damp).min(c), h));
+    let n = theme
+        .neutrals()
+        .map(|[l, ch]| from_oklch(l, (ch * damp).min(c), h));
     let [bg, surface, card, raised, border, text, subtext, muted] = n;
 
     let (fill, hover, ink) = readable_fill(accent, is_light);
@@ -374,9 +460,30 @@ pub fn palette(theme: ThemeId, accent: Rgb) -> Palette {
 
     let hex = |s| Rgb::hex(s).unwrap();
     let (green, red, yellow, control, line, line_strong) = match theme {
-        ThemeId::Dark => ("#34d399", "#f87171", "#fbbf24", "#6a6a74", Rgb::WHITE.alpha(0.07), Rgb::WHITE.alpha(0.11)),
-        ThemeId::Dim => ("#34d399", "#fb8a8a", "#fbbf24", "#75757f", Rgb::WHITE.alpha(0.08), Rgb::WHITE.alpha(0.13)),
-        ThemeId::Light => ("#036644", "#ae1919", "#7c5000", "#7b7b84", Rgb::BLACK.alpha(0.07), Rgb::BLACK.alpha(0.12)),
+        ThemeId::Dark => (
+            "#34d399",
+            "#f87171",
+            "#fbbf24",
+            "#6a6a74",
+            Rgb::WHITE.alpha(0.07),
+            Rgb::WHITE.alpha(0.11),
+        ),
+        ThemeId::Dim => (
+            "#34d399",
+            "#fb8a8a",
+            "#fbbf24",
+            "#75757f",
+            Rgb::WHITE.alpha(0.08),
+            Rgb::WHITE.alpha(0.13),
+        ),
+        ThemeId::Light => (
+            "#036644",
+            "#ae1919",
+            "#7c5000",
+            "#7b7b84",
+            Rgb::BLACK.alpha(0.07),
+            Rgb::BLACK.alpha(0.12),
+        ),
     };
 
     let (shadow_sm, shadow_md, shadow_lg) = match theme {
@@ -387,7 +494,10 @@ pub fn palette(theme: ThemeId, accent: Rgb) -> Palette {
                 sh(0., 8., 24., -8., 0, 0, 0, 0.50, false),
                 sh(0., 1., 0., 0., 255, 255, 255, 0.03, true),
             ],
-            vec![sh(0., 24., 64., -12., 0, 0, 0, 0.70, false), sh(0., 0., 0., 1., 255, 255, 255, 0.06, false)],
+            vec![
+                sh(0., 24., 64., -12., 0, 0, 0, 0.70, false),
+                sh(0., 0., 0., 1., 255, 255, 255, 0.06, false),
+            ],
         ),
         ThemeId::Dim => (
             vec![sh(0., 1., 2., 0., 0, 0, 0, 0.35, false)],
@@ -396,12 +506,21 @@ pub fn palette(theme: ThemeId, accent: Rgb) -> Palette {
                 sh(0., 8., 24., -8., 0, 0, 0, 0.40, false),
                 sh(0., 1., 0., 0., 255, 255, 255, 0.04, true),
             ],
-            vec![sh(0., 24., 64., -12., 0, 0, 0, 0.70, false), sh(0., 0., 0., 1., 255, 255, 255, 0.06, false)],
+            vec![
+                sh(0., 24., 64., -12., 0, 0, 0, 0.70, false),
+                sh(0., 0., 0., 1., 255, 255, 255, 0.06, false),
+            ],
         ),
         ThemeId::Light => (
             vec![sh(0., 1., 2., 0., 16, 16, 24, 0.06, false)],
-            vec![sh(0., 1., 2., 0., 16, 16, 24, 0.05, false), sh(0., 4., 12., -4., 16, 16, 24, 0.06, false)],
-            vec![sh(0., 24., 48., -12., 16, 16, 24, 0.20, false), sh(0., 0., 0., 1., 0, 0, 0, 0.06, false)],
+            vec![
+                sh(0., 1., 2., 0., 16, 16, 24, 0.05, false),
+                sh(0., 4., 12., -4., 16, 16, 24, 0.06, false),
+            ],
+            vec![
+                sh(0., 24., 48., -12., 16, 16, 24, 0.20, false),
+                sh(0., 0., 0., 1., 0, 0, 0, 0.06, false),
+            ],
         ),
     };
 
@@ -443,16 +562,38 @@ mod tests {
     fn neutrals_match_css_literals_at_base_hue() {
         // The CSS literals are the neutrals at OKLCH hue 285 (full chroma).
         let css = [
-            (ThemeId::Dark, ["#141416", "#19191c", "#1d1d21", "#242429", "#2f2f35", "#f4f4f5", "#a1a1aa", "#8f909a"]),
-            (ThemeId::Dim, ["#1b1b1f", "#212126", "#26262c", "#2c2d33", "#3a3a41", "#f4f4f5", "#aaaab2", "#9797a1"]),
-            (ThemeId::Light, ["#dfdfe1", "#e9e9eb", "#e9e9eb", "#f4f4f5", "#cccccf", "#18181b", "#47474f", "#5b5b64"]),
+            (
+                ThemeId::Dark,
+                [
+                    "#141416", "#19191c", "#1d1d21", "#242429", "#2f2f35", "#f4f4f5", "#a1a1aa",
+                    "#8f909a",
+                ],
+            ),
+            (
+                ThemeId::Dim,
+                [
+                    "#1b1b1f", "#212126", "#26262c", "#2c2d33", "#3a3a41", "#f4f4f5", "#aaaab2",
+                    "#9797a1",
+                ],
+            ),
+            (
+                ThemeId::Light,
+                [
+                    "#dfdfe1", "#e9e9eb", "#e9e9eb", "#f4f4f5", "#cccccf", "#18181b", "#47474f",
+                    "#5b5b64",
+                ],
+            ),
         ];
         for (theme, lits) in css {
             for (spec, lit) in theme.neutrals().iter().zip(lits) {
                 let got = from_oklch(spec[0], spec[1], 285.0);
                 let want = h(lit);
                 for (g, w) in [(got.r, want.r), (got.g, want.g), (got.b, want.b)] {
-                    assert!((g as i32 - w as i32).abs() <= 2, "{theme:?} {lit} got {}", got.to_hex());
+                    assert!(
+                        (g as i32 - w as i32).abs() <= 2,
+                        "{theme:?} {lit} got {}",
+                        got.to_hex()
+                    );
                 }
             }
         }
@@ -461,15 +602,53 @@ mod tests {
     #[test]
     fn runtime_neutrals_match_spec_examples() {
         let cases = [
-            (ThemeId::Dark, "#8b5cf6", ["#141416", "#19191c", "#1e1d21", "#242428", "#302f35", "#f4f4f5", "#a2a1a9", "#918f99"]),
-            (ThemeId::Dark, "#d97706", ["#151413", "#1a1918", "#1f1d1c", "#262423", "#312f2e", "#f4f4f4", "#a4a19f", "#93908d"]),
-            (ThemeId::Dark, "#2563eb", ["#131416", "#18191c", "#1c1e21", "#222529", "#2d3036", "#f4f4f5", "#9ea2aa", "#8c919a"]),
-            (ThemeId::Dim, "#8b5cf6", ["#1b1b1f", "#222126", "#27262c", "#2d2c33", "#3b3a40", "#f4f4f5", "#abaab1", "#9897a1"]),
-            (ThemeId::Light, "#8b5cf6", ["#dfdfe1", "#e9e9eb", "#e9e9eb", "#f4f4f5", "#cccbcf", "#18181b", "#48464f", "#5c5b63"]),
+            (
+                ThemeId::Dark,
+                "#8b5cf6",
+                [
+                    "#141416", "#19191c", "#1e1d21", "#242428", "#302f35", "#f4f4f5", "#a2a1a9",
+                    "#918f99",
+                ],
+            ),
+            (
+                ThemeId::Dark,
+                "#d97706",
+                [
+                    "#151413", "#1a1918", "#1f1d1c", "#262423", "#312f2e", "#f4f4f4", "#a4a19f",
+                    "#93908d",
+                ],
+            ),
+            (
+                ThemeId::Dark,
+                "#2563eb",
+                [
+                    "#131416", "#18191c", "#1c1e21", "#222529", "#2d3036", "#f4f4f5", "#9ea2aa",
+                    "#8c919a",
+                ],
+            ),
+            (
+                ThemeId::Dim,
+                "#8b5cf6",
+                [
+                    "#1b1b1f", "#222126", "#27262c", "#2d2c33", "#3b3a40", "#f4f4f5", "#abaab1",
+                    "#9897a1",
+                ],
+            ),
+            (
+                ThemeId::Light,
+                "#8b5cf6",
+                [
+                    "#dfdfe1", "#e9e9eb", "#e9e9eb", "#f4f4f5", "#cccbcf", "#18181b", "#48464f",
+                    "#5c5b63",
+                ],
+            ),
         ];
         for (theme, accent, want) in cases {
             let p = palette(theme, h(accent));
-            let got = [p.bg, p.surface, p.card, p.raised, p.border, p.text, p.subtext, p.muted].map(Rgb::to_hex);
+            let got = [
+                p.bg, p.surface, p.card, p.raised, p.border, p.text, p.subtext, p.muted,
+            ]
+            .map(Rgb::to_hex);
             assert_eq!(got, want, "{theme:?} {accent}");
         }
     }
@@ -478,19 +657,110 @@ mod tests {
     fn accent_sets_match_spec() {
         // (theme, raw accent, fill, hover, ink, bright)
         let cases = [
-            (ThemeId::Dark, "#8b5cf6", "#8558ec", "#784fd4", "#ffffff", "#a783f8"),
-            (ThemeId::Dark, "#7c3aed", "#7c3aed", "#7034d5", "#ffffff", "#a77bf3"),
-            (ThemeId::Dark, "#2563eb", "#2563eb", "#2159d4", "#ffffff", "#6993f1"),
-            (ThemeId::Dark, "#0891b2", "#07819e", "#06748e", "#ffffff", "#32a4bf"),
-            (ThemeId::Dark, "#059669", "#05875f", "#057a56", "#ffffff", "#32a984"),
-            (ThemeId::Dark, "#d97706", "#b26205", "#a05805", "#ffffff", "#dc8117"),
-            (ThemeId::Dark, "#e11d48", "#e11d48", "#cb1a41", "#ffffff", "#eb6884"),
-            (ThemeId::Dark, "#db2777", "#db2777", "#c5236b", "#ffffff", "#e66aa1"),
-            (ThemeId::Dark, "#eab308", "#eab308", "#edbc26", "#060609", "#eab308"),
-            (ThemeId::Dim, "#8b5cf6", "#8558ec", "#784fd4", "#ffffff", "#ae8df9"),
-            (ThemeId::Light, "#8b5cf6", "#8558ec", "#784fd4", "#ffffff", "#5d3ea5"),
-            (ThemeId::Light, "#2563eb", "#2563eb", "#2159d4", "#ffffff", "#1c4ab0"),
-            (ThemeId::Light, "#eab308", "#eab308", "#d7a507", "#060609", "#6e5404"),
+            (
+                ThemeId::Dark,
+                "#8b5cf6",
+                "#8558ec",
+                "#784fd4",
+                "#ffffff",
+                "#a783f8",
+            ),
+            (
+                ThemeId::Dark,
+                "#7c3aed",
+                "#7c3aed",
+                "#7034d5",
+                "#ffffff",
+                "#a77bf3",
+            ),
+            (
+                ThemeId::Dark,
+                "#2563eb",
+                "#2563eb",
+                "#2159d4",
+                "#ffffff",
+                "#6993f1",
+            ),
+            (
+                ThemeId::Dark,
+                "#0891b2",
+                "#07819e",
+                "#06748e",
+                "#ffffff",
+                "#32a4bf",
+            ),
+            (
+                ThemeId::Dark,
+                "#059669",
+                "#05875f",
+                "#057a56",
+                "#ffffff",
+                "#32a984",
+            ),
+            (
+                ThemeId::Dark,
+                "#d97706",
+                "#b26205",
+                "#a05805",
+                "#ffffff",
+                "#dc8117",
+            ),
+            (
+                ThemeId::Dark,
+                "#e11d48",
+                "#e11d48",
+                "#cb1a41",
+                "#ffffff",
+                "#eb6884",
+            ),
+            (
+                ThemeId::Dark,
+                "#db2777",
+                "#db2777",
+                "#c5236b",
+                "#ffffff",
+                "#e66aa1",
+            ),
+            (
+                ThemeId::Dark,
+                "#eab308",
+                "#eab308",
+                "#edbc26",
+                "#060609",
+                "#eab308",
+            ),
+            (
+                ThemeId::Dim,
+                "#8b5cf6",
+                "#8558ec",
+                "#784fd4",
+                "#ffffff",
+                "#ae8df9",
+            ),
+            (
+                ThemeId::Light,
+                "#8b5cf6",
+                "#8558ec",
+                "#784fd4",
+                "#ffffff",
+                "#5d3ea5",
+            ),
+            (
+                ThemeId::Light,
+                "#2563eb",
+                "#2563eb",
+                "#2159d4",
+                "#ffffff",
+                "#1c4ab0",
+            ),
+            (
+                ThemeId::Light,
+                "#eab308",
+                "#eab308",
+                "#d7a507",
+                "#060609",
+                "#6e5404",
+            ),
         ];
         for (theme, raw, fill, hover, ink, bright) in cases {
             let p = palette(theme, h(raw));

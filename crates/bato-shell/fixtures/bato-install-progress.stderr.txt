@@ -1,0 +1,5 @@
+  /home/user/.local/bin/batoshellfixture → /home/user/.local/share/bato/apps/batoshellfixture/batoshellfixture
+  /home/user/.local/share/applications/bato-batoshellfixture.desktop
+✓ installed batoshellfixture v1.2.3 (1.0 MB)
+  /home/user/.local/share/bato/apps/batoshellfixture
+! /home/user/.local/bin is not on your PATH — add it to run batoshellfixture

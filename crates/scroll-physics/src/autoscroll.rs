@@ -69,13 +69,17 @@ impl AutoscrollConfig {
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
-            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"));
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
+            });
         base.join("bato").join("batoscroll.json")
     }
 
     /// Never fails: a missing or corrupt file yields defaults.
     pub fn load() -> Self {
-        std::fs::read_to_string(Self::path()).map(|s| Self::from_json(&s)).unwrap_or_default()
+        std::fs::read_to_string(Self::path())
+            .map(|s| Self::from_json(&s))
+            .unwrap_or_default()
     }
 
     pub fn from_json(s: &str) -> Self {
@@ -98,7 +102,10 @@ impl AutoscrollConfig {
             indicator_size: num("indicatorSize", 20.0, 160.0, d.indicator_size),
             move_threshold: num("moveThreshold", 2.0, 100.0, d.move_threshold),
             smoothing_ms: num("smoothing", 0.0, 200.0, d.smoothing_ms),
-            invert: v.get("invert").and_then(|x| x.as_bool()).unwrap_or(d.invert),
+            invert: v
+                .get("invert")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(d.invert),
         }
     }
 
@@ -195,7 +202,12 @@ impl Autoscroll {
     pub fn direction(&self) -> Direction {
         let vx = self.config.axis_velocity(self.cursor.0 - self.origin.0);
         let vy = self.config.axis_velocity(self.cursor.1 - self.origin.1);
-        Direction { up: vy < 0.0, down: vy > 0.0, left: vx < 0.0, right: vx > 0.0 }
+        Direction {
+            up: vy < 0.0,
+            down: vy > 0.0,
+            left: vx < 0.0,
+            right: vx > 0.0,
+        }
     }
 
     /// Middle button pressed on an eligible spot. Returns true if it engaged
@@ -280,12 +292,19 @@ impl Autoscroll {
             return (0.0, 0.0);
         }
         let last = self.last.replace(now).unwrap_or(now);
-        let dt = now.saturating_duration_since(last).as_secs_f64().min(MAX_DT);
+        let dt = now
+            .saturating_duration_since(last)
+            .as_secs_f64()
+            .min(MAX_DT);
 
         let tx = self.config.axis_velocity(self.cursor.0 - self.origin.0) as f64;
         let ty = self.config.axis_velocity(self.cursor.1 - self.origin.1) as f64;
         let tau = self.config.smoothing_ms as f64 / 1000.0;
-        let alpha = if tau > 0.0 { 1.0 - (-dt / tau).exp() } else { 1.0 };
+        let alpha = if tau > 0.0 {
+            1.0 - (-dt / tau).exp()
+        } else {
+            1.0
+        };
         self.vel.0 += (tx - self.vel.0) * alpha;
         self.vel.1 += (ty - self.vel.1) * alpha;
         if self.vel.0.abs() < VEL_EPSILON {
@@ -317,8 +336,13 @@ mod tests {
 
     #[test]
     fn config_defaults_and_clamping() {
-        assert_eq!(AutoscrollConfig::from_json("not json"), AutoscrollConfig::default());
-        let c = AutoscrollConfig::from_json(r#"{"deadZone": 999, "sensitivity": 0, "smoothing": "x", "invert": true}"#);
+        assert_eq!(
+            AutoscrollConfig::from_json("not json"),
+            AutoscrollConfig::default()
+        );
+        let c = AutoscrollConfig::from_json(
+            r#"{"deadZone": 999, "sensitivity": 0, "smoothing": "x", "invert": true}"#,
+        );
         assert_eq!(c.dead_zone, 300.0);
         assert_eq!(c.sensitivity, 1.0);
         assert_eq!(c.smoothing_ms, 45.0);
@@ -367,7 +391,13 @@ mod tests {
         let mut a = Autoscroll::default();
         a.press_middle(0.0, 0.0, t);
         a.pointer_moved(0.0, 30.0); // target 300 px/s down
-        assert_eq!(a.direction(), Direction { down: true, ..Default::default() });
+        assert_eq!(
+            a.direction(),
+            Direction {
+                down: true,
+                ..Default::default()
+            }
+        );
         let mut total = 0.0;
         let mut now = t;
         for _ in 0..120 {
@@ -405,7 +435,10 @@ mod tests {
     #[test]
     fn long_frame_gaps_are_clamped() {
         let t = Instant::now();
-        let mut a = Autoscroll::new(AutoscrollConfig { smoothing_ms: 0.0, ..Default::default() });
+        let mut a = Autoscroll::new(AutoscrollConfig {
+            smoothing_ms: 0.0,
+            ..Default::default()
+        });
         a.press_middle(0.0, 0.0, t);
         a.pointer_moved(0.0, 110.0); // 1500 px/s
         let (_, dy) = a.tick(t + Duration::from_secs(2), 1.0);
