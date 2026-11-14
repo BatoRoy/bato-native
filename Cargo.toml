@@ -25,7 +25,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 4
 strip = true
-panic = "abort"
+# panic = "unwind" (the default) on purpose: the frame's error boundary then
+# shows React's "Something went wrong · Reload" fallback and keeps the app
+# state instead of the window disappearing (user decision, Phase 3).
 
 # Keep the cache small (CI) and debug builds fast.
 [profile.dev]

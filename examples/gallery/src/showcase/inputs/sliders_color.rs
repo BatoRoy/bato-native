@@ -2,9 +2,10 @@
 //! ColorPicker (`space-y-5`; each slider under a 12 px `subtext` caption
 //! with `mb-2`).
 //!
-//! The ColorPicker belongs to batch B2: see [`color_picker_slot`].
+//! The ColorPicker is batch B2's `bato_kit::inputs::color_picker`.
 
 use bato_kit::iced::widget::column;
+use bato_kit::inputs::color_picker::color_picker;
 use bato_kit::inputs::slider::{Volume, VolumeEvent, range_slider, slider, volume_control};
 use bato_kit::prelude::*;
 
@@ -16,6 +17,8 @@ pub struct State {
     range: (f64, f64),
     media: Volume,
     media_vol: f64,
+    /// React's `useState('#7c3aed')`.
+    color: String,
 }
 
 impl Default for State {
@@ -25,6 +28,7 @@ impl Default for State {
             range: (20.0, 80.0),
             media: Volume::default(),
             media_vol: 40.0,
+            color: "#7c3aed".into(),
         }
     }
 }
@@ -34,6 +38,7 @@ pub enum Msg {
     Vol(f64),
     Range((f64, f64)),
     Media(VolumeEvent),
+    Color(String),
 }
 
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
@@ -41,6 +46,7 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
         Msg::Vol(v) => state.vol = v,
         Msg::Range(r) => state.range = r,
         Msg::Media(ev) => state.media.update(ev, &mut state.media_vol, 0.0, 100.0),
+        Msg::Color(c) => state.color = c,
     }
     None
 }
@@ -51,23 +57,6 @@ fn caption<'a>(cx: &Ctx, text: String, control: El<'a, Msg>) -> El<'a, Msg> {
         vgap(8.0),
         control
     ]
-    .into()
-}
-
-// ── Slot: ColorPicker (batch B2) ────────────────────────────────────────
-//
-// B2 replaces the body of this function with the real control, e.g.
-//     color_picker(cx, &state.color, Msg::Color).label("Color")
-// with `color: String` = "#7c3aed" added to `State` (React's
-// `useState('#7c3aed')`). Until then it is a neutral box of the same size:
-// the Field label (16) + gap (6) + the 38 px trigger = 60 px, full width.
-fn color_picker_slot<'a>(cx: &Ctx) -> El<'a, Msg> {
-    container(
-        label("ColorPicker: batch B2", 12.0, 16.0).color(c(cx.p().muted)),
-    )
-    .width(Length::Fill)
-    .height(60)
-    .center_y(60)
     .into()
 }
 
@@ -96,7 +85,7 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
             .id("b1:volume")
             .into(),
         ),
-        color_picker_slot(&on),
+        El::from(color_picker(&on, &state.color, Msg::Color).label("Color")),
     ]
     .spacing(20);
     card(cx, "Sliders & color").body(body).into()

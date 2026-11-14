@@ -44,8 +44,9 @@ pub enum Msg {
     Browse,
     Picked(Vec<PathBuf>),
     Dropped(Vec<PathBuf>),
-    /// `BATO_SELFTEST=boundary` only (no button: with `panic = "abort"`, the
-    /// release profile, a panic ends the process).
+    /// `BATO_SELFTEST=boundary` only: a widget that panics, to show the
+    /// error boundary's fallback (needs `panic = "unwind"`, the release
+    /// profile's setting).
     Crash,
 }
 

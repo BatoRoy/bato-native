@@ -2,13 +2,17 @@
 //! RadioGroup, the native-input row (index.css theming), the disabled
 //! states, and the FileDropzone (`space-y-4`).
 //!
-//! The FileDropzone belongs to batch B3: see [`file_dropzone_slot`].
+//! The FileDropzone is batch B3's `bato_kit::inputs::file_dropzone`: click
+//! opens the portal file chooser, desktop drops arrive directly.
 
 use bato_kit::iced::widget::{column, row};
+use bato_kit::inputs::file_dropzone;
 use bato_kit::inputs::toggles::{native_checkbox, native_radio, native_radio_group, radio_group};
 use bato_kit::prelude::*;
 
-use crate::showcase::Effect;
+use std::path::PathBuf;
+
+use crate::showcase::{Effect, Reply};
 
 #[derive(Debug)]
 pub struct State {
@@ -43,6 +47,11 @@ pub enum Msg {
     Radio(char),
     Native(usize, bool),
     NativeRadio(usize),
+    /// FileDropzone clicked: open the file chooser.
+    Browse,
+    /// Paths chosen in the file chooser, or dropped from the desktop
+    /// (React's `onPaths` / `onFiles`: both toast the count).
+    Files(Vec<PathBuf>),
     /// The inert demo controls.
     Ignore,
 }
@@ -59,6 +68,21 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
             }
         }
         Msg::NativeRadio(i) => state.native_radio = i,
+        Msg::Browse => {
+            return Some(Effect::OpenFiles {
+                multiple: true,
+                reply: Reply(|paths| {
+                    crate::showcase::Msg::Inputs(super::Msg::TogglesUpload(Msg::Files(paths)))
+                }),
+            });
+        }
+        Msg::Files(paths) if paths.is_empty() => {}
+        Msg::Files(paths) => {
+            return Some(Effect::Toast(
+                format!("{} file(s) selected", paths.len()),
+                Tone::Success,
+            ));
+        }
         Msg::Ignore => {}
     }
     None
@@ -78,24 +102,6 @@ fn divider<'a>(cx: &Ctx, text: &str) -> El<'a, Msg> {
     ]
     .spacing(12)
     .into()
-}
-
-// ── Slot: FileDropzone (batch B3) ───────────────────────────────────────
-//
-// B3 replaces the body of this function with the real control, e.g.
-//     file_dropzone(cx).hint("PNG, JPG up to 10MB")
-//         .on_files(|f| Msg::Files(f.len())).on_paths(|p| Msg::Paths(p.len()))
-// whose callbacks toast "N file(s) selected" / "N path(s) selected"
-// (`Effect::Toast(…, Tone::Success)`). Until then it is a neutral box of the
-// same size: 2 px borders + py-8 + the 40 px icon + gap 8 + 20 px text +
-// gap 8 + the 16 px hint = 160 px, full width.
-fn file_dropzone_slot<'a>(cx: &Ctx) -> El<'a, Msg> {
-    container(label("FileDropzone: batch B3", 12.0, 16.0).color(c(cx.p().muted)))
-        .width(Length::Fill)
-        .height(160)
-        .center_x(Length::Fill)
-        .center_y(160)
-        .into()
 }
 
 pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
@@ -153,7 +159,12 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
         container(native).id("b1:native"),
         divider(&on, "disabled"),
         disabled,
-        file_dropzone_slot(&on),
+        El::from(
+            file_dropzone(&on)
+                .hint("PNG, JPG up to 10MB")
+                .on_browse(Msg::Browse)
+                .on_drop(Msg::Files)
+        ),
     ]
     .spacing(16);
     card(cx, "Toggles & file upload").body(body).into()
