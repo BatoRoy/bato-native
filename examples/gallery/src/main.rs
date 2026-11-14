@@ -242,12 +242,7 @@ impl App {
 }
 
 fn main() -> iced::Result {
-    // wgpu probes every backend by default; the GL probe loads Mesa (~45 MB
-    // PSS) only to drop it, and the backdrop blur needs Vulkan.
-    if std::env::var_os("WGPU_BACKEND").is_none() {
-        // SAFETY: first thing in main, single-threaded.
-        unsafe { std::env::set_var("WGPU_BACKEND", "vulkan") };
-    }
+    bato_shell::gpu::prefer_vulkan();
     hooks::mark("main");
     let view = BootView::from_env();
     fonts::setup();

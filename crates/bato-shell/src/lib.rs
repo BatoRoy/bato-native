@@ -54,6 +54,7 @@
 //! ```
 
 pub mod backend;
+pub mod gpu;
 pub mod hooks;
 pub mod http;
 pub mod identity;
