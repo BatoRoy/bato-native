@@ -67,6 +67,8 @@ pub mod toast;
 pub mod data;
 pub mod date;
 pub mod dnd;
+#[cfg(feature = "editor")]
+pub mod editor;
 pub mod feedback;
 pub mod inputs;
 pub mod overlay;

@@ -106,6 +106,12 @@ impl FtRaster {
         if unsafe { (*slot).format } != ft::FT_GLYPH_FORMAT_OUTLINE {
             return None;
         }
+        // Synthetic italic (no italic face, e.g. a CodeMirror comment in a
+        // monospace font): Skia's fake italic shears x by 1/4 of y.
+        if key.flags.contains(crate::CacheKeyFlags::FAKE_ITALIC) {
+            let m = ft::FT_Matrix { xx: 0x10000, xy: 0x4000, yx: 0, yy: 0x10000 };
+            unsafe { ft::FT_Outline_Transform(&(*slot).outline, &m) };
+        }
         let dx = (key.x_bin.as_float() * 64.0).round() as ft::FT_Pos;
         let dy = (key.y_bin.as_float() * 64.0).round() as ft::FT_Pos;
         unsafe { ft::FT_Outline_Translate(&(*slot).outline, dx, -dy) };
