@@ -76,7 +76,12 @@ impl Bezier {
     /// with the first control point scaled so the curve starts at `slope`.
     fn ease_in_out_with_slope(slope: f64) -> Self {
         let slope = slope.clamp(-1000.0, 1000.0);
-        Self { x1: 0.42, y1: 0.42 * slope, x2: 0.58, y2: 1.0 }
+        Self {
+            x1: 0.42,
+            y1: 0.42 * slope,
+            x2: 0.58,
+            y2: 1.0,
+        }
     }
 
     fn coord(p1: f64, p2: f64, s: f64) -> f64 {
@@ -112,7 +117,11 @@ impl Bezier {
             if (v - x).abs() < 1e-7 {
                 break;
             }
-            if v < x { lo = s } else { hi = s }
+            if v < x {
+                lo = s
+            } else {
+                hi = s
+            }
             s = (lo + hi) / 2.0;
         }
         s
@@ -198,7 +207,13 @@ impl WheelAnim {
         let vel = self.velocity(now);
         let rem = new_to - pos;
         if rem.abs() < 0.01 {
-            *self = Self { start: now, from: pos, to: new_to, duration: 0.0, curve: self.curve };
+            *self = Self {
+                start: now,
+                from: pos,
+                to: new_to,
+                duration: 0.0,
+                curve: self.curve,
+            };
             return;
         }
         let mut duration = segment_duration(rem);
@@ -293,7 +308,8 @@ impl VelocityTracker {
     fn add(&mut self, now: Instant, delta: f64) {
         self.pos += delta;
         self.samples.push((now, self.pos));
-        self.samples.retain(|(t, _)| now.saturating_duration_since(*t) <= HORIZON);
+        self.samples
+            .retain(|(t, _)| now.saturating_duration_since(*t) <= HORIZON);
         if self.samples.len() > 20 {
             let excess = self.samples.len() - 20;
             self.samples.drain(..excess);
@@ -302,7 +318,9 @@ impl VelocityTracker {
 
     /// px/s; 0 when the pointer was resting before release.
     fn velocity(&self, now: Instant, stopped_after: Duration) -> f64 {
-        let Some(&(last_t, _)) = self.samples.last() else { return 0.0 };
+        let Some(&(last_t, _)) = self.samples.last() else {
+            return 0.0;
+        };
         if now.saturating_duration_since(last_t) > stopped_after || self.samples.len() < 2 {
             return 0.0;
         }
@@ -351,7 +369,13 @@ impl Default for ScrollAxis {
 
 impl ScrollAxis {
     pub fn new(config: Config) -> Self {
-        Self { config, offset: 0.0, max: 0.0, motion: Motion::Idle, tracker: VelocityTracker::default() }
+        Self {
+            config,
+            offset: 0.0,
+            max: 0.0,
+            motion: Motion::Idle,
+            tracker: VelocityTracker::default(),
+        }
     }
 
     pub fn config(&self) -> &Config {
@@ -546,7 +570,10 @@ pub struct TouchDrag {
 
 impl Default for TouchDrag {
     fn default() -> Self {
-        Self { active: None, slop: TOUCH_SLOP }
+        Self {
+            active: None,
+            slop: TOUCH_SLOP,
+        }
     }
 }
 
@@ -590,11 +617,24 @@ impl TouchDrag {
         }
         let stopped_motion = axis.is_animating();
         axis.stop();
-        self.active = Some(Active { id, start: (x, y), last_y: y, scrolling: false, stopped_motion });
+        self.active = Some(Active {
+            id,
+            start: (x, y),
+            last_y: y,
+            scrolling: false,
+            stopped_motion,
+        });
         TouchOutcome::Pending
     }
 
-    pub fn moved(&mut self, id: u64, x: f32, y: f32, now: Instant, axis: &mut ScrollAxis) -> TouchOutcome {
+    pub fn moved(
+        &mut self,
+        id: u64,
+        x: f32,
+        y: f32,
+        now: Instant,
+        axis: &mut ScrollAxis,
+    ) -> TouchOutcome {
         let Some(a) = self.active.as_mut().filter(|a| a.id == id) else {
             return TouchOutcome::Ignored;
         };
@@ -663,7 +703,11 @@ mod tests {
         let mid = a.offset();
         assert!(mid > 0.0 && mid < 120.0, "mid {mid}");
         assert!(a.tick(t + ms(100)));
-        assert!((a.offset() - 60.0).abs() < 1.0, "ease-in-out is symmetric: {}", a.offset());
+        assert!(
+            (a.offset() - 60.0).abs() < 1.0,
+            "ease-in-out is symmetric: {}",
+            a.offset()
+        );
         assert!(!a.tick(t + ms(200)));
         assert_eq!(a.offset(), 120.0);
     }
@@ -690,7 +734,10 @@ mod tests {
         assert_eq!(a.target(), 240.0);
         a.tick(t + ms(81));
         let v_after = (a.offset() - before) / 0.001;
-        assert!((v_after - v_before).abs() / v_before < 0.1, "{v_before} vs {v_after}");
+        assert!(
+            (v_after - v_before).abs() / v_before < 0.1,
+            "{v_before} vs {v_after}"
+        );
         while a.tick(t + ms(1000)) {}
         assert_eq!(a.offset(), 240.0);
     }
@@ -711,7 +758,10 @@ mod tests {
     fn no_smooth_wheel_jumps() {
         let t = Instant::now();
         let mut a = axis(1000.0);
-        a.set_config(Config { smooth_wheel: false, ..Config::default() });
+        a.set_config(Config {
+            smooth_wheel: false,
+            ..Config::default()
+        });
         a.wheel_notches(1.0, t);
         assert_eq!(a.offset(), 120.0);
         assert!(!a.is_animating());
@@ -730,7 +780,10 @@ mod tests {
         let start = a.offset();
         a.tick(t + ms(105));
         let v = (a.offset() - start) / 0.010;
-        assert!((v - 1000.0).abs() < 150.0, "fling starts at release velocity: {v}");
+        assert!(
+            (v - 1000.0).abs() < 150.0,
+            "fling starts at release velocity: {v}"
+        );
         let mut now = t + ms(105);
         while a.tick(now) {
             now += ms(16);
@@ -790,7 +843,10 @@ mod tests {
         let mut a = axis(10_000.0);
         let mut d = TouchDrag::new();
         assert_eq!(d.down(1, 100.0, 100.0, &mut a), TouchOutcome::Pending);
-        assert_eq!(d.moved(1, 108.0, 106.0, t + ms(30), &mut a), TouchOutcome::Pending);
+        assert_eq!(
+            d.moved(1, 108.0, 106.0, t + ms(30), &mut a),
+            TouchOutcome::Pending
+        );
         assert_eq!(d.up(1, t + ms(80), &mut a), TouchOutcome::Tap);
         assert_eq!(a.offset(), 0.0);
     }
@@ -802,13 +858,19 @@ mod tests {
         let mut d = TouchDrag::new();
         d.down(7, 200.0, 600.0, &mut a);
         // Finger moves up 20 px: 15 px of slop, then 5 px of scroll.
-        assert_eq!(d.moved(7, 200.0, 580.0, t + ms(10), &mut a), TouchOutcome::ScrollStarted);
+        assert_eq!(
+            d.moved(7, 200.0, 580.0, t + ms(10), &mut a),
+            TouchOutcome::ScrollStarted
+        );
         assert_eq!(a.offset(), 5.0);
         // Then 1:1, 20 px per 10 ms (2000 px/s).
         let mut y = 580.0;
         for i in 2..=10 {
             y -= 20.0;
-            assert_eq!(d.moved(7, 200.0, y, t + ms(i * 10), &mut a), TouchOutcome::Scrolling);
+            assert_eq!(
+                d.moved(7, 200.0, y, t + ms(i * 10), &mut a),
+                TouchOutcome::Scrolling
+            );
         }
         assert_eq!(a.offset(), 5.0 + 9.0 * 20.0);
         assert_eq!(d.up(7, t + ms(105), &mut a), TouchOutcome::Ended);
@@ -833,8 +895,15 @@ mod tests {
         let mut d = TouchDrag::new();
         d.set_scale(2.0);
         d.down(1, 0.0, 100.0, &mut a);
-        assert_eq!(d.moved(1, 0.0, 75.0, t, &mut a), TouchOutcome::Pending, "25 device px < 30");
-        assert_eq!(d.moved(1, 0.0, 60.0, t + ms(10), &mut a), TouchOutcome::ScrollStarted);
+        assert_eq!(
+            d.moved(1, 0.0, 75.0, t, &mut a),
+            TouchOutcome::Pending,
+            "25 device px < 30"
+        );
+        assert_eq!(
+            d.moved(1, 0.0, 60.0, t + ms(10), &mut a),
+            TouchOutcome::ScrollStarted
+        );
         assert_eq!(a.offset(), 10.0);
     }
 
