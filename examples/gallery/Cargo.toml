@@ -1,0 +1,11 @@
+[package]
+name = "gallery"
+description = "The Showcase: every bato-kit component, the kit's visual test bench."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+bato-kit = { path = "../../crates/bato-kit" }
+bato-shell = { path = "../../crates/bato-shell" }

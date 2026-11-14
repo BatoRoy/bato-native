@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "examples/*"]
+# patched/: normalised upstream sources consumed via [patch.crates-io] (each is
+# its own package/workspace); poc/: the iced proof of concept, kept as the
+# extraction reference until bato-kit replaces it.
+exclude = ["patched", "poc"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/BatoRoy/bato-native"
+
+# Inside this repo the patched crates come from the tree. Apps get the same
+# sources from git (see README "Using bato-native in an app"); [patch] is
+# honoured only in the root manifest, so every app repeats this block.
+[patch.crates-io]
+winit = { path = "patched/winit" }
+cosmic-text = { path = "patched/cosmic-text" }
+cryoglyph = { path = "patched/cryoglyph" }
+iced_wgpu = { path = "patched/iced_wgpu" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "abort"
+
+# Keep the cache small (CI) and debug builds fast.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false

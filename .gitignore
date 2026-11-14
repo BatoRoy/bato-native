@@ -1,0 +1,3 @@
+target/
+# local kit development overrides in consuming apps live there, not here
+.cargo/config.toml

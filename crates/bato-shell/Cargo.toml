@@ -1,0 +1,9 @@
+[package]
+name = "bato-shell"
+description = "Platform services for native Bato apps: window identity, settings, HTTP, portal dialogs, notifications, backend supervisor, updater."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bato-theme = { path = "../bato-theme" }
