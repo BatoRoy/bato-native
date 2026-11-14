@@ -468,6 +468,8 @@ impl<'buffer> Edit<'buffer> for ViEditor<'_, 'buffer> {
         // The start of a pure yank (the cursor goes there), and whether a
         // put or delete ran.
         let mut yank: Option<(Cursor, bool)> = None;
+        // `O`: the line it opened, and the indent it should get.
+        let mut open_above: Option<(usize, String)> = None;
         let mut deleted = false;
         let mut put = false;
 
@@ -539,7 +541,31 @@ impl<'buffer> Edit<'buffer> for ViEditor<'_, 'buffer> {
                 }
                 Event::Escape => Action::Escape,
                 Event::Insert(c) => Action::Insert(c),
-                Event::NewLine => Action::Enter,
+                // bato: the user's Neovim has `autoindent` + `smartindent`:
+                // a new line takes the indent of the text before the cursor,
+                // one level (2 spaces) more after an opening brace. At column
+                // 0 (`O`, or Enter before the text) the split is plain and
+                // `O` gets its indent after the command, on the new line.
+                Event::NewLine => {
+                    let c = editor.cursor();
+                    let line = editor.with_buffer(|b| b.lines[c.line].text().to_string());
+                    if c.index == 0 {
+                        open_above = Some((c.line, leading_ws(&line).to_string()));
+                        Action::Enter
+                    } else {
+                        let before = &line[..c.index];
+                        let mut ind = leading_ws(before).to_string();
+                        if before.trim_end().ends_with('{') {
+                            ind.push_str("  ");
+                        }
+                        editor.insert_string(&format!("\n{ind}"), None);
+                        let line_i = editor.cursor().line;
+                        editor.with_buffer_mut(|b| {
+                            b.line_layout(font_system, line_i);
+                        });
+                        return;
+                    }
+                }
                 Event::Put { register, after } => {
                     put = true;
                     if let Some(reg) = registers.get(&register).cloned() {
@@ -997,6 +1023,15 @@ impl<'buffer> Edit<'buffer> for ViEditor<'_, 'buffer> {
         });
 
         // bato: after the command.
+        if let Some((line_i, ind)) = open_above.filter(|(_, ind)| !ind.is_empty()) {
+            let c = self.editor.cursor();
+            let blank = self
+                .editor
+                .with_buffer(|b| b.lines[c.line].text().is_empty());
+            if c.line == line_i && c.index == 0 && blank {
+                self.editor.insert_string(&ind, None);
+            }
+        }
         if x_yank && !x_text.is_empty() {
             store(
                 &mut self.registers,
@@ -1203,4 +1238,9 @@ fn put_register<'buffer, E: Edit<'buffer>>(
         editor.set_cursor(c);
     }
     replaced
+}
+
+/// The spaces and tabs a line starts with.
+fn leading_ws(s: &str) -> &str {
+    &s[..s.len() - s.trim_start_matches([' ', '\t']).len()]
 }

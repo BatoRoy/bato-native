@@ -310,9 +310,16 @@ pub fn resolve(buffer: &mut ct::Buffer, palette: &Palette) -> bool {
             }
             // `fontStyle: italic` on a monospace font without an italic
             // face: Chromium (Skia) slants the upright one.
-            if a.style == ct::Style::Italic {
+            //
+            // Only fresh highlighter output (a sentinel colour) decides the
+            // slant, and it sets or clears it. A line split off by Enter
+            // inherits the resolved attrs of the text before the cursor as
+            // its defaults (FAKE_ITALIC on a comment), and the highlighter
+            // builds its spans from those defaults, never touching the flag.
+            if class.is_some() {
+                a.cache_key_flags
+                    .set(ct::CacheKeyFlags::FAKE_ITALIC, a.style == ct::Style::Italic);
                 a.style = ct::Style::Normal;
-                a.cache_key_flags |= ct::CacheKeyFlags::FAKE_ITALIC;
             }
             ct::AttrsOwned::new(&a)
         };

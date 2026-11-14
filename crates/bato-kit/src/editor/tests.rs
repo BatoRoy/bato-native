@@ -324,3 +324,70 @@ fn load_cost() {
     );
     eprintln!("200 TS lines highlighted + shaped: {:?}", t.elapsed());
 }
+
+#[test]
+fn a_line_split_off_a_comment_is_not_slanted() {
+    // Enter at the end of `// say hello` used to hand the new line the
+    // comment's FAKE_ITALIC through its default attrs, so whatever was typed
+    // there (and on lines opened from it) rendered slanted.
+    let mut d = doc("  // say hello\nreturn 1", Language::JavaScript);
+    run(&mut d, &[Cmd::Move(Move::LineEnd, false), Cmd::Newline]);
+    run(&mut d, &typed("abc"));
+    run(&mut d, &[Cmd::Newline]);
+    run(&mut d, &typed("xyz"));
+    d.refresh(font_system().write().unwrap().raw());
+    let buf = d.buffer().unwrap();
+    let slanted = |line: usize, at: usize| {
+        buf.lines[line]
+            .attrs_list()
+            .get_span(at)
+            .cache_key_flags
+            .contains(iced::advanced::graphics::text::cosmic_text::CacheKeyFlags::FAKE_ITALIC)
+    };
+    assert!(slanted(0, 5), "the comment itself stays italic");
+    assert!(!slanted(1, d.lines()[1].find("abc").unwrap()));
+    assert!(!slanted(2, d.lines()[2].find("xyz").unwrap()));
+    assert!(!slanted(3, 0));
+}
+
+#[test]
+fn vim_new_lines_keep_the_indent_like_neovim() {
+    // The user's Neovim: autoindent + smartindent, 2-space indents.
+    crate::fonts::setup();
+    let mut d = Doc::new("function f() {\n  a()\n}");
+    let mut fs = font_system().write().unwrap();
+    let p = bato_theme::palette(
+        bato_theme::ThemeId::Dark,
+        bato_theme::Rgb::new(124, 58, 237),
+    );
+    d.configure(fs.raw(), &p, Language::JavaScript, true);
+    d.refresh(fs.raw());
+    use iced::advanced::graphics::text::cosmic_text as ct;
+    let key = |d: &mut Doc, fs: &mut ct::FontSystem, s: &str| {
+        for c in s.chars() {
+            d.vi_key(fs, ct::Action::Insert(c));
+        }
+    };
+    let esc = |d: &mut Doc, fs: &mut ct::FontSystem| d.vi_key(fs, ct::Action::Escape);
+    // `o` on an indented line keeps its indent.
+    key(&mut d, fs.raw(), "jox");
+    esc(&mut d, fs.raw());
+    assert_eq!(d.text(), "function f() {\n  a()\n  x\n}");
+    // `o` after an opening brace indents one level more.
+    key(&mut d, fs.raw(), "ggoy");
+    esc(&mut d, fs.raw());
+    assert_eq!(d.text(), "function f() {\n  y\n  a()\n  x\n}");
+    // `O` takes the indent of the line it opens above.
+    key(&mut d, fs.raw(), "jjOz");
+    esc(&mut d, fs.raw());
+    assert_eq!(d.text(), "function f() {\n  y\n  a()\n  z\n  x\n}");
+    // Enter in insert mode, mid-line.
+    key(&mut d, fs.raw(), "jA");
+    d.vi_key(fs.raw(), ct::Action::Enter);
+    key(&mut d, fs.raw(), "w");
+    esc(&mut d, fs.raw());
+    assert_eq!(d.text(), "function f() {\n  y\n  a()\n  z\n  x\n  w\n}");
+    // One undo takes back the whole `O` + typing, indent included.
+    key(&mut d, fs.raw(), "u");
+    assert_eq!(d.text(), "function f() {\n  y\n  a()\n  z\n  x\n}");
+}
