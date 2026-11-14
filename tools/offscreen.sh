@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Off-screen test output for native clients on Hyprland (real GPU, invisible).
-#   native/tools/offscreen.sh up      # create output BATOPOC + route class ^batopoc-.* to it
+#   tools/offscreen.sh up      # create output BATOPOC + route ^batopoc-.* and Electron's app-client to it
 #   native/tools/offscreen.sh down    # remove both
 #   native/tools/offscreen.sh check   # exit 0 only if routing is safe right now
-# While up, any window whose app_id starts with "batopoc-" opens on the named
+# While up, any window whose app_id starts with "batopoc-" (native test builds)
+# or is "app-client" (the Electron template build the fidelity harness launches;
+# it cannot change its Wayland app_id) opens on the named
 # workspace "batopoc", which lives only on BATOPOC, floating at 1280x800.
 # Screenshot with native/tools/shot.sh, which refuses windows anywhere else.
 #
@@ -49,7 +51,7 @@ case ${1:-} in
       hyprctl output remove $OUT >/dev/null 2>&1 || true
       exit 1
     fi
-    hyprctl eval "hl.window_rule({ name = \"batopoc-offscreen\", match = { class = \"^batopoc-.*\" }, workspace = \"name:$WS silent\", float = true, size = \"1280 800\", move = \"40 80\", no_initial_focus = true })" >/dev/null
+    hyprctl eval "hl.window_rule({ name = \"batopoc-offscreen\", match = { class = \"^(batopoc-.*|app-client)$\" }, workspace = \"name:$WS silent\", float = true, size = \"1280 800\", move = \"40 80\", no_initial_focus = true })" >/dev/null
     echo "offscreen: up ($OUT shows workspace $WS)" ;;
   down)
     rule_off
