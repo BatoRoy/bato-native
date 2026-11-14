@@ -112,6 +112,8 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
             label("Overlays, focus and scroll areas: the shared infrastructure every component builds on.", 14.0, 20.0)
                 .color(c(p.subtext)),
             vgap(32.0),
+            // First: its self-test aims at containers by id, which the
+            // script finds in layout (unscrolled) coordinates.
             modals::view(&state.modals, cx).map(Msg::Modals),
             vgap(24.0),
             overlay::view(&state.overlay, cx).map(Msg::Overlay),

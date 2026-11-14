@@ -121,6 +121,7 @@ const TOP: &str = "md-top";
 const BOTTOM: &str = "md-bottom";
 const PALETTE: &str = "md-palette";
 const ZONE: &str = "md-zone";
+const SECTION: &str = "md-section";
 
 fn target<'a>(name: &'static str, el: impl Into<El<'a, Msg>>) -> El<'a, Msg> {
     container(el).id(id(name)).into()
@@ -193,10 +194,12 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
     if state.crash {
         body = body.push(El::new(Crash));
     }
-    card(cx, "Modal family, palette and file drop")
-        .icon(Ico::Upload)
-        .body(body)
-        .into()
+    target(
+        SECTION,
+        card(cx, "Modal family, palette and file drop")
+            .icon(Ico::Upload)
+            .body(body),
+    )
 }
 
 /// Panics in `draw`: the frame's error boundary shows React's fallback.
