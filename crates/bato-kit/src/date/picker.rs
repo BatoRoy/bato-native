@@ -25,13 +25,14 @@ use super::calendar::{CalendarMsg, CalendarState, calendar, height as calendar_h
 use super::math::{DateRange, keep_time, trunc_seconds};
 use super::popover_panel;
 use super::time_picker::time_picker;
-use super::trigger::{press_probe, trigger};
+use super::trigger::trigger;
 use crate::El;
 use crate::ctx::Ctx;
 use crate::datefmt::{self, NaiveDate, NaiveDateTime};
 use crate::field::{FieldSize, field};
 use crate::icon::{Ico, icon};
 use crate::label::label;
+use crate::overlay::popover::press_probe;
 use crate::overlay::{Dismiss, anchored};
 use crate::style::c;
 use crate::surface::{BoxStyle, Status, surface};

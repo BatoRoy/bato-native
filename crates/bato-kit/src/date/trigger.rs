@@ -8,8 +8,8 @@
 //! A press inside the picker's popover moves focus there in Chromium, but
 //! iced never shows the base layer an event the overlay captured, so the
 //! trigger would stay focused (halo on). The popover body is wrapped in a
-//! [`press_probe`] that counts its presses; a focused trigger that sees the
-//! count change lets the focus go.
+//! [`crate::overlay::popover::press_probe`] that counts its presses; a
+//! focused trigger that sees the count change lets the focus go.
 
 use std::time::{Duration, Instant};
 
@@ -30,11 +30,6 @@ use crate::surface::paint;
 type El<'a, M> = Element<'a, M, iced::Theme, iced::Renderer>;
 
 const TRANSITION: Duration = Duration::from_millis(150);
-
-thread_local! {
-    /// Presses inside any picker popover so far.
-    static PANEL_PRESSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
 
 pub(crate) struct Trigger<'a, M> {
     cx: Ctx,
@@ -84,7 +79,7 @@ struct State {
     changed: Option<Instant>,
     pressed: bool,
     finger: Option<u64>,
-    /// [`PANEL_PRESSES`] when last seen.
+    /// [`crate::overlay::popover::panel_presses`] when last seen.
     panel_presses: u64,
 }
 
@@ -197,7 +192,7 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for Trigger<'a, M
         if st.focus.pointer(event, inside, true) {
             shell.request_redraw();
         }
-        let presses = PANEL_PRESSES.get();
+        let presses = crate::overlay::popover::panel_presses();
         if st.panel_presses != presses {
             st.panel_presses = presses;
             if st.focus.is_focused() {
@@ -361,133 +356,5 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for Trigger<'a, M
 impl<'a, M: Clone + 'a> From<Trigger<'a, M>> for El<'a, M> {
     fn from(t: Trigger<'a, M>) -> Self {
         Element::new(t)
-    }
-}
-
-/// Counts pointer presses inside `content` (a popover body) for the
-/// triggers (see the module docs). Layout, drawing and events pass through.
-pub(crate) fn press_probe<'a, M: 'a>(content: impl Into<El<'a, M>>) -> El<'a, M> {
-    Element::new(PressProbe {
-        content: content.into(),
-    })
-}
-
-struct PressProbe<'a, M> {
-    content: El<'a, M>,
-}
-
-impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for PressProbe<'a, M> {
-    fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
-    }
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content)]
-    }
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.content));
-    }
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &iced::Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        self.content
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
-    }
-    fn update(
-        &mut self,
-        tree: &mut Tree,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &iced::Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, M>,
-        viewport: &Rectangle,
-    ) {
-        let inside = match event {
-            Event::Touch(touch::Event::FingerPressed { position, .. }) => {
-                layout.bounds().contains(*position)
-            }
-            _ => cursor.is_over(layout.bounds()),
-        };
-        if inside && crate::focus::is_pointer_press(event) {
-            PANEL_PRESSES.set(PANEL_PRESSES.get() + 1);
-        }
-        self.content.as_widget_mut().update(
-            &mut tree.children[0],
-            event,
-            layout,
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        );
-    }
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut iced::Renderer,
-        theme: &iced::Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        self.content.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            style,
-            layout,
-            cursor,
-            viewport,
-        );
-    }
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &iced::Renderer,
-    ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
-    }
-    fn operate(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &iced::Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
-    }
-    fn overlay<'b>(
-        &'b mut self,
-        tree: &'b mut Tree,
-        layout: Layout<'b>,
-        renderer: &iced::Renderer,
-        viewport: &Rectangle,
-        translation: iced::Vector,
-    ) -> Option<iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>> {
-        self.content.as_widget_mut().overlay(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            viewport,
-            translation,
-        )
     }
 }
