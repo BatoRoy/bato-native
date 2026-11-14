@@ -1,7 +1,7 @@
 //! `overlays/triggers`: Triggers. A wrapping row: the "Actions" Dropdown
-//! (Edit, Delete), a Tooltip on "Hover me", the ConfirmDialog / Drawer /
-//! CommandPalette buttons (batch B3's slots) and the "Popover" button with
-//! its anchored panel (`ShowcasePage.tsx`).
+//! (Edit, Delete), a Tooltip on "Hover me", the ConfirmDialog, Drawer and
+//! CommandPalette buttons (their levels: [`levels`]) and the "Popover"
+//! button with its anchored panel (`ShowcasePage.tsx`).
 //!
 //! Also [`selftest`]: `BATO_SELFTEST=pickers`, batch B2's scripted run over
 //! the Selects, Sliders & color, Search and Overlays cards.
@@ -12,8 +12,10 @@ use bato_kit::Tone;
 use bato_kit::iced::keyboard::{Modifiers, key::Named};
 use bato_kit::iced::widget::{container, row};
 use bato_kit::iced::{Point, Vector, mouse, widget};
+use bato_kit::modal::Modal;
+use bato_kit::overlay::palette::{self, Command, Outcome, Palette};
 use bato_kit::overlay::script::{Step, Target};
-use bato_kit::overlay::{dropdown, popover, popover_panel, tooltip};
+use bato_kit::overlay::{confirm_dialog, drawer, dropdown, popover, popover_panel, tooltip};
 use bato_kit::prelude::*;
 
 use crate::showcase::{self, Effect, Tab};
@@ -21,6 +23,9 @@ use crate::showcase::{self, Effect, Tab};
 #[derive(Debug, Default)]
 pub struct State {
     pub pop: bool,
+    pub confirm: bool,
+    pub drawer: bool,
+    pub palette: Palette,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +34,34 @@ pub enum Msg {
     Toast(&'static str, Tone),
     /// A button without an action (React's `<Button>` with no `onClick`).
     Noop,
+    Confirm(bool),
+    Confirmed,
+    Drawer(bool),
+    OpenPalette,
+    Palette(palette::Msg),
+}
+
+/// The palette's commands (`ShowcasePage.tsx`).
+fn commands() -> Vec<Command<Msg>> {
+    vec![
+        Command::new("home", "Go to Home", Msg::Toast("Home", Tone::Info))
+            .icon(Ico::Home)
+            .group("Navigation"),
+        Command::new(
+            "settings",
+            "Open Settings",
+            Msg::Toast("Settings", Tone::Info),
+        )
+        .icon(Ico::Settings)
+        .group("Navigation"),
+        Command::new("new", "New File", Msg::Toast("New file", Tone::Success))
+            .icon(Ico::FileText)
+            .group("Actions")
+            .hint("⌘N"),
+        Command::new("add", "Add Item", Msg::Toast("Added", Tone::Success))
+            .icon(Ico::Plus)
+            .group("Actions"),
+    ]
 }
 
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
@@ -36,14 +69,71 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
         Msg::Pop(v) => state.pop = v,
         Msg::Toast(text, tone) => return Some(Effect::Toast(text.into(), tone)),
         Msg::Noop => {}
+        Msg::Confirm(v) => state.confirm = v,
+        Msg::Confirmed => {
+            state.confirm = false;
+            return Some(Effect::Toast("Deleted".into(), Tone::Error));
+        }
+        Msg::Drawer(v) => state.drawer = v,
+        Msg::OpenPalette => state.palette.open(),
+        Msg::Palette(m) => {
+            if let Some(Outcome::Run(run)) = state.palette.update(m, &commands()) {
+                return update(state, run);
+            }
+        }
     }
     None
+}
+
+/// The open ConfirmDialog, Drawer and CommandPalette, bottom first.
+pub fn levels<'a>(state: &'a State, cx: &Ctx) -> Vec<Modal<'a, Msg>> {
+    let on = cx.on_card();
+    let mut v = Vec::new();
+    if state.confirm {
+        v.push(
+            confirm_dialog(
+                cx,
+                "Delete item?",
+                "This cannot be undone.",
+                Msg::Confirmed,
+                Msg::Confirm(false),
+            )
+            .confirm_label("Delete")
+            .danger(true)
+            .into_level(),
+        );
+    }
+    if state.drawer {
+        let body = label(
+            "A slide-in panel. Use it for filters, details, or forms.",
+            14.0,
+            20.0,
+        )
+        .color(c(on.p().subtext))
+        .wrap();
+        v.push(
+            drawer(cx, body, Msg::Drawer(false))
+                .title("Drawer")
+                .into_level(),
+        );
+    }
+    if state.palette.is_open() {
+        v.push(
+            state
+                .palette
+                .level(cx, &commands(), "Type a command…", Msg::Palette),
+        );
+    }
+    v
 }
 
 /// Self-test targets.
 pub const ACTIONS: &str = "trig-actions";
 pub const HOVER: &str = "trig-hover";
 pub const POPOVER: &str = "trig-popover";
+pub const CONFIRM: &str = "trig-confirm";
+pub const DRAWER: &str = "trig-drawer";
+pub const PALETTE: &str = "trig-palette";
 
 pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
     let on = cx.on_card();
@@ -94,21 +184,27 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
     let body = row![
         container(actions).id(ACTIONS),
         container(hover).id(HOVER),
-        // ── B3 slot: ConfirmDialog ("Delete item?", danger) ──
-        button(&on)
-            .danger()
-            .label("Confirm dialog")
-            .on_press(Msg::Noop),
-        // ── B3 slot: Drawer ──
-        button(&on)
-            .secondary()
-            .label("Open drawer")
-            .on_press(Msg::Noop),
-        // ── B3 slot: CommandPalette ──
-        button(&on)
-            .secondary()
-            .label("Command palette")
-            .on_press(Msg::Noop),
+        container(
+            button(&on)
+                .danger()
+                .label("Confirm dialog")
+                .on_press(Msg::Confirm(true))
+        )
+        .id(CONFIRM),
+        container(
+            button(&on)
+                .secondary()
+                .label("Open drawer")
+                .on_press(Msg::Drawer(true))
+        )
+        .id(DRAWER),
+        container(
+            button(&on)
+                .secondary()
+                .label("Command palette")
+                .on_press(Msg::OpenPalette)
+        )
+        .id(PALETTE),
         pop,
     ]
     .spacing(12)
@@ -124,48 +220,42 @@ fn id(s: &'static str) -> widget::Id {
 }
 
 /// Batch B2's scripted run: start it with
-/// `BATO_VIEW=view=examples&tab=inputs BATO_SELFTEST=pickers` (the page at
-/// the top: script targets are found in unscrolled layout coordinates, so
-/// the Search card, further down, is aimed at by window position after
-/// scrolling it to the top).
+/// `BATO_VIEW=view=examples&tab=inputs&card=selects BATO_SELFTEST=pickers`.
+/// The card then sits 24 px under the top of the page (React's anchor), so
+/// targets are window positions (script ids resolve in unscrolled layout
+/// coordinates); the first step shows a ColorPicker at the top of the card
+/// body (test only), which moves the rest 80 px down.
 pub fn selftest() -> Vec<Step<showcase::Msg>> {
     use crate::showcase::inputs::{self, search, selects};
     use crate::showcase::overlays;
     let none = Modifiers::default();
     let left = mouse::Button::Left;
     let wait = |ms| Step::Wait(Duration::from_millis(ms));
+    let at = |x: f32, y: f32| Target::At(Point::new(x, y));
+    let click_at = |x: f32, y: f32| Step::Click(Target::At(Point::new(x, y)), left);
     let click = |name: &'static str| Step::Click(Target::Center(id(name)), left);
-    // The control box of a field: under its 16 px label and 6 px gap.
-    let field_box =
-        |name: &'static str| Step::Click(Target::Id(id(name), Vector::new(300.0, 41.0)), left);
     let search_msg = |m| Step::Message(showcase::Msg::Inputs(inputs::Msg::Search(m)));
     let mut v = vec![
         Step::Shot("selects"),
-        // ColorPicker (shown in this card for the test only): open, drag in
-        // the saturation/value area, a hue key, a preset.
+        // ColorPicker: open (the box at y 103–141), drag in the
+        // saturation/value area (the panel 6 px under the box, the area
+        // 13 px into it), then a hue key and a preset.
         Step::Message(showcase::Msg::Inputs(inputs::Msg::Selects(
             selects::Msg::Color("#7c3aed".into()),
         ))),
         wait(300),
-        field_box(selects::COLOR),
+        click_at(750.0, 122.0),
         wait(300),
         Step::Shot("color-open"),
-        // At 1280×800 the 289 px panel flips above the box (6 px gap); the
-        // area starts 13 px into it.
-        Step::Press(
-            Target::Id(id(selects::COLOR), Vector::new(60.0, 22.0 - 6.0 - 289.0 + 13.0 + 30.0)),
-            left,
-        ),
-        Step::Move(Target::Id(
-            id(selects::COLOR),
-            Vector::new(150.0, 22.0 - 6.0 - 289.0 + 13.0 + 60.0),
-        )),
+        Step::Press(at(400.0, 190.0), left),
+        Step::Move(at(480.0, 220.0)),
         Step::Event(bato_kit::iced::Event::Mouse(mouse::Event::ButtonReleased(left))),
         wait(300),
         Step::Shot("color-dragged"),
         Step::Key(Named::Escape, none),
-        // Combobox: open (search autofocused), filter, ↓, Enter.
-        field_box(selects::COMBOBOX),
+        // Combobox (box y 183–221): open (search autofocused), filter, ↓,
+        // Enter.
+        click_at(544.0, 202.0),
         wait(300),
         Step::Shot("combobox-open"),
         Step::Char('e', none),
@@ -176,22 +266,16 @@ pub fn selftest() -> Vec<Step<showcase::Msg>> {
         Step::Key(Named::Enter, none),
         wait(300),
         Step::Shot("combobox-picked"),
-        // Multi-select: open (the 221 px panel flips above), toggle Banana
-        // (row 2 under the 52 px search section).
-        field_box(selects::MULTI),
+        // Multi-select: open, toggle Banana (row 2 under the 52 px search
+        // section of the panel at y 227).
+        click_at(1000.0, 202.0),
         wait(300),
-        Step::Click(
-            Target::Id(
-                id(selects::MULTI),
-                Vector::new(300.0, 22.0 - 6.0 - 221.0 + 52.0 + 4.0 + 32.0 + 16.0),
-            ),
-            left,
-        ),
+        click_at(1000.0, 331.0),
         wait(300),
         Step::Shot("multiselect-open"),
         Step::Key(Named::Escape, none),
-        // Quick select: open, ↓ ↓ Enter (Elderberry → Banana… wraps).
-        click(selects::QUICK),
+        // Quick select: open, ↓.
+        click_at(498.0, 256.0),
         Step::Key(Named::ArrowDown, none),
         wait(300),
         Step::Shot("select-open"),
@@ -246,7 +330,20 @@ pub fn selftest() -> Vec<Step<showcase::Msg>> {
         Step::Shot("popover"),
         Step::Move(Target::At(Point::new(700.0, 700.0))),
         Step::Key(Named::Escape, none),
-        wait(300),
+        // The modal family (B3's components) from this card.
+        click(CONFIRM),
+        wait(400),
+        Step::Shot("confirm"),
+        Step::Key(Named::Escape, none),
+        click(DRAWER),
+        wait(500),
+        Step::Shot("drawer"),
+        Step::Key(Named::Escape, none),
+        click(PALETTE),
+        wait(400),
+        Step::Shot("palette"),
+        Step::Key(Named::Escape, none),
+        wait(400),
         Step::Shot("end"),
     ];
     v.shrink_to_fit();

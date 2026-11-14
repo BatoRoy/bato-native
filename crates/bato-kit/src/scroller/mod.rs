@@ -391,6 +391,21 @@ pub fn scroll_to(id: impl Into<widget::Id>, align: Align) {
     );
 }
 
+/// [`scroll_to`] without the animation (`scrollIntoView()` with the default
+/// `behavior: auto`, e.g. the command palette's active row).
+pub fn jump_to(id: impl Into<widget::Id>, align: Align) {
+    request(
+        Target::Container(id.into()),
+        Reveal {
+            block: align,
+            inline: align,
+            smooth: false,
+            margin: 0.0,
+        },
+        None,
+    );
+}
+
 /// The focus hook: the focus system calls this from the newly focused
 /// widget's `update` with its layout bounds (and `shell.request_redraw()`).
 /// Like Chromium's focus scrolling it jumps (no animation) by the least

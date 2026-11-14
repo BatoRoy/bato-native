@@ -273,7 +273,8 @@ where
                         .on_press(MultiEvent::Toggle),
                 )
                 .error(has_error)
-                .disabled(disabled);
+                .disabled(disabled)
+                .blur_on_panel_press(true);
                 let panel = s.open.then(|| {
                     let on = cx.on_card();
                     let p = on.p().clone();

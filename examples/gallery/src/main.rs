@@ -150,12 +150,27 @@ impl App {
             backend_version: None,
             smoke: Smoke::default(),
             script: std::env::var("BATO_SELFTEST").ok().and_then(|n| {
-                gallery::interaction::selftest(&n)
-                    .map(|steps| steps.into_iter().map(|s| s.map(Msg::Interaction)).collect())
-                    .or_else(|| {
-                        showcase::selftest(&n)
-                            .map(|steps| steps.into_iter().map(|s| s.map(Msg::Showcase)).collect())
-                    })
+                let lab = gallery::interaction::selftest(&n).map(|steps| {
+                    // `modals`: the frame's palette first, then the lab section.
+                    let frame = if n == "modals" {
+                        palette_selftest()
+                    } else {
+                        Vec::new()
+                    };
+                    frame
+                        .into_iter()
+                        .chain(steps.into_iter().map(|s| s.map(Msg::Interaction)))
+                        .collect::<Vec<_>>()
+                });
+                lab.or_else(|| {
+                    showcase::selftest(&n)
+                        .map(|steps| steps.into_iter().map(|s| s.map(Msg::Showcase)).collect())
+                })
+                .or_else(|| {
+                    let date = |m| Msg::Showcase(showcase::Msg::Date(m));
+                    showcase::date::selftest(&n)
+                        .map(|steps| steps.into_iter().map(|s| s.map(date)).collect())
+                })
             }),
         };
         let mut task = app.ping();
@@ -190,7 +205,8 @@ impl App {
     fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Frame(m) => match self.frame.update(m) {
-                Action::None | Action::Navigated(_) => {}
+                // The gallery registers no commands of its own.
+                Action::None | Action::Navigated(_) | Action::Command(_) => {}
                 Action::SaveSettings => self.save_settings(),
                 Action::TestServer(url) => {
                     let api = Http::new(&url);
@@ -251,14 +267,26 @@ impl App {
                 if let Some(s) = m.gaps_status() {
                     self.frame.set_update_status(s.clone());
                 }
+                if let Some((text, tone)) = m.toast() {
+                    self.frame.toast(text, tone);
+                }
                 return gallery::interaction::update(&mut self.interaction, m)
                     .map(Msg::Interaction);
             }
-            Msg::Showcase(m) => {
-                if let Some(Effect::Toast(text, tone)) = showcase::update(&mut self.showcase, m) {
-                    self.frame.toast(text, tone);
+            Msg::Showcase(m) => match showcase::update(&mut self.showcase, m) {
+                Some(Effect::Toast(text, tone)) => self.frame.toast(text, tone),
+                Some(Effect::OpenFiles { multiple, reply }) => {
+                    let o = bato_shell::dialogs::OpenFiles {
+                        multiple,
+                        ..Default::default()
+                    };
+                    return iced_ext::open_files(o).map(move |r| match r {
+                        Ok(paths) => Msg::Showcase((reply.0)(paths)),
+                        Err(e) => Msg::Frame(frame::Msg::Toast(e.to_string(), Tone::Error)),
+                    });
                 }
-            }
+                None => {}
+            },
             Msg::Name(n) => self.name = n,
             Msg::AutoUpdate(v) => self.auto_update = v,
             Msg::Ping => {
@@ -332,13 +360,16 @@ impl App {
                 gallery::interaction::view(&self.interaction, cx, wide).map(Msg::Interaction)
             }
         };
-        let levels = if self.frame.page() == Page::Interaction {
-            gallery::interaction::levels(&self.interaction, cx)
+        let levels = match self.frame.page() {
+            Page::Interaction => gallery::interaction::levels(&self.interaction, cx)
                 .into_iter()
                 .map(|l| l.map(Msg::Interaction))
-                .collect()
-        } else {
-            Vec::new()
+                .collect(),
+            Page::Examples => showcase::levels(&self.showcase, cx)
+                .into_iter()
+                .map(|l| l.map(Msg::Showcase))
+                .collect(),
+            _ => Vec::new(),
         };
         let root = self.frame.view_with(page, levels, Msg::Frame);
         let root = match &self.script {
@@ -348,6 +379,54 @@ impl App {
         // `BATO_SELFTEST=scroll`: scripted scroll input (otherwise a no-op).
         gallery::interaction::scroll::selftest(root)
     }
+}
+
+/// `BATO_SELFTEST=modals`, the frame's part: the command palette from
+/// `mod+k` (the hotkey registry), from the sidebar search box and from
+/// Home's Commands; filtering, ↑↓ and Enter running a default command.
+fn palette_selftest() -> Vec<bato_kit::overlay::script::Step<Msg>> {
+    use bato_kit::hotkeys::KeyPress;
+    use bato_kit::iced::keyboard::{Modifiers, key::Named};
+    use bato_kit::iced::{Point, mouse};
+    use bato_kit::overlay::script::{Step, Target};
+    let none = Modifiers::default();
+    let key = |c| Step::Message(Msg::Frame(frame::Msg::Key(KeyPress::of(c).unwrap())));
+    let chars = |s: &str| s.chars().map(|c| Step::Char(c, none)).collect::<Vec<_>>();
+    let wait = |ms| Step::Wait(Duration::from_millis(ms));
+    let mut v = vec![
+        key("mod+k"),
+        wait(300),
+        Step::Shot("frame-palette"),
+        Step::Key(Named::ArrowDown, none),
+        Step::Key(Named::ArrowDown, none),
+        Step::Key(Named::ArrowDown, none),
+        Step::Key(Named::ArrowDown, none),
+        wait(200),
+        Step::Shot("frame-palette-down4"),
+    ];
+    v.extend(chars("dim"));
+    v.extend([
+        wait(200),
+        Step::Shot("frame-palette-dim"),
+        Step::Key(Named::Enter, none),
+        wait(400),
+        Step::Shot("theme-dim"),
+        // The sidebar search box opens it too; "dark" + Enter restores.
+        Step::Click(Target::At(Point::new(100.0, 80.0)), mouse::Button::Left),
+        wait(300),
+    ]);
+    v.extend(chars("dark"));
+    v.extend([
+        Step::Key(Named::Enter, none),
+        wait(300),
+        // Esc closes it without running anything.
+        Step::Message(Msg::Frame(frame::Msg::OpenPalette)),
+        wait(200),
+        Step::Key(Named::Escape, none),
+        wait(300),
+        Step::Shot("frame-palette-closed"),
+    ]);
+    v
 }
 
 /// bato-shell's phase as the frame shows it.

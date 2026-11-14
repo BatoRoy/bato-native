@@ -44,7 +44,7 @@ use crate::icon::{Ico, icon};
 use crate::label::label;
 use crate::layout::hline;
 use crate::overlay::dropdown::chevron;
-use crate::overlay::popover::{keys, local, min_fill, popover, popover_panel};
+use crate::overlay::popover::{keys, local, min_fill, panel_presses, popover, popover_panel};
 use crate::overlay::select::SelectOption;
 use crate::scroller::scroll_area;
 use crate::style::{c, rgba};
@@ -70,6 +70,8 @@ pub struct ControlFrame<'a, M> {
     disabled: bool,
     text: bool,
     on_focus: Option<M>,
+    blur_on_panel_press: bool,
+    in_panel: bool,
 }
 
 /// See [`ControlFrame`].
@@ -82,6 +84,8 @@ pub fn control_frame<'a, M>(cx: &Ctx, content: impl Into<El<'a, M>>) -> ControlF
         disabled: false,
         text: false,
         on_focus: None,
+        blur_on_panel_press: false,
+        in_panel: false,
     }
 }
 
@@ -107,6 +111,18 @@ impl<'a, M> ControlFrame<'a, M> {
         self.text = on;
         self
     }
+    /// A popover trigger: a press inside any popover panel takes focus away
+    /// from it (see [`crate::overlay::popover::panel_presses`]).
+    pub fn blur_on_panel_press(mut self, on: bool) -> Self {
+        self.blur_on_panel_press = on;
+        self
+    }
+    /// Inside a popover panel: focusing it never scrolls the page (the
+    /// overlay's window coordinates are not the page's).
+    pub fn in_panel(mut self) -> Self {
+        self.in_panel = true;
+        self
+    }
     /// Published when focus enters (`onFocus`).
     pub fn on_focus(mut self, m: M) -> Self {
         self.on_focus = Some(m);
@@ -120,6 +136,8 @@ struct FrameState {
     from: f32,
     changed: Option<Instant>,
     seen: u64,
+    /// [`panel_presses`] when last seen.
+    presses: u64,
 }
 
 impl FrameState {
@@ -138,6 +156,23 @@ impl FrameState {
     fn running(&self, now: Instant) -> bool {
         self.changed
             .is_some_and(|t0| now.saturating_duration_since(t0) < TRANSITION)
+    }
+}
+
+/// Drops the focus of every focusable it visits.
+struct Unfocus;
+
+impl widget::Operation for Unfocus {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn widget::Operation)) {
+        operate(self);
+    }
+    fn focusable(
+        &mut self,
+        _id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn widget::operation::Focusable,
+    ) {
+        state.unfocus();
     }
 }
 
@@ -164,6 +199,7 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for ControlFrame<
     fn state(&self) -> tree::State {
         tree::State::new(FrameState {
             seen: revision().wrapping_sub(1),
+            presses: panel_presses(),
             ..FrameState::default()
         })
     }
@@ -221,7 +257,26 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for ControlFrame<
         }
         let rev = revision();
         let now = Instant::now();
-        if tree.state.downcast_ref::<FrameState>().seen != rev || is_pointer_press(event) {
+        let presses = panel_presses();
+        let panel_press = {
+            let st = tree.state.downcast_mut::<FrameState>();
+            std::mem::replace(&mut st.presses, presses) != presses
+        };
+        if panel_press
+            && self.blur_on_panel_press
+            && tree.state.downcast_ref::<FrameState>().focused
+        {
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                child,
+                renderer,
+                &mut Unfocus,
+            );
+        }
+        if tree.state.downcast_ref::<FrameState>().seen != rev
+            || is_pointer_press(event)
+            || panel_press
+        {
             let mut op = FocusedBounds::default();
             self.content
                 .as_widget_mut()
@@ -234,7 +289,7 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for ControlFrame<
                 st.focused = focused;
                 st.changed = Some(now);
                 shell.request_redraw();
-                if focused && self.text && !is_pointer_press(event) {
+                if focused && self.text && !self.in_panel && !is_pointer_press(event) {
                     // Focused by a key or a program: Chromium scrolls it
                     // into view (a click does not).
                     crate::scroller::focus_into_view(layout.bounds());
@@ -392,6 +447,7 @@ pub fn search_field<'a, E: Clone + 'a>(
     control_frame(cx, stack![input, glyph].width(Length::Fill))
         .radius(6.0)
         .text(true)
+        .in_panel()
         .into()
 }
 
@@ -666,6 +722,7 @@ pub fn control_trigger<'a, E: Clone + 'a>(
     )
     .error(error)
     .disabled(disabled)
+    .blur_on_panel_press(true)
     .into()
 }
 

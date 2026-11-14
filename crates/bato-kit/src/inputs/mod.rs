@@ -5,6 +5,22 @@
 //!
 //! Phase 3 batches add one file per component here and one `mod` line below.
 
+// B1 basic inputs.
+pub mod file_dropzone;
+pub mod format;
+pub mod frame;
+pub mod number_input;
+pub mod otp_input;
+pub mod slider;
+pub mod tags_input;
+pub mod text_area;
+pub mod text_field;
+pub mod time_input;
+pub mod toggles;
+
+pub use file_dropzone::{FileDropzone, file_dropzone};
+
+// B2 pickers.
 pub mod color_picker;
 pub mod combobox;
 pub mod multiselect;

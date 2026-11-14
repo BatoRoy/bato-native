@@ -31,7 +31,7 @@ use iced::widget::row;
 use iced::{Alignment, Color, Element, Event, Length, Padding, Rectangle, Size, mouse, window};
 
 use super::anchored::{Dismiss, Position, anchored};
-use super::popover::local;
+use super::popover::{local, press_probe};
 use crate::anim::{Tween, ease_standard};
 use crate::ctx::Ctx;
 use crate::focus::Ring;
@@ -299,9 +299,10 @@ impl<'a, M: Clone + 'a> From<Dropdown<M>> for El<'a, M> {
         local(
             move |s: &DropdownState| {
                 let menu = s.open.then(|| {
-                    menu_list(&cx, map_entries(&items, &DropdownEvent::Pick))
-                        .on_close(DropdownEvent::Close)
-                        .into()
+                    press_probe(
+                        menu_list(&cx, map_entries(&items, &DropdownEvent::Pick))
+                            .on_close(DropdownEvent::Close),
+                    )
                 });
                 anchored(
                     trigger(&cx, &text, icon, s.open, width, DropdownEvent::Toggle),

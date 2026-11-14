@@ -11,14 +11,24 @@
 //! | `absolute left-… top-… w-… h-…` (calendar events, timeline bars, dashboard) | [`absolute()`] |
 //! | `border-t` / `border-l` hairlines, fixed gaps | [`hline`], [`vline`], [`gap`], [`vgap`] |
 //! | the page container (`mx-auto max-w-[--app-content-width] p-…`) | [`page()`] |
+//! | `Stack`/`HStack`/`VStack`, `Center`, `Container`, `Divider`, `Spacer` | [`hstack`], [`vstack`], [`center`], [`sized_container`], [`divider`], [`divider_v`], [`divider_label`], [`spacer`] |
+//! | `Collapsible`'s `grid-rows-[0fr]` → `[1fr]` height animation | [`collapse()`] |
+//! | `rounded-lg overflow-hidden` around content with its own fills | [`rounded_clip()`] |
+//! | `AppShell` (header, sidebar, footer, scrolling main) | [`app_shell()`] |
+//! | `PanelGroup` / `ResizablePanels` (draggable splits) | [`panel_group()`], [`resizable_panels()`] |
 //!
 //! Every cell is stretched like CSS's default `align-items: stretch`.
 
 mod absolute;
+mod app_shell;
 mod aspect;
+mod clip;
+mod collapse;
 mod grid;
 mod lines;
 mod masonry;
+mod panels;
+mod primitives;
 mod stretch;
 
 pub use absolute::{Absolute, absolute};
@@ -27,6 +37,17 @@ pub use grid::{Grid, Track, grid};
 pub use lines::{gap, hline, page, vgap, vline};
 pub use masonry::{Masonry, masonry};
 pub use stretch::{StretchColumn, stretch_column};
+
+pub use app_shell::{AppShell, app_shell};
+pub use clip::{RoundedClip, rounded_clip};
+pub use collapse::{COLLAPSE, Collapse, collapse};
+pub use panels::{
+    Direction, PanelGroup, bar_size, drag_sizes, initial_sizes, panel_group, resizable_panels,
+};
+pub use primitives::{
+    ContainerSize, center, divider, divider_label, divider_v, hstack, sized_container, spacer,
+    units, vstack,
+};
 
 /// The child-forwarding parts of a widget whose children are
 /// `self.cells: Vec<Element>` laid out one node per cell, in order.

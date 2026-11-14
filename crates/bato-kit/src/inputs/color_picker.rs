@@ -444,7 +444,7 @@ impl<'a, E: Clone> Widget<E, iced::Theme, iced::Renderer> for HueStrip<'a, E> {
         if st.focus.pointer(event, inside, true) {
             shell.request_redraw();
         }
-        st.focus.reveal(b, shell);
+        // No `reveal`: in a popover, window coordinates are not the page's.
         let set = |shell: &mut Shell<'_, E>, v: f32| {
             shell.publish((self.on_hue)(v));
             shell.capture_event();
@@ -714,7 +714,8 @@ impl<'a, M: Clone + 'a> From<ColorPicker<'a, M>> for El<'a, M> {
                         .padding(Padding::from([7.0, 9.0])),
                     )
                     .radius(6.0)
-                    .text(true);
+                    .text(true)
+                    .in_panel();
                     let mut grid = Grid::columns(6).gap(6.0);
                     for preset in &presets {
                         let st = BoxStyle::default()

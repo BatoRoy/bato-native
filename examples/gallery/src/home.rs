@@ -41,10 +41,7 @@ pub fn view<'a>(cx: &Ctx, h: Home<'_>, wide: bool) -> El<'a, Msg> {
             .icon(Ico::Command)
             .label("Commands")
             .push(kbd(&cx.on(cx.wash(0.04)), bato_kit::frame::MOD_K))
-            .on_press(toast(
-                "The command palette comes with Phase 3 (B3)",
-                Tone::Info
-            )),
+            .on_press(Msg::Frame(bato_kit::frame::Msg::OpenPalette)),
     ]
     .spacing(20)
     .align_y(Alignment::Center);

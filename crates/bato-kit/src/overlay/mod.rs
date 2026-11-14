@@ -8,16 +8,22 @@
 //! Phase 3 batches add one file per component here and one `mod` line below.
 
 pub mod anchored;
+pub mod confirm;
 pub mod context_menu;
+pub mod drawer;
 pub mod dropdown;
+pub mod palette;
 pub mod popover;
 pub mod script;
 pub mod select;
 pub mod tooltip;
 
 pub use anchored::{Anchored, Dismiss, DismissReason, Enter, Position, anchored, context_area};
+pub use confirm::{ConfirmDialog, confirm_dialog};
 pub use context_menu::{ContextMenuState, context_menu};
+pub use drawer::{Drawer, drawer};
 pub use dropdown::dropdown;
+pub use palette::{Command, Palette};
 pub use popover::{popover, popover_panel};
 pub use select::{SelectOption, opt, select};
 pub use tooltip::tooltip;

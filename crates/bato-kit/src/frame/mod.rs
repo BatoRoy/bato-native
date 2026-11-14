@@ -49,10 +49,13 @@
 //! `.style(|a, _| a.frame.style())` and `.default_font(bato_kit::fonts::sans())`
 //! into `iced::application`.
 
+pub mod boundary;
+mod commands;
 mod dialogs;
 mod sidebar;
 mod update;
 
+pub use commands::PLACEHOLDER;
 pub use sidebar::MOD_K;
 pub use update::UpdateStatus;
 
@@ -171,6 +174,17 @@ pub enum Msg<P> {
     /// "Restart to install vX" in About, "Restart" in the sidebar card.
     RestartToUpdate,
     Rescaled(f32),
+    /// Open the command palette (`mod+k`, the sidebar search box, an app
+    /// button such as Home's "Commands").
+    OpenPalette,
+    /// The palette's own messages.
+    Palette(crate::overlay::palette::Msg),
+    /// A key press for the frame's hotkeys (`mod+k`).
+    Key(crate::hotkeys::KeyPress),
+    /// An app command from the palette ([`Frame::commands`]).
+    Command(String),
+    /// The error fallback's Reload.
+    Reload,
 }
 
 /// What the app must do after [`Frame::update`].
@@ -191,6 +205,8 @@ pub enum Action<P> {
     /// "Restart to install vX": start the installed release and exit
     /// (bato-shell `iced_ext::restart_to_update`).
     RestartToUpdate,
+    /// The palette ran one of the app's own commands (its id).
+    Command(String),
 }
 
 /// Where the frame starts (from `BATO_VIEW` or the app).
@@ -229,11 +245,16 @@ pub struct Frame<P> {
     start: Start,
     window_scale: f32,
     autoscroll: AutoscrollBus,
+    palette: crate::overlay::palette::Palette,
+    app_commands: Vec<crate::overlay::palette::Command<String>>,
+    keys: crate::hotkeys::Hotkeys<Msg<P>>,
+    epoch: u64,
 }
 
 impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     pub fn new(brand: Brand, nav: Vec<NavItem<P>>, settings: Settings, page: P) -> Self {
         let cx = Ctx::from_palette(palette(settings.theme, accent_rgb(&settings, &brand)));
+        boundary::install_panic_hook();
         set_device_scale(settings.scale_factor());
         let w = if settings.sidebar_collapsed {
             COLLAPSED
@@ -261,6 +282,10 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             start: Start::default(),
             window_scale: 1.0,
             autoscroll: new_bus(),
+            palette: Default::default(),
+            app_commands: Vec::new(),
+            keys: crate::hotkeys::Hotkeys::new().bind("mod+k", Msg::OpenPalette),
+            epoch: 0,
         }
     }
 
@@ -350,10 +375,13 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     }
 
     pub fn subscription(&self) -> Subscription<Msg<P>> {
-        let mut subs = vec![window::events().filter_map(|(_, e)| match e {
-            window::Event::Rescaled(f) => Some(Msg::Rescaled(f)),
-            _ => None,
-        })];
+        let mut subs = vec![
+            window::events().filter_map(|(_, e)| match e {
+                window::Event::Rescaled(f) => Some(Msg::Rescaled(f)),
+                _ => None,
+            }),
+            self.keys.subscription().map(Msg::Key),
+        ];
         if self.sidebar.is_running(Instant::now()) {
             subs.push(window::frames().map(Msg::Tick));
         }
@@ -471,6 +499,19 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 self.window_scale = f;
                 set_device_scale(f * self.settings.scale_factor());
             }
+            Msg::OpenPalette => self.palette.open(),
+            Msg::Palette(m) => {
+                if let Some(run) = self.palette_update(m) {
+                    return self.update(run);
+                }
+            }
+            Msg::Key(press) => {
+                if let Some(m) = self.keys.resolve(&press) {
+                    return self.update(m);
+                }
+            }
+            Msg::Command(id) => return Action::Command(id),
+            Msg::Reload => self.epoch += 1,
         }
         Action::None
     }
@@ -536,16 +577,30 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             depth += 1;
             if top { above.push(el) } else { layers.push(el) }
         }
+        // The frame's command palette, over everything (z-50).
+        if self.palette.is_open() {
+            above.push(
+                self.palette_level(wrap)
+                    .id(level_id(depth))
+                    .wrap_panel(|p| crate::focus::focus_scope(p).into())
+                    .blur(true)
+                    .animate(animate)
+                    .into(),
+            );
+        }
         if !self.toasts.is_empty() {
             layers.push(toast_stack(&self.cx, &self.toasts.items, move |id| {
                 wrap(Msg::Dismiss(id))
             }));
         }
         layers.extend(above);
-        crate::focus::focus_root(crate::hotkeys::probe(
+        let cx = self.cx.clone();
+        let window = boundary::error_boundary(
             stack(layers).width(Length::Fill).height(Length::Fill),
-        ))
-        .into()
+            self.epoch,
+            move |e| boundary::fallback_view(&cx, e, wrap(Msg::Reload)),
+        );
+        crate::focus::focus_root(crate::hotkeys::probe(window)).into()
     }
 }
 
