@@ -14,6 +14,8 @@ pub use event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 pub use output::{MonitorHandle, VideoModeHandle};
 pub use window::Window;
 
+pub(crate) use dnd::read_selection_text;
+
 mod dnd;
 mod event_loop;
 mod output;

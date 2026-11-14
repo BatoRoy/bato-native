@@ -75,6 +75,25 @@ impl<T> EventLoopBuilderExtWayland for EventLoopBuilder<T> {
     }
 }
 
+/// bato-native: reads the clipboard (the `wl_data_device` selection) as text,
+/// through the data device winit creates for desktop file drops.
+///
+/// Hyprland sends the selection only to a client's first `wl_data_device`,
+/// which is winit's, so a clipboard with its own data device (smithay-clipboard)
+/// sees nothing there. Blocks until the selection owner has sent the text
+/// (at most a few seconds; the owner may be this process's own clipboard
+/// thread).
+///
+/// `Err(())`: winit has no data device to read through (not on Wayland, no
+/// `wl_data_device_manager`, or the connection is gone), so read the
+/// clipboard another way. `Ok(None)`: no selection, no text in it, or the
+/// owner failed to send it.
+#[doc(hidden)]
+#[allow(clippy::result_unit_err)]
+pub fn read_selection_text() -> Result<Option<String>, ()> {
+    crate::platform_impl::wayland::read_selection_text()
+}
+
 /// Additional methods on [`Window`] that are specific to Wayland.
 ///
 /// [`Window`]: crate::window::Window

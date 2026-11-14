@@ -209,8 +209,10 @@ impl SeatHandler for WinitState {
         seat: WlSeat,
     ) {
         let mut state = WinitSeatState::new();
-        state.data_device =
-            self.data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
+        state.data_device = self
+            .data_device_manager
+            .as_ref()
+            .map(|m| crate::platform_impl::wayland::dnd::data_device(m, queue_handle, &seat));
         self.seats.insert(seat.id(), state);
     }
 
@@ -221,6 +223,7 @@ impl SeatHandler for WinitState {
         seat: WlSeat,
     ) {
         let _ = self.seats.remove(&seat.id());
+        crate::platform_impl::wayland::dnd::forget_seat(&seat);
         self.on_keyboard_destroy(&seat.id());
     }
 }

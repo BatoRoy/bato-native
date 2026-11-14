@@ -1,0 +1,278 @@
+From 7a15e02a99c77f71ff11b099b93de5188a57ee44 Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sat, 14 Nov 2026 16:32:02 +0100
+Subject: [PATCH] Wayland: read the clipboard selection through the file-drop
+ data device (Hyprland sends the selection only to a client's first
+ wl_data_device)
+
+---
+ src/platform/wayland.rs                     |  19 +++
+ src/platform_impl/linux/wayland/dnd.rs      | 145 +++++++++++++++++++-
+ src/platform_impl/linux/wayland/mod.rs      |   2 +
+ src/platform_impl/linux/wayland/seat/mod.rs |   7 +-
+ src/platform_impl/linux/wayland/state.rs    |   5 +-
+ 5 files changed, 171 insertions(+), 7 deletions(-)
+
+diff --git a/src/platform/wayland.rs b/src/platform/wayland.rs
+index 9c1a8e4..5906a60 100644
+--- a/src/platform/wayland.rs
++++ b/src/platform/wayland.rs
+@@ -75,6 +75,25 @@ impl<T> EventLoopBuilderExtWayland for EventLoopBuilder<T> {
+     }
+ }
+ 
++/// bato-native: reads the clipboard (the `wl_data_device` selection) as text,
++/// through the data device winit creates for desktop file drops.
++///
++/// Hyprland sends the selection only to a client's first `wl_data_device`,
++/// which is winit's, so a clipboard with its own data device (smithay-clipboard)
++/// sees nothing there. Blocks until the selection owner has sent the text
++/// (at most a few seconds; the owner may be this process's own clipboard
++/// thread).
++///
++/// `Err(())`: winit has no data device to read through (not on Wayland, no
++/// `wl_data_device_manager`, or the connection is gone), so read the
++/// clipboard another way. `Ok(None)`: no selection, no text in it, or the
++/// owner failed to send it.
++#[doc(hidden)]
++#[allow(clippy::result_unit_err)]
++pub fn read_selection_text() -> Result<Option<String>, ()> {
++    crate::platform_impl::wayland::read_selection_text()
++}
++
+ /// Additional methods on [`Window`] that are specific to Wayland.
+ ///
+ /// [`Window`]: crate::window::Window
+diff --git a/src/platform_impl/linux/wayland/dnd.rs b/src/platform_impl/linux/wayland/dnd.rs
+index c6093e4..c1e83fd 100644
+--- a/src/platform_impl/linux/wayland/dnd.rs
++++ b/src/platform_impl/linux/wayland/dnd.rs
+@@ -14,17 +14,29 @@
+ //! Only the copy action is offered: accepting "move" would let a file
+ //! manager delete the originals. The list is read through the event loop
+ //! (the pipe is a calloop source), never blocking.
++//!
++//! The same data device serves the clipboard: Hyprland (`dataDeviceForClient`)
++//! sends the selection, like drags, only to a client's first
++//! `wl_data_device`. This one is created when the event loop starts, before
++//! iced's clipboard (window_clipboard → smithay-clipboard) creates its own,
++//! which then never sees a selection, so paste found nothing. Clipboard reads
++//! go through [`read_selection_text`] (iced_winit, patched, calls it);
++//! writes still go through smithay-clipboard, whose `wl_data_source` the
++//! compositor accepts from any device.
+ 
+ use std::io::{ErrorKind, Read};
+ use std::path::PathBuf;
++use std::sync::{Mutex, PoisonError};
++use std::time::{Duration, Instant};
+ 
+ use sctk::compositor::SurfaceData;
+-use sctk::data_device_manager::data_device::{DataDeviceData, DataDeviceHandler};
++use sctk::data_device_manager::data_device::{DataDevice, DataDeviceData, DataDeviceHandler};
+ use sctk::data_device_manager::data_offer::{DataOfferHandler, DragOffer};
+-use sctk::data_device_manager::ReadPipe;
++use sctk::data_device_manager::{DataDeviceManagerState, ReadPipe};
+ use sctk::reexports::calloop::{PostAction, RegistrationToken};
+ use sctk::reexports::client::protocol::wl_data_device::WlDataDevice;
+ use sctk::reexports::client::protocol::wl_data_device_manager::DndAction;
++use sctk::reexports::client::protocol::wl_seat::WlSeat;
+ use sctk::reexports::client::protocol::wl_surface::WlSurface;
+ use sctk::reexports::client::{Connection, Proxy, QueueHandle};
+ use tracing::warn;
+@@ -216,7 +228,12 @@ impl DataDeviceHandler for WinitState {
+         }
+     }
+ 
+-    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
++    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, device: &WlDataDevice) {
++        // The seat that saw the latest selection is the one to paste from.
++        // SCTK keeps the offer (and drops it when the selection is cleared,
++        // without calling this), so reads always see the current one.
++        *selection_device() = Some(device.clone());
++    }
+ 
+     fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
+         if self.dnd.target.is_none() {
+@@ -249,3 +266,125 @@ impl DataOfferHandler for WinitState {
+         }
+     }
+ }
++
++// bato-native: the clipboard selection, read through the data device above.
++
++/// The data device to read the selection from (the latest seat to see one).
++static SELECTION_DEVICE: Mutex<Option<WlDataDevice>> = Mutex::new(None);
++
++fn selection_device() -> std::sync::MutexGuard<'static, Option<WlDataDevice>> {
++    SELECTION_DEVICE.lock().unwrap_or_else(PoisonError::into_inner)
++}
++
++/// A seat's data device: file drops and the clipboard selection.
++pub fn data_device(
++    manager: &DataDeviceManagerState,
++    queue_handle: &QueueHandle<WinitState>,
++    seat: &WlSeat,
++) -> DataDevice {
++    let device = manager.get_data_device(queue_handle, seat);
++    selection_device().get_or_insert_with(|| device.inner().clone());
++    device
++}
++
++/// The seat is gone: stop reading the selection through its device.
++pub fn forget_seat(seat: &WlSeat) {
++    let mut device = selection_device();
++    if device.as_ref().and_then(|d| d.data::<DataDeviceData>()).is_some_and(|d| d.seat() == seat) {
++        *device = None;
++    }
++}
++
++/// Text types, preferred first: smithay-clipboard's, then X11's older names.
++const TEXT_MIME_TYPES: [&str; 5] =
++    ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "TEXT", "STRING"];
++
++/// Give up when the selection owner sends nothing for this long...
++const READ_IDLE: Duration = Duration::from_secs(1);
++/// ...or has not finished after this long.
++const READ_TOTAL: Duration = Duration::from_secs(5);
++
++/// See [`crate::platform::wayland::read_selection_text`].
++pub fn read_selection_text() -> Result<Option<String>, ()> {
++    let device = selection_device().clone().ok_or(())?;
++    let connection = Connection::from_backend(device.backend().upgrade().ok_or(())?);
++    let Some(offer) = device.data::<DataDeviceData>().and_then(|d| d.selection_offer()) else {
++        return Ok(None);
++    };
++    let Some(mime) = offer.with_mime_types(|offered| {
++        TEXT_MIME_TYPES.into_iter().find(|t| offered.iter().any(|o| o == t))
++    }) else {
++        return Ok(None);
++    };
++    let mut pipe = match offer.receive(mime.to_owned()) {
++        Ok(pipe) => pipe,
++        Err(e) => {
++            warn!("cannot receive the clipboard: {e}");
++            return Ok(None);
++        },
++    };
++    // The request has to reach the compositor before the owner can answer.
++    // The owner may be this process (smithay-clipboard holds our copies): it
++    // writes from its own thread and queue, so blocking here is fine. The
++    // event loop holds no wl_display read intent outside its poll, so that
++    // thread can read the `send` event while this one waits.
++    if let Err(e) = connection.flush() {
++        warn!("cannot request the clipboard: {e}");
++        return Ok(None);
++    }
++    Ok(read_with_timeout(&mut pipe).map(|bytes| decode_text(mime, bytes)))
++}
++
++/// The pipe's contents, or `None` on an error or a stalled owner.
++fn read_with_timeout(pipe: &mut ReadPipe) -> Option<Vec<u8>> {
++    use rustix::event::{poll, PollFd, PollFlags, Timespec};
++    let start = Instant::now();
++    let mut bytes = Vec::new();
++    let mut chunk = [0u8; 16 * 1024];
++    loop {
++        let Some(left) = READ_TOTAL.checked_sub(start.elapsed()) else {
++            warn!("the clipboard owner did not finish within {READ_TOTAL:?}");
++            return None;
++        };
++        let wait = left.min(READ_IDLE);
++        let timeout = Timespec { tv_sec: wait.as_secs() as _, tv_nsec: wait.subsec_nanos() as _ };
++        match poll(&mut [PollFd::new(&*pipe, PollFlags::IN)], Some(&timeout)) {
++            Ok(0) => {
++                warn!("the clipboard owner sent nothing for {wait:?}");
++                return None;
++            },
++            Ok(_) => {},
++            Err(rustix::io::Errno::INTR) => continue,
++            Err(e) => {
++                warn!("reading the clipboard failed: {e}");
++                return None;
++            },
++        }
++        match pipe.read(&mut chunk) {
++            Ok(0) => return Some(bytes),
++            Ok(n) => bytes.extend_from_slice(&chunk[..n]),
++            Err(e) if e.kind() == ErrorKind::Interrupted => {},
++            Err(e) => {
++                warn!("reading the clipboard failed: {e}");
++                return None;
++            },
++        }
++    }
++}
++
++/// Text from `mime` data: `STRING` is Latin-1, the rest UTF-8 (lossy);
++/// `text/plain` line ends (CRLF by RFC 2046) become LF, as in
++/// smithay-clipboard.
++fn decode_text(mime: &str, bytes: Vec<u8>) -> String {
++    let text = if mime == "STRING" {
++        bytes.into_iter().map(char::from).collect()
++    } else {
++        String::from_utf8(bytes)
++            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
++    };
++    if mime.starts_with("text/plain") {
++        text.replace("\r\n", "\n").replace('\r', "\n")
++    } else {
++        text
++    }
++}
+diff --git a/src/platform_impl/linux/wayland/mod.rs b/src/platform_impl/linux/wayland/mod.rs
+index caddb5a..e578f1e 100644
+--- a/src/platform_impl/linux/wayland/mod.rs
++++ b/src/platform_impl/linux/wayland/mod.rs
+@@ -14,6 +14,8 @@ pub use event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+ pub use output::{MonitorHandle, VideoModeHandle};
+ pub use window::Window;
+ 
++pub(crate) use dnd::read_selection_text;
++
+ mod dnd;
+ mod event_loop;
+ mod output;
+diff --git a/src/platform_impl/linux/wayland/seat/mod.rs b/src/platform_impl/linux/wayland/seat/mod.rs
+index 532e99e..26ca3f7 100644
+--- a/src/platform_impl/linux/wayland/seat/mod.rs
++++ b/src/platform_impl/linux/wayland/seat/mod.rs
+@@ -209,8 +209,10 @@ impl SeatHandler for WinitState {
+         seat: WlSeat,
+     ) {
+         let mut state = WinitSeatState::new();
+-        state.data_device =
+-            self.data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
++        state.data_device = self
++            .data_device_manager
++            .as_ref()
++            .map(|m| crate::platform_impl::wayland::dnd::data_device(m, queue_handle, &seat));
+         self.seats.insert(seat.id(), state);
+     }
+ 
+@@ -221,6 +223,7 @@ impl SeatHandler for WinitState {
+         seat: WlSeat,
+     ) {
+         let _ = self.seats.remove(&seat.id());
++        crate::platform_impl::wayland::dnd::forget_seat(&seat);
+         self.on_keyboard_destroy(&seat.id());
+     }
+ }
+diff --git a/src/platform_impl/linux/wayland/state.rs b/src/platform_impl/linux/wayland/state.rs
+index d1a0c0f..8267375 100644
+--- a/src/platform_impl/linux/wayland/state.rs
++++ b/src/platform_impl/linux/wayland/state.rs
+@@ -154,8 +154,9 @@ impl WinitState {
+         let mut seats = AHashMap::default();
+         for seat in seat_state.seats() {
+             let mut state = WinitSeatState::new();
+-            state.data_device =
+-                data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
++            state.data_device = data_device_manager
++                .as_ref()
++                .map(|m| crate::platform_impl::wayland::dnd::data_device(m, queue_handle, &seat));
+             seats.insert(seat.id(), state);
+         }
+ 
+-- 
+2.56.0
+

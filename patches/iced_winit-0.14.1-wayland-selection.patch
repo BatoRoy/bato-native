@@ -1,0 +1,50 @@
+From f0518a7c498047ad1c7ffe00aaafd79f6cb59d7b Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sat, 14 Nov 2026 16:31:18 +0100
+Subject: [PATCH] Wayland: read the clipboard through winit's data device
+ (Hyprland sends the selection only to a client's first wl_data_device)
+
+---
+ src/clipboard.rs | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/src/clipboard.rs b/src/clipboard.rs
+index b1463fd..c1ce87a 100644
+--- a/src/clipboard.rs
++++ b/src/clipboard.rs
+@@ -54,7 +54,31 @@ impl Clipboard {
+     pub fn read(&self, kind: Kind) -> Option<String> {
+         match &self.state {
+             State::Connected { clipboard, .. } => match kind {
+-                Kind::Standard => clipboard.read().ok(),
++                Kind::Standard => {
++                    // bato-native: on Wayland, read through winit's data
++                    // device (patched winit). Hyprland sends the selection
++                    // only to a client's first `wl_data_device`, which is
++                    // winit's (desktop file drops), so window_clipboard's
++                    // own device never sees one. Writes and the primary
++                    // selection stay on window_clipboard.
++                    #[cfg(all(
++                        feature = "wayland",
++                        unix,
++                        not(any(
++                            target_os = "macos",
++                            target_os = "ios",
++                            target_os = "android",
++                            target_os = "emscripten",
++                            target_os = "redox"
++                        ))
++                    ))]
++                    if let Ok(text) =
++                        winit::platform::wayland::read_selection_text()
++                    {
++                        return text;
++                    }
++                    clipboard.read().ok()
++                }
+                 Kind::Primary => clipboard.read_primary().and_then(Result::ok),
+             },
+             State::Unavailable => None,
+-- 
+2.56.0
+

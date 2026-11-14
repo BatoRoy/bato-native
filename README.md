@@ -20,10 +20,11 @@ fix to text, scrolling, theme or a widget is made once and reaches an app when i
 
 | Crate | Why |
 |---|---|
-| `winit` (iced's fork) | Wayland `axis_value120` hi-res wheel deltas, Wayland file drops, keypad keys that honour NumLock (`key_without_modifiers`, X11 and Wayland) |
+| `winit` (iced's fork) | Wayland `axis_value120` hi-res wheel deltas, Wayland file drops, keypad keys that honour NumLock (`key_without_modifiers`, X11 and Wayland), clipboard reads through the file-drop `wl_data_device` |
 | `cosmic-text` 0.15.0 | FreeType light hinting, so text matches Chromium |
 | `cryoglyph` 0.1.0 | Skia's gamma preblend in the glyph shader |
 | `iced_wgpu` 0.14.0 | `COPY_SRC` surface usage, for the dialog backdrop blur |
+| `iced_winit` 0.14.1 | Wayland paste: reads the clipboard through winit's data device. Hyprland sends the selection only to a client's first `wl_data_device` (winit's, for file drops), so window_clipboard's own never sees one; writes and the primary selection stay on window_clipboard |
 
 `scripts/regen-patched.sh [out-dir]` rebuilds `patched/` from the upstream sources (sha256-checked
 `.crate` files, iced's winit fork at a pinned commit), `patches/*.patch` and the tripwire blocks in
@@ -36,8 +37,8 @@ compilation fails rather than silently losing the fix. Build with `--locked`.
 ## Using bato-native in an app
 
 `[patch]` is honoured only in the root manifest, so each app carries the block itself. Every
-bato-native `tag` must match: the template's `app-client-native/Cargo.toml` has seven (kit,
-shell, gallery and the four patches); `make native-bump TAG=…` keeps them in step and `make lint`
+bato-native `tag` must match: the template's `app-client-native/Cargo.toml` has eight (kit,
+shell, gallery and the five patches); `make native-bump TAG=…` keeps them in step and `make lint`
 fails if they disagree:
 
 ```toml
@@ -51,6 +52,7 @@ winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
 cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
 cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
 iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
+iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v0.1.0" }
 ```
 
 Working on the kit and an app together, without tagging: in the app, a git-ignored

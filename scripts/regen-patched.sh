@@ -76,12 +76,16 @@ crate cryoglyph 0.1.0 08bc795bdbccdbd461736fb163930a009da6597b226d6f6fce33e7a8eb
   cryoglyph-0.1.0-skia-gamma.patch
 crate iced_wgpu 0.14.0 ff144a999b0ca0f8a10257934500060240825c42e950ec0ebee9c8ae30561c13 \
   iced_wgpu-0.14.0-surface-copy-src.patch
+crate iced_winit 0.14.1 7589888c8e951899cc688247a69933bb7a0511f0b4b2e122ac3fcd5dacb37f72 \
+  iced_winit-0.14.1-wayland-selection.patch
 
 # iced's winit fork (value120 wheel deltas on Wayland), pinned, with smol_str 0.2,
-# desktop file drops on Wayland (wl_data_device text/uri-list), and keypad keys
-# that honour NumLock in key_without_modifiers (X11 and Wayland, xkb).
+# desktop file drops on Wayland (wl_data_device text/uri-list), keypad keys
+# that honour NumLock in key_without_modifiers (X11 and Wayland, xkb), and
+# clipboard reads through the file-drop data device (Hyprland sends the
+# selection only to a client's first wl_data_device; iced_winit reads it).
 git clone -q --no-checkout "$WINIT_REPO" "$work/winit"
 git -C "$work/winit" -c advice.detachedHead=false checkout -q "$WINIT_REV"
 finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch winit-wayland-file-drop.patch \
-  winit-xkb-keypad-numlock.patch
+  winit-xkb-keypad-numlock.patch winit-wayland-selection.patch
 rm -rf "$out/winit/.git"

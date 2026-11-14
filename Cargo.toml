@@ -19,6 +19,7 @@ winit = { path = "patched/winit" }
 cosmic-text = { path = "patched/cosmic-text" }
 cryoglyph = { path = "patched/cryoglyph" }
 iced_wgpu = { path = "patched/iced_wgpu" }
+iced_winit = { path = "patched/iced_winit" }
 
 [profile.release]
 opt-level = 3

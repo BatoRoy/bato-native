@@ -154,8 +154,9 @@ impl WinitState {
         let mut seats = AHashMap::default();
         for seat in seat_state.seats() {
             let mut state = WinitSeatState::new();
-            state.data_device =
-                data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
+            state.data_device = data_device_manager
+                .as_ref()
+                .map(|m| crate::platform_impl::wayland::dnd::data_device(m, queue_handle, &seat));
             seats.insert(seat.id(), state);
         }
 
