@@ -46,7 +46,7 @@ use crate::anim::{ease_standard, fade};
 use crate::ctx::Ctx;
 use crate::cursor::Cursor;
 use crate::scale::snap_rect;
-use crate::scroller::scroll_area;
+use crate::scroller::{chain, scroll_area};
 use crate::style::{c, lerp};
 
 type El<'a, M> = Element<'a, M, iced::Theme, iced::Renderer>;
@@ -284,6 +284,9 @@ struct Fade {
 
 #[derive(Debug, Default)]
 struct State {
+    /// The touch-latch identity (holds a finger while it drags a handle,
+    /// so the scrollers around step aside).
+    token: u64,
     /// The group's length at the last layout.
     total: f32,
     drag: Option<Drag>,
@@ -340,7 +343,10 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for PanelGroup<'a, M> {
         tree::Tag::of::<State>()
     }
     fn state(&self) -> tree::State {
-        tree::State::new(State::default())
+        tree::State::new(State {
+            token: chain::next_id(),
+            ..State::default()
+        })
     }
     fn children(&self) -> Vec<Tree> {
         self.panels.iter().map(Tree::new).collect()
@@ -447,6 +453,9 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for PanelGroup<'a, M> {
             && state.drag.is_none()
             && !shell.is_event_captured()
         {
+            if let Some(f) = finger {
+                chain::touch_claim(f, state.token);
+            }
             state.drag = Some(Drag {
                 handle: i,
                 finger,
@@ -459,7 +468,9 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for PanelGroup<'a, M> {
         }
 
         let moved = match event {
-            Event::Mouse(mouse::Event::CursorMoved { position }) => Some((*position, None)),
+            // The cursor, not the event: scrollers translate the cursor
+            // into content coordinates, not the event's position.
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => cursor.position().map(|p| (p, None)),
             Event::Touch(touch::Event::FingerMoved { id, position }) => {
                 Some((*position, Some(id.0)))
             }
@@ -508,15 +519,20 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for PanelGroup<'a, M> {
 
         let released = match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(None),
-            Event::Touch(
-                touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
-            ) => Some(Some(id.0)),
+            Event::Touch(touch::Event::FingerLifted { id, .. }) => Some(Some(id.0)),
+            // A scroller stepping aside for us only cancels presses.
+            Event::Touch(touch::Event::FingerLost { id, .. }) if !chain::is_synthetic_lost() => {
+                Some(Some(id.0))
+            }
             _ => None,
         };
         if let Some(finger) = released
             && state.drag.as_ref().is_some_and(|d| d.finger == finger)
         {
             let d = state.drag.take().unwrap();
+            if let Some(f) = d.finger {
+                chain::touch_release(f, state.token);
+            }
             if d.last != d.start
                 && let Some(f) = &self.on_commit
             {

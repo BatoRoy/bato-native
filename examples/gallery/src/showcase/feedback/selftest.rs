@@ -53,12 +53,9 @@ pub fn steps() -> Vec<Step<Msg>> {
         Step::Key(Named::Enter, none),
         wait(300),
         Step::Shot("stepper-enter"),
-        // Accordion: open the first, catch it mid-way, then open the second
-        // (the first closes).
+        // Accordion: open the first, then the second (the first closes).
         Step::Click(at(accordion::ITEMS, 200.0, 23.0), left),
-        wait(90),
-        Step::Shot("accordion-opening"),
-        wait(300),
+        wait(400),
         Step::Shot("accordion-open"),
         Step::Click(at(accordion::ITEMS, 200.0, 91.0 + 8.0 + 23.0), left),
         wait(400),

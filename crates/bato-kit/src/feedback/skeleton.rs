@@ -87,18 +87,19 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Skeleton {
         &mut self,
         _tree: &mut Tree,
         event: &iced::Event,
-        _layout: Layout<'_>,
+        layout: Layout<'_>,
         _cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
         _clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut iced::advanced::Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
         if self.animate
             && matches!(
                 event,
                 iced::Event::Window(iced::window::Event::RedrawRequested(_))
             )
+            && layout.bounds().intersects(viewport)
         {
             shell.request_redraw();
         }
