@@ -33,12 +33,11 @@
 //!     Action::RestartToUpdate => return restart_to_update(&updater, Msg::RestartFailed),
 //!     Action::None | Action::Navigated(_) => {}
 //! }
-//! // the updater's phases
+//! // the updater's phases (bato-shell `iced_ext::update_status`)
 //! Msg::Update(phase) => frame.set_update_status(match phase {
 //!     UpdatePhase::Downloaded { version } => UpdateStatus::Downloaded { version },
 //!     /* … one arm per phase */
 //! }),
-//! }
 //!
 //! // view
 //! let cx = frame.ctx();

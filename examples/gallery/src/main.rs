@@ -135,7 +135,7 @@ impl App {
             frame.toast("Hello, Ada!", Tone::Success);
             frame.toast("Something went wrong", Tone::Error);
         }
-        let app = App {
+        let mut app = App {
             frame,
             showcase: showcase::State::new(tab),
             interaction: Default::default(),
@@ -148,7 +148,6 @@ impl App {
             backend_version: None,
             smoke: Smoke::default(),
         };
-        let mut app = app;
         let mut task = app.ping();
         match app.selftest.clone() {
             Some(SelfTest::Update(s)) => app.frame.set_update_status(s),
