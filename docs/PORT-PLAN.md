@@ -96,10 +96,10 @@ Done:
 | 1.6 | BatoGit Ship infers native clients | BatoGit branch `native-client-ship` |
 | 1.6 | Skill docs | bato branch `native-flavor-docs` |
 
-Gaps carried into Phase 2:
-- About has no "Restart to update" button. A finished update shows a toast, and the next launch runs the new version.
-- No X11 window icon.
-- File dialogs open unparented on Wayland (needs an xdg-foreign export).
+Gaps carried into Phase 2 (all but the last closed in Phase 2):
+- About has no "Restart to update" button. A finished update shows a toast, and the next launch runs the new version. **Done:** About and the sidebar update card, as in Electron.
+- No X11 window icon. **Done.**
+- File dialogs open unparented on Wayland (needs an xdg-foreign export). **Done:** xdg-foreign export, no iced patch.
 - Fresh-clone CI hasn't run on GitHub yet.
 
 ### Phase 2: Interaction core (F2, 3 agents in parallel)
@@ -111,6 +111,20 @@ Gaps carried into Phase 2:
 | Scroller + Field | General scroller (bounded, horizontal, nested, `scroll_to`, edge fade; reuses the PoC physics); `Field` and control style (INF-7, 10) |
 
 **Checkpoint 2:** focus rings, Tab order and a menu/popover demo in the gallery.
+
+#### Phase 2 status (2026-11-15): done, tagged `v0.2.0`
+
+| Area | Module |
+|---|---|
+| Overlays | `floating.rs` (exact `floating.ts` port), `overlay::anchored` + `context_area`, `menu_list`, overlay stack (`modal::level`, drawers, palette above toasts), `hotkeys` |
+| Focus | `focus_root`, `focus_scope` (trap, autofocus, restore), `roving`, focus-visible rings, keyboard activation; every overlay level trapped |
+| Scrolling | general `scroll_area` (bounded, horizontal, both axes, edge fade), Chromium wheel/touchpad/touch latching, `scroll_to` / `reveal` / `focus_into_view`, `virtual_list` |
+| Fields | `field` + `text_control` + `control_style` |
+
+- Fidelity on every reference view is unchanged.
+- Demos and scripted self-tests live in the gallery's Interaction lab: `BATO_SELFTEST=overlay|scroll|focus:<steps>`.
+- Deliberate deviations from React (Esc closes only the top layer, Home/End in menus): see the agents' notes in the merge commits.
+- Not yet: Tab into a popover right after its trigger (overlays come last in Tab order).
 
 ### Phase 3: Component batches (up to 5 agents at a time)
 
