@@ -35,7 +35,9 @@ use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay};
 use iced::keyboard::{self, key::Named};
 use iced::widget::{column, container, row, text_input};
-use iced::{Alignment, Background, Border, Color, Event, Length, Padding, Rectangle, Size, Vector, mouse};
+use iced::{
+    Alignment, Background, Border, Color, Event, Length, Padding, Rectangle, Size, Vector, mouse,
+};
 
 use crate::El;
 use crate::ctx::Ctx;
@@ -456,9 +458,12 @@ macro_rules! delegate {
             renderer: &iced::Renderer,
             operation: &mut dyn widget::Operation,
         ) {
-            self.content
-                .as_widget_mut()
-                .operate(&mut tree.children[0], layout, renderer, operation);
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                operation,
+            );
         }
         fn overlay<'b>(
             &'b mut self,

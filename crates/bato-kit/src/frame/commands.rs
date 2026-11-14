@@ -70,10 +70,14 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 .keywords("settings preferences"),
         );
         v.push(
-            Command::new("app-about", format!("About {app}"), Msg::Open(Dialog::About))
-                .group(app)
-                .icon(Ico::Info)
-                .keywords("version"),
+            Command::new(
+                "app-about",
+                format!("About {app}"),
+                Msg::Open(Dialog::About),
+            )
+            .group(app)
+            .icon(Ico::Info)
+            .keywords("version"),
         );
         v.push(
             Command::new("app-update", "Check for updates", Msg::Open(Dialog::About))
@@ -99,12 +103,10 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     }
 
     pub(super) fn palette_level<'a, M: Clone + 'a>(&self, wrap: fn(Msg<P>) -> M) -> Modal<'a, M> {
-        self.palette.level(
-            &self.cx,
-            &self.palette_commands(),
-            PLACEHOLDER,
-            move |m| wrap(Msg::Palette(m)),
-        )
+        self.palette
+            .level(&self.cx, &self.palette_commands(), PLACEHOLDER, move |m| {
+                wrap(Msg::Palette(m))
+            })
     }
 }
 

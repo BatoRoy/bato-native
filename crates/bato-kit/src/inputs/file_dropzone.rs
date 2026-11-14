@@ -39,8 +39,8 @@ use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::widget::{column, container};
 use iced::{
-    Alignment, Border, Color, Event, Length, Padding, Radians, Rectangle, Size, mouse,
-    touch, window,
+    Alignment, Border, Color, Event, Length, Padding, Radians, Rectangle, Size, mouse, touch,
+    window,
 };
 
 use crate::El;
@@ -326,7 +326,12 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for Zone<'a, M> {
             st.highlighted = hover;
             let now = Instant::now();
             let from = st.tween.value(now);
-            st.tween = Tween::new(from, if hover { 1.0 } else { 0.0 }, TRANSITION, ease_standard);
+            st.tween = Tween::new(
+                from,
+                if hover { 1.0 } else { 0.0 },
+                TRANSITION,
+                ease_standard,
+            );
             shell.request_redraw();
         }
     }
@@ -480,7 +485,10 @@ mod tests {
             let p = perimeter(w, 160.0);
             let n = p / (DASH + dash_gap(p));
             assert!((n - n.round()).abs() < 1e-3, "{w}: {n}");
-            assert!(dash_gap(p) >= GAP - 1e-3, "rounding down never shrinks the gap");
+            assert!(
+                dash_gap(p) >= GAP - 1e-3,
+                "rounding down never shrinks the gap"
+            );
         }
     }
 
@@ -511,10 +519,7 @@ mod tests {
         );
         // LF only, no trailing newline, localhost and the own host name.
         let list = b"file://localhost/etc/hosts\nfile://box/srv/x\nFILE:///y";
-        assert_eq!(
-            parse(list, Some("box")),
-            p(&["/etc/hosts", "/srv/x", "/y"])
-        );
+        assert_eq!(parse(list, Some("box")), p(&["/etc/hosts", "/srv/x", "/y"]));
         // Other hosts and schemes are not local files; `file:/p` is.
         let list = b"file://other/srv/x\nhttps://example.com/a.png\nfile:/z\n  file:///trim  \n";
         assert_eq!(parse(list, Some("box")), p(&["/z", "/trim"]));
@@ -531,8 +536,17 @@ mod tests {
     #[test]
     fn drag_position_rules() {
         let b = Rectangle::new(iced::Point::new(10.0, 10.0), Size::new(100.0, 50.0));
-        assert!(drag_over(mouse::Cursor::Available(iced::Point::new(20.0, 20.0)), b));
-        assert!(!drag_over(mouse::Cursor::Available(iced::Point::new(0.0, 0.0)), b));
-        assert!(drag_over(mouse::Cursor::Unavailable, b), "no position: the window");
+        assert!(drag_over(
+            mouse::Cursor::Available(iced::Point::new(20.0, 20.0)),
+            b
+        ));
+        assert!(!drag_over(
+            mouse::Cursor::Available(iced::Point::new(0.0, 0.0)),
+            b
+        ));
+        assert!(
+            drag_over(mouse::Cursor::Unavailable, b),
+            "no position: the window"
+        );
     }
 }

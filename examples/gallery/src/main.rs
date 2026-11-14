@@ -154,7 +154,11 @@ impl App {
                     .into_iter()
                     .map(|s| s.map(Msg::Interaction));
                 // `modals`: the frame's palette first, then the lab section.
-                let frame = if n == "modals" { palette_selftest() } else { Vec::new() };
+                let frame = if n == "modals" {
+                    palette_selftest()
+                } else {
+                    Vec::new()
+                };
                 Some(frame.into_iter().chain(lab).collect())
             }),
         };

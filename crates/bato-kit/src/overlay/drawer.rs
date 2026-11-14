@@ -77,7 +77,13 @@ impl<'a, M: Clone + 'a> Drawer<'a, M> {
     /// The drawer as a level for [`crate::frame::Frame::view_with`].
     pub fn into_level(self) -> Modal<'a, M> {
         let side = self.side;
-        let panel = panel(&self.cx, side, self.title.as_deref(), self.on_close.clone(), self.body);
+        let panel = panel(
+            &self.cx,
+            side,
+            self.title.as_deref(),
+            self.on_close.clone(),
+            self.body,
+        );
         level(Kind::Drawer(side, self.size), panel, self.on_close)
     }
 }
@@ -150,7 +156,10 @@ mod tests {
             bato_theme::Rgb::new(0x8b, 0x5c, 0xf6),
         ));
         let d = drawer::<()>(&cx, iced::widget::Space::new(), ());
-        assert_eq!((d.side, d.size, d.title.is_none()), (Side::Right, 320.0, true));
+        assert_eq!(
+            (d.side, d.size, d.title.is_none()),
+            (Side::Right, 320.0, true)
+        );
         for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
             let l = drawer::<()>(&cx, iced::widget::Space::new(), ())
                 .side(side)

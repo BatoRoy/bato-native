@@ -303,14 +303,22 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ErrorBoundary<'a, M> 
     ) -> mouse::Interaction {
         let child = layout.children().next().unwrap();
         if let Some(fb) = &self.shown {
-            return fb
-                .as_widget()
-                .mouse_interaction(&tree.children[1], child, cursor, viewport, renderer);
+            return fb.as_widget().mouse_interaction(
+                &tree.children[1],
+                child,
+                cursor,
+                viewport,
+                renderer,
+            );
         }
         guarded(|| {
-            self.content
-                .as_widget()
-                .mouse_interaction(&tree.children[0], child, cursor, viewport, renderer)
+            self.content.as_widget().mouse_interaction(
+                &tree.children[0],
+                child,
+                cursor,
+                viewport,
+                renderer,
+            )
         })
         .unwrap_or_default()
     }
@@ -330,7 +338,11 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ErrorBoundary<'a, M> 
         }
         let content = &mut self.content;
         let t = &mut tree.children[0];
-        if let Err(e) = guarded(|| content.as_widget_mut().operate(t, child, renderer, operation)) {
+        if let Err(e) = guarded(|| {
+            content
+                .as_widget_mut()
+                .operate(t, child, renderer, operation)
+        }) {
             Self::caught(tree, e);
         }
     }
@@ -386,9 +398,13 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ErrorBoundary<'a, M> 
     ) -> Option<overlay::Element<'b, M, iced::Theme, iced::Renderer>> {
         let child = layout.children().next().unwrap();
         if let Some(fb) = &mut self.shown {
-            return fb
-                .as_widget_mut()
-                .overlay(&mut tree.children[1], child, renderer, viewport, translation);
+            return fb.as_widget_mut().overlay(
+                &mut tree.children[1],
+                child,
+                renderer,
+                viewport,
+                translation,
+            );
         }
         if tree.state.downcast_ref::<State>().error.is_some() {
             return None;
@@ -429,7 +445,7 @@ mod tests {
         install_panic_hook();
         assert_eq!(guarded(|| 2 + 2), Ok(4));
         assert_eq!(guarded(|| -> u8 { panic!("boom") }), Err("boom".into()));
-        let n: Option<u8> = None;
+        let n: Option<u8> = std::hint::black_box(None);
         let e = guarded(|| n.expect("no value")).unwrap_err();
         assert_eq!(e, "no value");
         assert_eq!(

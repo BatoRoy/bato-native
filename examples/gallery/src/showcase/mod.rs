@@ -25,7 +25,10 @@ pub enum Effect {
     Toast(String, Tone),
     /// A FileDropzone click: open the portal file chooser and send the
     /// chosen paths back as `reply(paths)` (React's `onPaths`).
-    OpenFiles { multiple: bool, reply: Reply },
+    OpenFiles {
+        multiple: bool,
+        reply: Reply,
+    },
 }
 
 /// Where the chosen paths of [`Effect::OpenFiles`] go.

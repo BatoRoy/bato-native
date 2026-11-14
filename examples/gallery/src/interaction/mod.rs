@@ -84,6 +84,12 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
                 .map(|s| s.map(Msg::Overlay))
                 .collect(),
         ),
+        "boundary" => Some(
+            modals::boundary_selftest()
+                .into_iter()
+                .map(|s| s.map(Msg::Modals))
+                .collect(),
+        ),
         "modals" => Some(
             modals::selftest()
                 .into_iter()

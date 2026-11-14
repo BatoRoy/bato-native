@@ -29,6 +29,8 @@ pub struct State {
     confirm: bool,
     drawer: Option<Side>,
     palette: Palette,
+    /// `BATO_SELFTEST=boundary`: a widget that panics while drawing.
+    crash: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,9 @@ pub enum Msg {
     Browse,
     Picked(Vec<PathBuf>),
     Dropped(Vec<PathBuf>),
+    /// `BATO_SELFTEST=boundary` only (no button: with `panic = "abort"`, the
+    /// release profile, a panic ends the process).
+    Crash,
 }
 
 impl Msg {
@@ -88,8 +93,9 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Drawer(s) => state.drawer = s,
         Msg::OpenPalette => state.palette.open(),
         Msg::Palette(m) => {
+            // Through the app's update, so the command's toast shows.
             if let Some(Outcome::Run(run)) = state.palette.update(m, &commands()) {
-                return update(state, run);
+                return Task::done(run);
             }
         }
         Msg::Browse => {
@@ -99,6 +105,7 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
             };
             return iced_ext::open_files(o).map(|r| Msg::Picked(r.unwrap_or_default()));
         }
+        Msg::Crash => state.crash = true,
         Msg::Run(_) | Msg::Picked(_) | Msg::Dropped(_) => {}
     }
     Task::none()
@@ -119,7 +126,7 @@ fn target<'a>(name: &'static str, el: impl Into<El<'a, Msg>>) -> El<'a, Msg> {
     container(el).id(id(name)).into()
 }
 
-pub fn view<'a>(_state: &'a State, cx: &Ctx) -> El<'a, Msg> {
+pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
     let on = cx.on_card();
     let p = on.p();
     let triggers = row![
@@ -182,10 +189,54 @@ pub fn view<'a>(_state: &'a State, cx: &Ctx) -> El<'a, Msg> {
             .on_browse(Msg::Browse)
             .on_drop(Msg::Dropped),
     );
+    let mut body = column![triggers, sides, zone].spacing(16);
+    if state.crash {
+        body = body.push(El::new(Crash));
+    }
     card(cx, "Modal family, palette and file drop")
         .icon(Ico::Upload)
-        .body(column![triggers, sides, zone].spacing(16))
+        .body(body)
         .into()
+}
+
+/// Panics in `draw`: the frame's error boundary shows React's fallback.
+struct Crash;
+
+impl<M> bato_kit::iced::advanced::Widget<M, bato_kit::iced::Theme, bato_kit::iced::Renderer>
+    for Crash
+{
+    fn size(&self) -> bato_kit::iced::Size<Length> {
+        bato_kit::iced::Size::new(Length::Fill, Length::Fixed(1.0))
+    }
+    fn layout(
+        &mut self,
+        _: &mut bato_kit::iced::advanced::widget::Tree,
+        _: &bato_kit::iced::Renderer,
+        limits: &bato_kit::iced::advanced::layout::Limits,
+    ) -> bato_kit::iced::advanced::layout::Node {
+        bato_kit::iced::advanced::layout::Node::new(limits.width(Length::Fill).height(1.0).max())
+    }
+    fn draw(
+        &self,
+        _: &bato_kit::iced::advanced::widget::Tree,
+        _: &mut bato_kit::iced::Renderer,
+        _: &bato_kit::iced::Theme,
+        _: &bato_kit::iced::advanced::renderer::Style,
+        _: bato_kit::iced::advanced::Layout<'_>,
+        _: mouse::Cursor,
+        _: &bato_kit::iced::Rectangle,
+    ) {
+        panic!("Cannot read properties of undefined (reading 'map')");
+    }
+}
+
+/// `BATO_SELFTEST=boundary`: a panic while drawing, the fallback, Reload.
+pub fn boundary_selftest() -> Vec<Step<Msg>> {
+    vec![
+        Step::Message(Msg::Crash),
+        Step::Wait(Duration::from_millis(400)),
+        Step::Shot("boundary-fallback"),
+    ]
 }
 
 /// The open levels, bottom first.
@@ -287,7 +338,10 @@ pub fn selftest() -> Vec<Step<Msg>> {
         Step::Shot("zone-hover"),
         Step::Event(Event::Window(window::Event::FileHovered(file("a")))),
         Step::Event(Event::Window(window::Event::FileHovered(file("b")))),
-        Step::Move(Target::Id(id(ZONE), bato_kit::iced::Vector::new(40.0, 40.0))),
+        Step::Move(Target::Id(
+            id(ZONE),
+            bato_kit::iced::Vector::new(40.0, 40.0),
+        )),
         Step::Wait(Duration::from_millis(300)),
         Step::Shot("zone-drag-over"),
         Step::Event(Event::Window(window::Event::FileDropped(file("a")))),
