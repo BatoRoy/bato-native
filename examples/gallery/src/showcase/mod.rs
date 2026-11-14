@@ -272,6 +272,9 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
         "feedback" => Some(map(feedback::selftest::steps(), Msg::Feedback)),
         "pickers" => Some(overlays::triggers::selftest()),
         "layout" => Some(map(layout::selftest::steps(), Msg::Layout)),
+        "editor" => Some(map(inputs::code_editor::selftest(), |m| {
+            Msg::Inputs(inputs::Msg::CodeEditor(m))
+        })),
         _ => None,
     }
 }

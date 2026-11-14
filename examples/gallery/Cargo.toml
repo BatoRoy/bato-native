@@ -7,6 +7,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
-bato-kit = { path = "../../crates/bato-kit" }
+bato-kit = { path = "../../crates/bato-kit", features = ["editor"] }
 bato-shell = { path = "../../crates/bato-shell" }
 
