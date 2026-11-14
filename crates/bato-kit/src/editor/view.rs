@@ -148,7 +148,7 @@ fn build_numbers(fs: &mut ct::FontSystem, count: usize) -> (Arc<ct::Buffer>, f32
     buf.set_text(
         fs,
         &text,
-        &ct::Attrs::new().family(ct::Family::Monospace),
+        &ct::Attrs::new().family(ct::Family::Name(super::engine::mono_family(fs))),
         ct::Shaping::Advanced,
         None,
     );
@@ -272,7 +272,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for DocView<'_, M> {
                 buf.set_text(
                     fs,
                     p,
-                    &ct::Attrs::new().family(ct::Family::Monospace),
+                    &ct::Attrs::new().family(ct::Family::Name(super::engine::mono_family(fs))),
                     ct::Shaping::Advanced,
                     None,
                 );

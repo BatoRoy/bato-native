@@ -221,7 +221,16 @@ fn dump_scopes() {
         "function greet(name) {\n  // say hello\n  return `Hello, ${name}!`\n}\n\ngreet('world')"
             .into(),
     );
-    let syn = ss.find_syntax_by_extension(&ext).unwrap();
+    let syn = match std::env::var("NAME") {
+        Ok(n) => ss.find_syntax_by_name(&n).unwrap(),
+        Err(_) => ss.find_syntax_by_extension(&ext).unwrap(),
+    };
+    for e in ["js", "jsx", "ts", "tsx", "mjs"] {
+        eprintln!(
+            "ext {e} -> {:?}",
+            ss.find_syntax_by_extension(e).map(|s| &s.name)
+        );
+    }
     eprintln!("syntax: {}", syn.name);
     let mut ps = ParseState::new(syn);
     let mut stack = ScopeStack::new();
@@ -298,4 +307,20 @@ fn vim_modes_and_motions() {
     d.vi_key(fs.raw(), ct::Action::Escape);
     key(&mut d, fs.raw(), "u");
     eprintln!("after u: {:?}", d.text());
+}
+
+/// `cargo test -p bato-kit --features editor load_cost -- --ignored --nocapture`
+/// (dependencies are built at opt-level 2 in dev).
+#[test]
+#[ignore]
+fn load_cost() {
+    let t = std::time::Instant::now();
+    let _ = syntax::system();
+    eprintln!("syntax set: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    let _ = doc(
+        "function f() {}\n".repeat(200).as_str(),
+        Language::TypeScript,
+    );
+    eprintln!("200 TS lines highlighted + shaped: {:?}", t.elapsed());
 }

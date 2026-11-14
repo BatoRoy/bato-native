@@ -194,7 +194,7 @@ impl Doc {
             self.pending = text.to_string();
             return;
         };
-        let attrs = default_attrs();
+        let attrs = default_attrs(fs);
         with_ed!(eng, |e| {
             e.set_selection(ct::Selection::None);
             e.set_cursor(ct::Cursor::new(0, 0));
@@ -222,7 +222,7 @@ impl Doc {
             buffer.set_text(
                 fs,
                 &std::mem::take(&mut self.pending),
-                &default_attrs(),
+                &default_attrs(fs),
                 ct::Shaping::Advanced,
                 None,
             );
@@ -643,9 +643,22 @@ pub enum Pointer {
     Extend,
 }
 
-pub fn default_attrs() -> ct::Attrs<'static> {
+/// The family CSS `monospace` resolves to (cosmic-text's monospace family,
+/// Noto Sans Mono on Linux, like fontconfig's for Chromium), by name:
+/// `Family::Monospace` itself makes cosmic-text open every monospace face
+/// on the system to rank fallbacks (+5 MB of mapped fonts).
+pub fn mono_family(fs: &ct::FontSystem) -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        fs.db()
+            .family_name(&ct::fontdb::Family::Monospace)
+            .to_string()
+    })
+}
+
+pub fn default_attrs(fs: &ct::FontSystem) -> ct::Attrs<'static> {
     ct::Attrs::new()
-        .family(ct::Family::Monospace)
+        .family(ct::Family::Name(mono_family(fs)))
         .color(syntax::sentinel(Class::Default))
 }
 
