@@ -101,6 +101,44 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
         .into()
 }
 
+/// `BATO_SELFTEST=dnd-tabs` (with `BATO_VIEW=view=examples&tab=layout&card=editor-tabs`):
+/// hover, a drag reorder, activation, add and close. Window points (the
+/// strip's tabs are at y 82–118).
+pub fn selftest<M>() -> Vec<bato_kit::overlay::script::Step<M>> {
+    use bato_kit::iced::{Event, Point, mouse};
+    use bato_kit::overlay::script::{Step, Target};
+    use std::time::Duration;
+    let left = mouse::Button::Left;
+    let at = |x: f32, y: f32| Target::At(Point::new(x, y));
+    let mv = |x: f32, y: f32| Step::Move(Target::At(Point::new(x, y)));
+    let wait = |ms| Step::Wait(Duration::from_millis(ms));
+    let release = || Step::Event(Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)));
+    vec![
+        Step::Shot("rest"),
+        // Hover styles.css: × replaces the dirty dot.
+        mv(540.0, 100.0),
+        wait(300),
+        Step::Shot("tab-hover"),
+        // Drag index.tsx past styles.css.
+        Step::Press(at(400.0, 100.0), left),
+        mv(403.0, 101.0),
+        mv(470.0, 104.0),
+        mv(560.0, 108.0),
+        wait(350),
+        Step::Shot("tab-drag"),
+        release(),
+        wait(350),
+        Step::Shot("tab-dropped"),
+        // Click README.md (third), then +.
+        Step::Click(at(700.0, 100.0), left),
+        wait(300),
+        Step::Shot("tab-activated"),
+        Step::Click(at(798.0, 100.0), left),
+        wait(300),
+        Step::Shot("tab-added"),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

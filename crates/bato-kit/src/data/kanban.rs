@@ -156,10 +156,13 @@ pub fn drag_end(cols: &[KanbanColumn], active: &str, over: &Over) -> Option<Vec<
     Some(next)
 }
 
+/// A `renderCard` function.
+type CardFn<'a, M> = Box<dyn Fn(&KanbanCard) -> El<'a, M> + 'a>;
+
 pub struct KanbanBoard<'a, M> {
     cx: Ctx,
     columns: Vec<KanbanColumn>,
-    render: Option<Box<dyn Fn(&KanbanCard) -> El<'a, M> + 'a>>,
+    render: Option<CardFn<'a, M>>,
     on_change: Option<Box<dyn Fn(Vec<KanbanColumn>) -> M + 'a>>,
 }
 
@@ -314,6 +317,8 @@ struct State {
     over: Option<Over>,
     tints: Vec<Tint>,
     landing: Option<Landing>,
+    /// The card ids of the children after the headers, at the last diff.
+    ids: Vec<String>,
     /// The pointer relative to the board.
     pointer: Point,
 }
@@ -368,7 +373,7 @@ impl State {
             for (i, (k, r)) in col.cards.iter().enumerate() {
                 let mut to = Vector::new(r.x, r.y);
                 if let (Some(a), Some(o)) = (ai, oi) {
-                    to = to + dnd::strategy(&rects, a, o, i, Axis::Vertical);
+                    to += dnd::strategy(&rects, a, o, i, Axis::Vertical);
                 }
                 self.motion.aim(k, to, animate, now);
             }
@@ -445,6 +450,28 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for Board<'a, M> 
         self.children().map(Tree::new).collect()
     }
     fn diff(&self, tree: &mut Tree) {
+        // Keyed cards: a card moved to another column keeps its state.
+        let nh = self.headers.len();
+        let ids: Vec<String> = self
+            .columns
+            .iter()
+            .flat_map(|c| c.cards.iter().map(|k| k.id.clone()))
+            .collect();
+        let state = tree.state.downcast_mut::<State>();
+        if state.ids != ids && tree.children.len() == nh + state.ids.len() {
+            let old = std::mem::take(&mut state.ids);
+            let mut cards: Vec<Option<Tree>> =
+                tree.children.split_off(nh).into_iter().map(Some).collect();
+            for (k, el) in ids.iter().zip(&self.cards) {
+                let t = old
+                    .iter()
+                    .position(|o| o == k)
+                    .and_then(|i| cards[i].take())
+                    .unwrap_or_else(|| Tree::new(el));
+                tree.children.push(t);
+            }
+        }
+        tree.state.downcast_mut::<State>().ids = ids;
         let all: Vec<&El<'a, M>> = self.children().collect();
         tree.diff_children(&all);
     }

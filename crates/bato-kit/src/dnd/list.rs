@@ -300,6 +300,28 @@ impl<'a, K: Clone + PartialEq + 'static, M: 'a> Widget<M, iced::Theme, iced::Ren
         self.items.iter().map(Tree::new).collect()
     }
     fn diff(&self, tree: &mut Tree) {
+        // Keyed children: a reordered item keeps its own widget state
+        // (hover, focus, presses), as React's `key` does.
+        let state = tree.state.downcast_mut::<State<K>>();
+        if state.keys != self.keys && tree.children.len() == state.keys.len() {
+            let old = std::mem::take(&mut state.keys);
+            let mut trees: Vec<Option<Tree>> = std::mem::take(&mut tree.children)
+                .into_iter()
+                .map(Some)
+                .collect();
+            tree.children = self
+                .keys
+                .iter()
+                .zip(&self.items)
+                .map(|(k, item)| {
+                    old.iter()
+                        .position(|o| o == k)
+                        .and_then(|i| trees[i].take())
+                        .unwrap_or_else(|| Tree::new(item))
+                })
+                .collect();
+        }
+        tree.state.downcast_mut::<State<K>>().keys = self.keys.clone();
         tree.diff_children(&self.items);
     }
 
@@ -622,9 +644,9 @@ impl<'a, K: Clone + PartialEq + 'static, M: 'a> Widget<M, iced::Theme, iced::Ren
             // While a pointer drags, the items see no pointer but the dragged
             // one under it; the release that ends a drag clicks nothing.
             let pointer_event = matches!(event, Event::Mouse(_) | Event::Touch(_));
-            let c = if (ended || dragging.is_some()) && pointer_event && !active {
-                mouse::Cursor::Unavailable
-            } else if active && ended {
+            let c = if (pointer_event && !active && (ended || dragging.is_some()))
+                || (active && ended)
+            {
                 mouse::Cursor::Unavailable
             } else {
                 shifted(cursor, off)
