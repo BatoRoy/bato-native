@@ -22,8 +22,8 @@ use iced::advanced::renderer::{self, Quad, Renderer as _};
 use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::{
-    Alignment, Border, Color, Element, Event, Length, Padding, Rectangle, Shadow, Size, Transformation, Vector, mouse,
-    window,
+    Alignment, Border, Color, Element, Event, Length, Padding, Rectangle, Shadow, Size,
+    Transformation, Vector, mouse, window,
 };
 
 use crate::anim::{ease_standard, fade};
@@ -110,7 +110,11 @@ impl BoxStyle {
             bg: oc(self.bg, o.bg),
             border: oc(self.border, o.border),
             radius: o.radius,
-            shadows: if t < 0.5 { self.shadows.clone() } else { o.shadows.clone() },
+            shadows: if t < 0.5 {
+                self.shadows.clone()
+            } else {
+                o.shadows.clone()
+            },
             inset_top: oc(self.inset_top, o.inset_top),
             inner_ring: oc(self.inner_ring, o.inner_ring),
             rings: o.rings.clone(),
@@ -134,8 +138,16 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
     for (w, c) in s.rings.iter().rev() {
         renderer.fill_quad(
             Quad {
-                bounds: Rectangle { x: b.x - w, y: b.y - w, width: b.width + 2.0 * w, height: b.height + 2.0 * w },
-                border: Border { radius: (r + w).into(), ..Border::default() },
+                bounds: Rectangle {
+                    x: b.x - w,
+                    y: b.y - w,
+                    width: b.width + 2.0 * w,
+                    height: b.height + 2.0 * w,
+                },
+                border: Border {
+                    radius: (r + w).into(),
+                    ..Border::default()
+                },
                 ..Quad::default()
             },
             fade(*c),
@@ -154,7 +166,10 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
                         width: b.width + 2.0 * grow,
                         height: b.height + 2.0 * grow,
                     },
-                    border: Border { radius: (r + grow).max(0.0).into(), ..Border::default() },
+                    border: Border {
+                        radius: (r + grow).max(0.0).into(),
+                        ..Border::default()
+                    },
                     ..Quad::default()
                 },
                 fade(sh.color),
@@ -170,8 +185,15 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
         renderer.fill_quad(
             Quad {
                 bounds: qb,
-                border: Border { radius: (r + grow).max(0.0).into(), ..Border::default() },
-                shadow: Shadow { color: fade(sh.color), offset: Vector::new(sh.x, sh.y), blur_radius: sh.blur },
+                border: Border {
+                    radius: (r + grow).max(0.0).into(),
+                    ..Border::default()
+                },
+                shadow: Shadow {
+                    color: fade(sh.color),
+                    offset: Vector::new(sh.x, sh.y),
+                    blur_radius: sh.blur,
+                },
                 snap: false,
             },
             Color::TRANSPARENT,
@@ -192,22 +214,45 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
         );
     }
     let inner = if s.border.is_some() {
-        Rectangle { x: b.x + 1.0, y: b.y + 1.0, width: b.width - 2.0, height: b.height - 2.0 }
+        Rectangle {
+            x: b.x + 1.0,
+            y: b.y + 1.0,
+            width: b.width - 2.0,
+            height: b.height - 2.0,
+        }
     } else {
         b
     };
-    let inner_r = if s.border.is_some() { (r - 1.0).max(0.0) } else { r };
+    let inner_r = if s.border.is_some() {
+        (r - 1.0).max(0.0)
+    } else {
+        r
+    };
     if let (Some(hl), Some(bg)) = (s.inset_top, s.bg) {
         // inset 0 1px 0 hl: the padding box, then the background again
         // shifted down 1px (and 1px shorter, so it never leaves the box).
         renderer.fill_quad(
-            Quad { bounds: inner, border: Border { radius: inner_r.into(), ..Border::default() }, ..Quad::default() },
+            Quad {
+                bounds: inner,
+                border: Border {
+                    radius: inner_r.into(),
+                    ..Border::default()
+                },
+                ..Quad::default()
+            },
             fade(hl),
         );
         renderer.fill_quad(
             Quad {
-                bounds: Rectangle { y: inner.y + 1.0, height: inner.height - 1.0, ..inner },
-                border: Border { radius: inner_r.into(), ..Border::default() },
+                bounds: Rectangle {
+                    y: inner.y + 1.0,
+                    height: inner.height - 1.0,
+                    ..inner
+                },
+                border: Border {
+                    radius: inner_r.into(),
+                    ..Border::default()
+                },
                 ..Quad::default()
             },
             fade(bg),
@@ -217,7 +262,11 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
         renderer.fill_quad(
             Quad {
                 bounds: inner,
-                border: Border { radius: inner_r.into(), width: 1.0, color: fade(ring) },
+                border: Border {
+                    radius: inner_r.into(),
+                    width: 1.0,
+                    color: fade(ring),
+                },
                 ..Quad::default()
             },
             Color::TRANSPARENT,
@@ -242,7 +291,9 @@ pub struct Surface<'a, Message> {
     cursor: Option<Cursor>,
 }
 
-pub fn surface<'a, Message>(content: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>) -> Surface<'a, Message> {
+pub fn surface<'a, Message>(
+    content: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+) -> Surface<'a, Message> {
     Surface {
         content: content.into(),
         style: Box::new(|_| BoxStyle::default()),
@@ -349,11 +400,17 @@ impl State {
         if self.hovered { 1.0 } else { 0.0 }
     }
     fn advance(&mut self, now: Instant, dur: Duration) -> bool {
-        let Some(start) = self.started else { return false };
+        let Some(start) = self.started else {
+            return false;
+        };
         let target = self.target();
         let span = (target - self.from).abs().max(0.001);
         let total = dur.as_secs_f32() * span;
-        let f = if total <= 0.0 { 1.0 } else { (now.saturating_duration_since(start).as_secs_f32() / total).min(1.0) };
+        let f = if total <= 0.0 {
+            1.0
+        } else {
+            (now.saturating_duration_since(start).as_secs_f32() / total).min(1.0)
+        };
         self.t = self.from + (target - self.from) * ease_standard(f);
         if f >= 1.0 {
             self.t = target;
@@ -365,7 +422,9 @@ impl State {
     }
 }
 
-impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for Surface<'a, Message> {
+impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
+    for Surface<'a, Message>
+{
     fn size(&self) -> Size<Length> {
         Size::new(self.width, self.height)
     }
@@ -386,13 +445,24 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
         tree.diff_children(std::slice::from_ref(&self.content));
     }
 
-    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         layout::positioned(
             limits,
             self.width,
             self.height,
             self.padding,
-            |limits| self.content.as_widget_mut().layout(&mut tree.children[0], renderer, &limits.loose()),
+            |limits| {
+                self.content.as_widget_mut().layout(
+                    &mut tree.children[0],
+                    renderer,
+                    &limits.loose(),
+                )
+            },
             |content, size| content.align(self.align_x, self.align_y, size),
         )
     }
@@ -423,7 +493,8 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
         }
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
-        let over = cursor.is_over(bounds) && viewport.contains(cursor.position().unwrap_or_default());
+        let over =
+            cursor.is_over(bounds) && viewport.contains(cursor.position().unwrap_or_default());
         let interactive = self.on_press.is_some() && !self.disabled;
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => {
@@ -431,7 +502,11 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
                     shell.request_redraw();
                 }
             }
-            Event::Mouse(mouse::Event::CursorMoved { .. } | mouse::Event::CursorLeft | mouse::Event::CursorEntered) => {
+            Event::Mouse(
+                mouse::Event::CursorMoved { .. }
+                | mouse::Event::CursorLeft
+                | mouse::Event::CursorEntered,
+            ) => {
                 if over != state.hovered {
                     state.hovered = over;
                     state.from = state.t;
@@ -439,17 +514,23 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
                     shell.request_redraw();
                 }
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if over && interactive => {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if over && interactive =>
+            {
                 state.pressed = true;
                 shell.capture_event();
             }
-            Event::Touch(iced::touch::Event::FingerPressed { id, position }) if interactive && state.finger.is_none() => {
+            Event::Touch(iced::touch::Event::FingerPressed { id, position })
+                if interactive && state.finger.is_none() =>
+            {
                 if bounds.contains(*position) && viewport.contains(*position) {
                     state.finger = Some(id.0);
                     shell.capture_event();
                 }
             }
-            Event::Touch(iced::touch::Event::FingerLifted { id, position }) if state.finger == Some(id.0) => {
+            Event::Touch(iced::touch::Event::FingerLifted { id, position })
+                if state.finger == Some(id.0) =>
+            {
                 state.finger = None;
                 if bounds.contains(*position)
                     && interactive
@@ -459,7 +540,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
                 }
                 shell.capture_event();
             }
-            Event::Touch(iced::touch::Event::FingerLost { id, .. }) if state.finger == Some(id.0) => {
+            Event::Touch(iced::touch::Event::FingerLost { id, .. })
+                if state.finger == Some(id.0) =>
+            {
                 state.finger = None;
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.pressed => {
@@ -500,7 +583,11 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
             return c.into();
         }
         if self.on_press.is_some() {
-            if self.disabled { mouse::Interaction::NotAllowed } else { mouse::Interaction::Pointer }
+            if self.disabled {
+                mouse::Interaction::NotAllowed
+            } else {
+                mouse::Interaction::Pointer
+            }
         } else {
             mouse::Interaction::None
         }
@@ -519,25 +606,51 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
         let state = tree.state.downcast_ref::<State>();
         let t = if self.disabled { 0.0 } else { state.t };
         let rest = (self.style)(Status::Rest);
-        let s = if t > 0.0 { rest.lerp(&(self.style)(Status::Hover), t) } else { rest };
+        let s = if t > 0.0 {
+            rest.lerp(&(self.style)(Status::Hover), t)
+        } else {
+            rest
+        };
         let b = snap_rect(layout.bounds());
-        let content_style = renderer::Style { text_color: s.fg.unwrap_or(style.text_color) };
+        let content_style = renderer::Style {
+            text_color: s.fg.unwrap_or(style.text_color),
+        };
         let draw_all = |renderer: &mut iced::Renderer| {
             paint(renderer, b, &s);
             let child = layout.children().next().unwrap();
             if self.clip {
                 renderer.with_layer(b, |renderer| {
-                    self.content.as_widget().draw(&tree.children[0], renderer, theme, &content_style, child, cursor, &b);
+                    self.content.as_widget().draw(
+                        &tree.children[0],
+                        renderer,
+                        theme,
+                        &content_style,
+                        child,
+                        cursor,
+                        &b,
+                    );
                 });
             } else {
-                self.content.as_widget().draw(&tree.children[0], renderer, theme, &content_style, child, cursor, viewport);
+                self.content.as_widget().draw(
+                    &tree.children[0],
+                    renderer,
+                    theme,
+                    &content_style,
+                    child,
+                    cursor,
+                    viewport,
+                );
             }
         };
         let k = 1.0 + (self.hover_scale - 1.0) * t;
         if (k - 1.0).abs() > 1e-4 {
             let c = b.center();
-            let tf = Transformation::translate(c.x, c.y) * Transformation::scale(k) * Transformation::translate(-c.x, -c.y);
-            renderer.with_layer(b.expand(8.0), |renderer| renderer.with_transformation(tf, draw_all));
+            let tf = Transformation::translate(c.x, c.y)
+                * Transformation::scale(k)
+                * Transformation::translate(-c.x, -c.y);
+            renderer.with_layer(b.expand(8.0), |renderer| {
+                renderer.with_transformation(tf, draw_all)
+            });
         } else {
             draw_all(renderer);
         }
@@ -550,7 +663,12 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        self.content.as_widget_mut().operate(&mut tree.children[0], layout.children().next().unwrap(), renderer, operation);
+        self.content.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
+        );
     }
 
     fn overlay<'b>(
@@ -561,11 +679,19 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for S
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
-        self.content.as_widget_mut().overlay(&mut tree.children[0], layout.children().next().unwrap(), renderer, viewport, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
-impl<'a, Message: Clone + 'a> From<Surface<'a, Message>> for Element<'a, Message, iced::Theme, iced::Renderer> {
+impl<'a, Message: Clone + 'a> From<Surface<'a, Message>>
+    for Element<'a, Message, iced::Theme, iced::Renderer>
+{
     fn from(s: Surface<'a, Message>) -> Self {
         Element::new(s)
     }

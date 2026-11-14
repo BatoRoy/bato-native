@@ -12,11 +12,33 @@
 //!
 //! English only (the template is English; locale tables are out of scope).
 
-pub use chrono::{Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
+pub use chrono::{
+    Datelike, Days, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday,
+};
 
-const MONTHS: [&str; 12] =
-    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const DAYS: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
 
 /// Format `dt` with a date-fns pattern.
 pub fn format(dt: &NaiveDateTime, pattern: &str) -> String {
@@ -139,7 +161,11 @@ pub fn end_of_month(d: NaiveDate) -> NaiveDate {
 
 /// `addMonths(d, n)` (clamped to the month's last day, like date-fns).
 pub fn add_months(d: NaiveDate, n: i32) -> NaiveDate {
-    if n >= 0 { d + Months::new(n as u32) } else { d - Months::new(n.unsigned_abs()) }
+    if n >= 0 {
+        d + Months::new(n as u32)
+    } else {
+        d - Months::new(n.unsigned_abs())
+    }
 }
 
 /// The days of a month grid: from the start of the week of the 1st to the end
@@ -153,8 +179,15 @@ pub fn month_grid(month: NaiveDate, week_starts_on: u8) -> Vec<NaiveDate> {
 /// The 7 weekday labels of a week starting on `week_starts_on`, in `EEEEE`
 /// (or any weekday pattern).
 pub fn weekday_labels(week_starts_on: u8, pattern: &str) -> Vec<String> {
-    let start = start_of_week(NaiveDate::from_ymd_opt(2024, 1, 10).expect("valid"), week_starts_on);
-    start.iter_days().take(7).map(|d| format_date(d, pattern)).collect()
+    let start = start_of_week(
+        NaiveDate::from_ymd_opt(2024, 1, 10).expect("valid"),
+        week_starts_on,
+    );
+    start
+        .iter_days()
+        .take(7)
+        .map(|d| format_date(d, pattern))
+        .collect()
 }
 
 #[cfg(test)]
@@ -162,7 +195,10 @@ mod tests {
     use super::*;
 
     fn dt(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, mi, 5).unwrap()
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(h, mi, 5)
+            .unwrap()
     }
 
     #[test]
@@ -187,15 +223,33 @@ mod tests {
     #[test]
     fn weeks_and_months() {
         let d = NaiveDate::from_ymd_opt(2026, 11, 14).unwrap(); // Saturday
-        assert_eq!(start_of_week(d, 1), NaiveDate::from_ymd_opt(2026, 11, 9).unwrap());
-        assert_eq!(start_of_week(d, 0), NaiveDate::from_ymd_opt(2026, 11, 8).unwrap());
-        assert_eq!(end_of_month(d), NaiveDate::from_ymd_opt(2026, 11, 30).unwrap());
-        assert_eq!(add_months(NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(), 1), NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
-        assert_eq!(add_months(d, -11), NaiveDate::from_ymd_opt(2025, 12, 14).unwrap());
+        assert_eq!(
+            start_of_week(d, 1),
+            NaiveDate::from_ymd_opt(2026, 11, 9).unwrap()
+        );
+        assert_eq!(
+            start_of_week(d, 0),
+            NaiveDate::from_ymd_opt(2026, 11, 8).unwrap()
+        );
+        assert_eq!(
+            end_of_month(d),
+            NaiveDate::from_ymd_opt(2026, 11, 30).unwrap()
+        );
+        assert_eq!(
+            add_months(NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(), 1),
+            NaiveDate::from_ymd_opt(2026, 2, 28).unwrap()
+        );
+        assert_eq!(
+            add_months(d, -11),
+            NaiveDate::from_ymd_opt(2025, 12, 14).unwrap()
+        );
         let g = month_grid(d, 1);
         assert_eq!(g.len() % 7, 0);
         assert_eq!(g[0], NaiveDate::from_ymd_opt(2026, 10, 26).unwrap());
-        assert_eq!(*g.last().unwrap(), NaiveDate::from_ymd_opt(2026, 12, 6).unwrap());
+        assert_eq!(
+            *g.last().unwrap(),
+            NaiveDate::from_ymd_opt(2026, 12, 6).unwrap()
+        );
         assert_eq!(weekday_labels(1, "EEEEE").join(""), "MTWTFSS");
         assert_eq!(weekday_labels(0, "EEE")[0], "Sun");
     }

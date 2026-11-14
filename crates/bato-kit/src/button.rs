@@ -50,20 +50,36 @@ pub fn button_style(cx: &Ctx, v: Variant, disabled: bool) -> impl Fn(Status) -> 
         let p = &t.p;
         let hover = st == Status::Hover && !disabled;
         let k = if disabled { 0.5 } else { 1.0 };
-        let op = |x: Rgb| if disabled { c(bato_theme::blend(x, 0.5, over)) } else { c(x) };
+        let op = |x: Rgb| {
+            if disabled {
+                c(bato_theme::blend(x, 0.5, over))
+            } else {
+                c(x)
+            }
+        };
         match v {
             Variant::Primary => {
                 let fill = if hover { p.accent_hover } else { p.accent };
                 BoxStyle::default()
                     .bg(op(fill))
                     .fg(if disabled {
-                        c(bato_theme::blend(p.accent_ink, 0.5, bato_theme::blend(fill, 0.5, over)))
+                        c(bato_theme::blend(
+                            p.accent_ink,
+                            0.5,
+                            bato_theme::blend(fill, 0.5, over),
+                        ))
                     } else {
                         c(p.accent_ink)
                     })
                     .radius(8.0)
                     .inset_top(op(bato_theme::blend(Rgb::WHITE, 0.16, fill)))
-                    .shadows(vec![Sh { x: 0.0, y: 1.0, blur: 2.0, spread: 0.0, color: Color::from_rgba(0.0, 0.0, 0.0, 0.2 * k) }])
+                    .shadows(vec![Sh {
+                        x: 0.0,
+                        y: 1.0,
+                        blur: 2.0,
+                        spread: 0.0,
+                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.2 * k),
+                    }])
             }
             Variant::Secondary => {
                 let bg = t.wash(if hover { 0.08 } else { 0.04 }, over);
@@ -75,16 +91,27 @@ pub fn button_style(cx: &Ctx, v: Variant, disabled: bool) -> impl Fn(Status) -> 
                     .shadows(p.shadow_sm.iter().map(|s| sh(s, k)).collect())
             }
             Variant::Ghost => {
-                let mut s = BoxStyle::default().radius(8.0).fg(op(if hover { p.text } else { p.subtext }));
+                let mut s =
+                    BoxStyle::default()
+                        .radius(8.0)
+                        .fg(op(if hover { p.text } else { p.subtext }));
                 if hover {
                     s = s.bg(c(t.wash(0.06, over)));
                 }
                 s
             }
             Variant::Success | Variant::Danger => {
-                let tone = if v == Variant::Success { p.green } else { p.red };
+                let tone = if v == Variant::Success {
+                    p.green
+                } else {
+                    p.red
+                };
                 let bg = bato_theme::blend(tone, if hover { 0.15 } else { 0.10 }, over);
-                BoxStyle::default().bg(op(bg)).border(op(bato_theme::blend(tone, 0.25, bg))).fg(op(tone)).radius(8.0)
+                BoxStyle::default()
+                    .bg(op(bg))
+                    .border(op(bato_theme::blend(tone, 0.25, bg)))
+                    .fg(op(tone))
+                    .radius(8.0)
             }
         }
     }
@@ -210,7 +237,10 @@ impl<'a, M: Clone + 'a> Button<'a, M> {
 impl<'a, M: Clone + 'a> From<Button<'a, M>> for El<'a, M> {
     fn from(b: Button<'a, M>) -> Self {
         let disabled = b.on_press.is_none() || b.loading || b.disabled;
-        let bordered = matches!(b.variant, Variant::Secondary | Variant::Success | Variant::Danger);
+        let bordered = matches!(
+            b.variant,
+            Variant::Secondary | Variant::Success | Variant::Danger
+        );
         let (h, px, gapw) = match b.size {
             Size::Sm => (32.0, 12.0, 8.0),
             Size::Md => (36.0, 16.0, 8.0),

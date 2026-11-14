@@ -34,7 +34,10 @@ pub fn card_style(cx: &Ctx) -> BoxStyle {
 
 /// The card box around `content` (padding 20 + the 1 px border), full width.
 pub fn card_box<'a, M: Clone + 'a>(cx: &Ctx, content: impl Into<El<'a, M>>) -> Surface<'a, M> {
-    surface(content).padding(21).width(Length::Fill).fixed(card_style(cx))
+    surface(content)
+        .padding(21)
+        .width(Length::Fill)
+        .fixed(card_style(cx))
 }
 
 pub struct Card<'a, M> {
@@ -46,7 +49,13 @@ pub struct Card<'a, M> {
 }
 
 pub fn card<'a, M: Clone + 'a>(cx: &Ctx, title: impl Into<String>) -> Card<'a, M> {
-    Card { cx: cx.clone(), title: title.into(), icon: None, action: None, body: None }
+    Card {
+        cx: cx.clone(),
+        title: title.into(),
+        icon: None,
+        action: None,
+        body: None,
+    }
 }
 
 impl<'a, M: Clone + 'a> Card<'a, M> {
@@ -72,20 +81,39 @@ impl<'a, M: Clone + 'a> Card<'a, M> {
         let mut left: Vec<El<'a, M>> = Vec::new();
         if let Some(i) = self.icon {
             let tile_bg = cx.wash(0.05);
-            let tile = BoxStyle::default().bg(c(tile_bg)).inner_ring(c(cx.t.line_on(tile_bg))).radius(8.0);
-            left.push(surface(icon(i, 14.0).color(c(p.subtext))).width(28).height(28).center().fixed(tile).into());
+            let tile = BoxStyle::default()
+                .bg(c(tile_bg))
+                .inner_ring(c(cx.t.line_on(tile_bg)))
+                .radius(8.0);
+            left.push(
+                surface(icon(i, 14.0).color(c(p.subtext)))
+                    .width(28)
+                    .height(28)
+                    .center()
+                    .fixed(tile)
+                    .into(),
+            );
         }
         if !self.title.is_empty() {
-            left.push(label(self.title, 14.0, 20.0).semibold().color(c(p.text)).ellipsis().into());
+            left.push(
+                label(self.title, 14.0, 20.0)
+                    .semibold()
+                    .color(c(p.text))
+                    .ellipsis()
+                    .into(),
+            );
         }
         let mut col = column![];
         if !left.is_empty() || self.action.is_some() {
-            let mut header: Vec<El<'a, M>> = vec![row(left).spacing(10).align_y(Alignment::Center).into()];
+            let mut header: Vec<El<'a, M>> =
+                vec![row(left).spacing(10).align_y(Alignment::Center).into()];
             header.push(Space::new().width(Length::Fill).into());
             if let Some(a) = self.action {
                 header.push(a);
             }
-            col = col.push(row(header).spacing(12).align_y(Alignment::Center)).push(vgap(16.0));
+            col = col
+                .push(row(header).spacing(12).align_y(Alignment::Center))
+                .push(vgap(16.0));
         }
         if let Some(b) = self.body {
             col = col.push(b);

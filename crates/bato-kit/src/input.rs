@@ -140,7 +140,9 @@ impl<'a, Message: Clone + 'a> Input<'a, Message> {
     }
 }
 
-impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message, iced::Theme, iced::Renderer> {
+impl<'a, Message: Clone + 'a> From<Input<'a, Message>>
+    for Element<'a, Message, iced::Theme, iced::Renderer>
+{
     fn from(f: Input<'a, Message>) -> Self {
         let colors = f.colors;
         // CSS: border 1px + padding-x 12; iced draws the border over its padding.
@@ -148,7 +150,9 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message, 
         let mut inner = text_input(&f.placeholder, &f.value)
             .font(f.font)
             .size(f.size)
-            .line_height(iced::widget::text::LineHeight::Absolute(f.line_height.into()))
+            .line_height(iced::widget::text::LineHeight::Absolute(
+                f.line_height.into(),
+            ))
             .padding([pad_y, 13.0])
             .width(Length::Fill)
             .secure(f.secure)
@@ -157,7 +161,11 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message, 
                 text_input::Style {
                     background: Background::Color(colors.fill),
                     border: Border {
-                        color: if focused { colors.border_focus } else { colors.border },
+                        color: if focused {
+                            colors.border_focus
+                        } else {
+                            colors.border
+                        },
                         width: 1.0,
                         radius: 8.0.into(),
                     },
@@ -176,7 +184,11 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message, 
         if let Some(id) = f.id {
             inner = inner.id(id);
         }
-        let halo = Halo { inner: inner.into(), halo: colors.halo, width: f.width };
+        let halo = Halo {
+            inner: inner.into(),
+            halo: colors.halo,
+            width: f.width,
+        };
         Element::new(halo)
     }
 }
@@ -198,9 +210,17 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
     fn diff(&self, tree: &mut Tree) {
         tree.diff_children(std::slice::from_ref(&self.inner));
     }
-    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let limits = limits.width(self.width);
-        let n = self.inner.as_widget_mut().layout(&mut tree.children[0], renderer, &limits);
+        let n = self
+            .inner
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, &limits);
         layout::Node::with_children(n.size(), vec![n])
     }
     fn update(
@@ -216,7 +236,11 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
     ) {
         // `data-batoscroll-ignore`: a middle press on a text field is the
         // field's (primary paste), never an autoscroll.
-        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle))) && cursor.is_over(layout.bounds()) {
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle))
+        ) && cursor.is_over(layout.bounds())
+        {
             shell.capture_event();
             return;
         }
@@ -231,11 +255,35 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
             viewport,
         );
     }
-    fn mouse_interaction(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle, renderer: &iced::Renderer) -> mouse::Interaction {
-        self.inner.as_widget().mouse_interaction(&tree.children[0], layout.children().next().unwrap(), cursor, viewport, renderer)
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.inner.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout.children().next().unwrap(),
+            cursor,
+            viewport,
+            renderer,
+        )
     }
-    fn operate(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &iced::Renderer, operation: &mut dyn widget::Operation) {
-        self.inner.as_widget_mut().operate(&mut tree.children[0], layout.children().next().unwrap(), renderer, operation);
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.inner.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
+        );
     }
     fn draw(
         &self,
@@ -248,22 +296,41 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Halo<'a, 
         viewport: &Rectangle,
     ) {
         use iced::advanced::Renderer as _;
-        let focused = tree.children[0].state.downcast_ref::<text_input::State<P>>().is_focused();
+        let focused = tree.children[0]
+            .state
+            .downcast_ref::<text_input::State<P>>()
+            .is_focused();
         let raw = layout.bounds();
         let b = crate::scale::snap_rect(raw);
         let shift = iced::Vector::new(b.x - raw.x, b.y - raw.y);
         if focused {
             renderer.fill_quad(
                 Quad {
-                    bounds: Rectangle { x: b.x - 4.0, y: b.y - 4.0, width: b.width + 8.0, height: b.height + 8.0 },
-                    border: Border { radius: 12.0.into(), ..Border::default() },
+                    bounds: Rectangle {
+                        x: b.x - 4.0,
+                        y: b.y - 4.0,
+                        width: b.width + 8.0,
+                        height: b.height + 8.0,
+                    },
+                    border: Border {
+                        radius: 12.0.into(),
+                        ..Border::default()
+                    },
                     ..Quad::default()
                 },
                 self.halo,
             );
         }
         renderer.with_translation(shift, |renderer| {
-            self.inner.as_widget().draw(&tree.children[0], renderer, theme, style, layout.children().next().unwrap(), cursor - shift, viewport);
+            self.inner.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout.children().next().unwrap(),
+                cursor - shift,
+                viewport,
+            );
         });
     }
 }

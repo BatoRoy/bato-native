@@ -27,7 +27,13 @@ pub struct EmptyState<'a, M> {
 }
 
 pub fn empty_state<'a, M: Clone + 'a>(cx: &Ctx, title: impl Into<String>) -> EmptyState<'a, M> {
-    EmptyState { cx: cx.clone(), title: title.into(), icon: None, subtitle: None, action: None }
+    EmptyState {
+        cx: cx.clone(),
+        title: title.into(),
+        icon: None,
+        subtitle: None,
+        action: None,
+    }
 }
 
 impl<'a, M: Clone + 'a> EmptyState<'a, M> {
@@ -52,16 +58,41 @@ impl<'a, M: Clone + 'a> From<EmptyState<'a, M>> for El<'a, M> {
         let mut col = column![].align_x(Alignment::Center).width(Length::Fill);
         if let Some(i) = e.icon {
             let bg = cx.wash(0.05);
-            let tile = BoxStyle::default().bg(c(bg)).inner_ring(c(cx.t.line_on(bg))).radius(16.0);
-            col = col.push(surface(icon(i, 22.0).color(c(p.muted))).width(48).height(48).center().fixed(tile)).push(vgap(12.0));
+            let tile = BoxStyle::default()
+                .bg(c(bg))
+                .inner_ring(c(cx.t.line_on(bg)))
+                .radius(16.0);
+            col = col
+                .push(
+                    surface(icon(i, 22.0).color(c(p.muted)))
+                        .width(48)
+                        .height(48)
+                        .center()
+                        .fixed(tile),
+                )
+                .push(vgap(12.0));
         }
-        col = col.push(label(e.title, 14.0, 20.0).medium().color(c(p.text)).align(Align::Center));
+        col = col.push(
+            label(e.title, 14.0, 20.0)
+                .medium()
+                .color(c(p.text))
+                .align(Align::Center),
+        );
         if let Some(s) = e.subtitle {
-            col = col.push(vgap(4.0)).push(label(s, 12.0, 16.0).color(c(p.muted)).align(Align::Center).wrap().max_width(320.0));
+            col = col.push(vgap(4.0)).push(
+                label(s, 12.0, 16.0)
+                    .color(c(p.muted))
+                    .align(Align::Center)
+                    .wrap()
+                    .max_width(320.0),
+            );
         }
         if let Some(a) = e.action {
             col = col.push(vgap(16.0)).push(a);
         }
-        container(col).width(Length::Fill).padding(Padding::from([48.0, 24.0])).into()
+        container(col)
+            .width(Length::Fill)
+            .padding(Padding::from([48.0, 24.0]))
+            .into()
     }
 }

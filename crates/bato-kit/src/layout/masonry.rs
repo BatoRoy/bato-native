@@ -15,8 +15,16 @@ pub struct Masonry<'a, Message> {
     gap: f32,
 }
 
-pub fn masonry<'a, Message>(columns: usize, gap: f32, cells: Vec<Element<'a, Message, iced::Theme, iced::Renderer>>) -> Masonry<'a, Message> {
-    Masonry { cells, columns: columns.max(1), gap }
+pub fn masonry<'a, Message>(
+    columns: usize,
+    gap: f32,
+    cells: Vec<Element<'a, Message, iced::Theme, iced::Renderer>>,
+) -> Masonry<'a, Message> {
+    Masonry {
+        cells,
+        columns: columns.max(1),
+        gap,
+    }
 }
 
 /// Column index of each item for heights `hs`, balanced into `n` columns
@@ -40,10 +48,17 @@ pub(crate) fn balance(hs: &[f32], n: usize, gap: f32) -> Vec<usize> {
         }
         Some(out)
     };
-    let (mut lo, mut hi) = (hs.iter().copied().fold(0.0, f32::max), hs.iter().sum::<f32>() + gap * hs.len() as f32);
+    let (mut lo, mut hi) = (
+        hs.iter().copied().fold(0.0, f32::max),
+        hs.iter().sum::<f32>() + gap * hs.len() as f32,
+    );
     for _ in 0..40 {
         let mid = (lo + hi) / 2.0;
-        if fill(mid).is_some() { hi = mid } else { lo = mid }
+        if fill(mid).is_some() {
+            hi = mid
+        } else {
+            lo = mid
+        }
     }
     fill(hi).unwrap_or_else(|| vec![0; hs.len()])
 }
@@ -52,7 +67,12 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Masonry<'
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fill, Length::Shrink)
     }
-    fn layout(&mut self, tree: &mut iced::advanced::widget::Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut iced::advanced::widget::Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let total = limits.max().width;
         let n = self.columns as f32;
         let w = ((total - self.gap * (n - 1.0)) / n).max(0.0);
@@ -60,7 +80,13 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Masonry<'
             .cells
             .iter_mut()
             .zip(tree.children.iter_mut())
-            .map(|(cell, t)| cell.as_widget_mut().layout(t, renderer, &layout::Limits::new(Size::new(w, 0.0), Size::new(w, f32::INFINITY))))
+            .map(|(cell, t)| {
+                cell.as_widget_mut().layout(
+                    t,
+                    renderer,
+                    &layout::Limits::new(Size::new(w, 0.0), Size::new(w, f32::INFINITY)),
+                )
+            })
             .collect();
         let hs: Vec<f32> = nodes.iter().map(|n| n.size().height).collect();
         let cols = balance(&hs, self.columns, self.gap);

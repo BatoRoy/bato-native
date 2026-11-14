@@ -22,8 +22,8 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::{self, Quad, Renderer as _};
 use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
-use iced::{Border, Color, Element, Event, Length, Point, Rectangle, Size, Vector, mouse, window};
 use iced::touch;
+use iced::{Border, Color, Element, Event, Length, Point, Rectangle, Size, Vector, mouse, window};
 use scroll_physics::{ScrollAxis, TouchDrag, TouchOutcome};
 
 use crate::scale::device_scale;
@@ -61,7 +61,10 @@ pub const CHROMIUM_TOUCHPAD_GAIN: f32 = 12.0;
 fn touchpad_gain() -> f32 {
     static GAIN: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *GAIN.get_or_init(|| {
-        std::env::var("BATO_TOUCHPAD_GAIN").ok().and_then(|v| v.parse().ok()).unwrap_or(CHROMIUM_TOUCHPAD_GAIN)
+        std::env::var("BATO_TOUCHPAD_GAIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(CHROMIUM_TOUCHPAD_GAIN)
     })
 }
 
@@ -90,7 +93,14 @@ pub fn scroller<'a, Message>(
     thumb: Color,
     thumb_hover: Color,
 ) -> Scroller<'a, Message> {
-    Scroller { content: content.into(), autoscroll: None, thumb, thumb_hover, initial: None, anchor: None }
+    Scroller {
+        content: content.into(),
+        autoscroll: None,
+        thumb,
+        thumb_hover,
+        initial: None,
+        anchor: None,
+    }
 }
 
 impl<'a, Message> Scroller<'a, Message> {
@@ -194,7 +204,14 @@ impl TouchRouter {
             }
             touch::Event::FingerMoved { id, .. } => {
                 if !mine(self, id.0) {
-                    return (TouchOutcome::Ignored, if self.finger.is_some() { Forward::Swallow } else { Forward::Pass });
+                    return (
+                        TouchOutcome::Ignored,
+                        if self.finger.is_some() {
+                            Forward::Swallow
+                        } else {
+                            Forward::Pass
+                        },
+                    );
                 }
                 let out = self.drag.moved(id.0, pos.0, pos.1, now, axis);
                 match out {
@@ -208,7 +225,14 @@ impl TouchRouter {
             }
             touch::Event::FingerLifted { id, .. } => {
                 if !mine(self, id.0) {
-                    return (TouchOutcome::Ignored, if self.finger.is_some() { Forward::Swallow } else { Forward::Pass });
+                    return (
+                        TouchOutcome::Ignored,
+                        if self.finger.is_some() {
+                            Forward::Swallow
+                        } else {
+                            Forward::Pass
+                        },
+                    );
                 }
                 let out = self.drag.up(id.0, now, axis);
                 let stolen = self.stolen;
@@ -223,13 +247,27 @@ impl TouchRouter {
             }
             touch::Event::FingerLost { id, .. } => {
                 if !mine(self, id.0) {
-                    return (TouchOutcome::Ignored, if self.finger.is_some() { Forward::Swallow } else { Forward::Pass });
+                    return (
+                        TouchOutcome::Ignored,
+                        if self.finger.is_some() {
+                            Forward::Swallow
+                        } else {
+                            Forward::Pass
+                        },
+                    );
                 }
                 self.drag.cancel(axis);
                 let stolen = self.stolen;
                 self.finger = None;
                 self.stolen = false;
-                (TouchOutcome::Ended, if stolen { Forward::Swallow } else { Forward::Pass })
+                (
+                    TouchOutcome::Ended,
+                    if stolen {
+                        Forward::Swallow
+                    } else {
+                        Forward::Pass
+                    },
+                )
             }
         }
     }
@@ -259,7 +297,9 @@ fn hover_after(current: HoverSource, outcome: TouchOutcome, at: Point) -> HoverS
     match outcome {
         TouchOutcome::Pending => HoverSource::TouchPending(at),
         TouchOutcome::Tap => HoverSource::TouchAt(at),
-        TouchOutcome::ScrollStarted | TouchOutcome::Scrolling | TouchOutcome::Ended => HoverSource::TouchNone,
+        TouchOutcome::ScrollStarted | TouchOutcome::Scrolling | TouchOutcome::Ended => {
+            HoverSource::TouchNone
+        }
         TouchOutcome::Ignored => current,
     }
 }
@@ -306,8 +346,12 @@ impl State {
             HoverSource::TouchNone | HoverSource::TouchPending(_) => mouse::Cursor::Unavailable,
             HoverSource::TouchAt(p) => mouse::Cursor::Available(p),
             HoverSource::Mouse => match cursor {
-                mouse::Cursor::Available(p) if area.contains(p) => mouse::Cursor::Available(p + Vector::new(0.0, offset)),
-                mouse::Cursor::Levitating(p) => mouse::Cursor::Levitating(p + Vector::new(0.0, offset)),
+                mouse::Cursor::Available(p) if area.contains(p) => {
+                    mouse::Cursor::Available(p + Vector::new(0.0, offset))
+                }
+                mouse::Cursor::Levitating(p) => {
+                    mouse::Cursor::Levitating(p + Vector::new(0.0, offset))
+                }
                 _ => mouse::Cursor::Unavailable,
             },
         }
@@ -325,10 +369,18 @@ impl State {
         }
         let s = device_scale();
         let track = b.height * s;
-        let len = (track * self.viewport_h / self.content_h).round().max(2.0 * BAR * s).min(track);
+        let len = (track * self.viewport_h / self.content_h)
+            .round()
+            .max(2.0 * BAR * s)
+            .min(track);
         let max = self.axis.max().max(1.0);
         let pos = ((track - len) * self.axis.offset() / max).round();
-        Some(Rectangle { x: b.x + b.width - BAR, y: b.y + pos / s, width: BAR, height: len / s })
+        Some(Rectangle {
+            x: b.x + b.width - BAR,
+            y: b.y + pos / s,
+            width: BAR,
+            height: len / s,
+        })
     }
 
     fn log(&self, what: &str, detail: String) {
@@ -366,12 +418,22 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         tree.diff_children(std::slice::from_ref(&self.content));
     }
 
-    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let size = limits.max();
-        let lay = |w: f32, tree: &mut Tree, content: &mut Element<'a, Message, iced::Theme, iced::Renderer>| {
-            let l = layout::Limits::new(Size::new(w, 0.0), Size::new(w, f32::INFINITY));
-            content.as_widget_mut().layout(&mut tree.children[0], renderer, &l)
-        };
+        let lay =
+            |w: f32,
+             tree: &mut Tree,
+             content: &mut Element<'a, Message, iced::Theme, iced::Renderer>| {
+                let l = layout::Limits::new(Size::new(w, 0.0), Size::new(w, f32::INFINITY));
+                content
+                    .as_widget_mut()
+                    .layout(&mut tree.children[0], renderer, &l)
+            };
         let mut node = lay(size.width, tree, &mut self.content);
         let mut overflow = node.size().height > size.height + 0.5;
         if overflow {
@@ -384,7 +446,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         state.content_h = node.size().height;
         state.viewport_h = size.height;
         state.overflow = overflow;
-        state.axis.set_max(((node.size().height - size.height) * s).max(0.0));
+        state
+            .axis
+            .set_max(((node.size().height - size.height) * s).max(0.0));
         if !state.initial_applied {
             state.initial_applied = true;
             if let Some(px) = self.initial {
@@ -396,7 +460,12 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         {
             state.anchor_tries -= 1;
             let mut find = FindContainer { id, found: None };
-            self.content.as_widget_mut().operate(&mut tree.children[0], Layout::new(&node), renderer, &mut find);
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                Layout::new(&node),
+                renderer,
+                &mut find,
+            );
             let state = tree.state.downcast_mut::<State>();
             if let Some(b) = find.found {
                 state.anchor_tries = 0;
@@ -423,7 +492,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             || tree.state.downcast_ref::<State>().touch.is_scrolling();
 
         // A real mouse takes hover back from the last touch.
-        if let Event::Mouse(mouse::Event::CursorMoved { .. } | mouse::Event::WheelScrolled { .. }) = event {
+        if let Event::Mouse(mouse::Event::CursorMoved { .. } | mouse::Event::WheelScrolled { .. }) =
+            event
+        {
             tree.state.downcast_mut::<State>().hover = HoverSource::Mouse;
         }
 
@@ -440,16 +511,28 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             // the axis works in device px, so the content tracks the finger
             // exactly at every scale.
             let s = device_scale();
-            let inside = Rectangle { width: b.width - BAR, ..b }.contains(position)
+            let inside = Rectangle {
+                width: b.width - BAR,
+                ..b
+            }
+            .contains(position)
                 && viewport.contains(position);
             let state = tree.state.downcast_mut::<State>();
-            let (outcome, fwd) = state.touch.route(te, (position.x * s, position.y * s), inside, Instant::now(), &mut state.axis);
+            let (outcome, fwd) = state.touch.route(
+                te,
+                (position.x * s, position.y * s),
+                inside,
+                Instant::now(),
+                &mut state.axis,
+            );
             if !matches!(outcome, TouchOutcome::Ignored) || debug_enabled() && inside {
                 state.log("touch", format!("{te:?} -> {outcome:?}/{fwd:?}"));
             }
             let shifted = Point::new(position.x, position.y + offset);
             state.hover = hover_after(state.hover, outcome, shifted);
-            if !matches!(outcome, TouchOutcome::Ignored | TouchOutcome::Pending) || state.axis.is_animating() {
+            if !matches!(outcome, TouchOutcome::Ignored | TouchOutcome::Pending)
+                || state.axis.is_animating()
+            {
                 // Tap too: hover-only content (the Scroll lab rows) updates on
                 // redraw, and a tap alone would not cause one.
                 shell.request_redraw();
@@ -457,10 +540,22 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             match fwd {
                 Forward::Pass => {
                     routed = Some(Event::Touch(match *te {
-                        touch::Event::FingerPressed { id, .. } => touch::Event::FingerPressed { id, position: shifted },
-                        touch::Event::FingerMoved { id, .. } => touch::Event::FingerMoved { id, position: shifted },
-                        touch::Event::FingerLifted { id, .. } => touch::Event::FingerLifted { id, position: shifted },
-                        touch::Event::FingerLost { id, .. } => touch::Event::FingerLost { id, position: shifted },
+                        touch::Event::FingerPressed { id, .. } => touch::Event::FingerPressed {
+                            id,
+                            position: shifted,
+                        },
+                        touch::Event::FingerMoved { id, .. } => touch::Event::FingerMoved {
+                            id,
+                            position: shifted,
+                        },
+                        touch::Event::FingerLifted { id, .. } => touch::Event::FingerLifted {
+                            id,
+                            position: shifted,
+                        },
+                        touch::Event::FingerLost { id, .. } => touch::Event::FingerLost {
+                            id,
+                            position: shifted,
+                        },
                     }))
                 }
                 Forward::Lost => {
@@ -470,7 +565,10 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                         | touch::Event::FingerLifted { id, .. }
                         | touch::Event::FingerLost { id, .. } => *id,
                     };
-                    routed = Some(Event::Touch(touch::Event::FingerLost { id, position: shifted }));
+                    routed = Some(Event::Touch(touch::Event::FingerLost {
+                        id,
+                        position: shifted,
+                    }));
                 }
                 Forward::Swallow => {
                     shell.capture_event();
@@ -488,7 +586,10 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                 _ => state.content_cursor(cursor, b, offset),
             }
         };
-        let content_viewport = Rectangle { y: b.y + offset, ..b };
+        let content_viewport = Rectangle {
+            y: b.y + offset,
+            ..b
+        };
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -497,7 +598,12 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             renderer,
             clipboard,
             shell,
-            &content_viewport.intersection(&Rectangle { y: viewport.y + offset, ..*viewport }).unwrap_or(content_viewport),
+            &content_viewport
+                .intersection(&Rectangle {
+                    y: viewport.y + offset,
+                    ..*viewport
+                })
+                .unwrap_or(content_viewport),
         );
         if shell.is_event_captured() || routed.is_some() {
             if routed.is_some() {
@@ -574,7 +680,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                         let track = b.height - t.height;
                         if track > 0.0 {
                             let per = state.axis.max() / (track * s);
-                            state.axis.set_offset(start + (position.y - grab_y) * s * per);
+                            state
+                                .axis
+                                .set_offset(start + (position.y - grab_y) * s * per);
                             shell.request_redraw();
                         }
                     }
@@ -605,7 +713,11 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                     }
                 }
             }
-            Event::Keyboard(iced::keyboard::Event::KeyPressed { key: iced::keyboard::Key::Named(named), modifiers, .. }) => {
+            Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(named),
+                modifiers,
+                ..
+            }) => {
                 // Chromium: arrows 40 px, PageUp/PageDown/Space 87.5% of the
                 // viewport, Home/End; all animated like a wheel notch.
                 use iced::keyboard::key::Named;
@@ -630,7 +742,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                     shell.capture_event();
                 }
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.drag.is_some() => {
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.drag.is_some() =>
+            {
                 state.drag = None;
                 state.thumb_hover = state.thumb_rect(b).is_some_and(|t| cursor.is_over(t));
                 shell.request_redraw();
@@ -659,7 +773,10 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             &tree.children[0],
             layout.children().next().unwrap(),
             c,
-            &Rectangle { y: b.y + offset, ..*viewport },
+            &Rectangle {
+                y: b.y + offset,
+                ..*viewport
+            },
             renderer,
         )
     }
@@ -676,12 +793,23 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
     ) {
         let state = tree.state.downcast_ref::<State>();
         if draw_debug() {
-            eprintln!("[draw {:>9.3}s] offset={:.1}", state.t0.elapsed().as_secs_f64(), state.axis.offset());
+            eprintln!(
+                "[draw {:>9.3}s] offset={:.1}",
+                state.t0.elapsed().as_secs_f64(),
+                state.axis.offset()
+            );
         }
         let b = layout.bounds();
         let offset = state.offset();
-        let clip = Rectangle { width: b.width - if state.overflow { BAR } else { 0.0 }, ..b };
-        let c = if state.drag.is_some() { mouse::Cursor::Unavailable } else { state.content_cursor(cursor, clip, offset) };
+        let clip = Rectangle {
+            width: b.width - if state.overflow { BAR } else { 0.0 },
+            ..b
+        };
+        let c = if state.drag.is_some() {
+            mouse::Cursor::Unavailable
+        } else {
+            state.content_cursor(cursor, clip, offset)
+        };
         renderer.with_layer(clip, |renderer| {
             renderer.with_translation(Vector::new(0.0, -offset), |renderer| {
                 self.content.as_widget().draw(
@@ -691,14 +819,24 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                     style,
                     layout.children().next().unwrap(),
                     c,
-                    &Rectangle { y: clip.y + offset, ..clip },
+                    &Rectangle {
+                        y: clip.y + offset,
+                        ..clip
+                    },
                 );
             });
         });
         if let Some(t) = state.thumb_rect(b) {
             let hot = state.thumb_hover || state.drag.is_some();
             renderer.fill_quad(
-                Quad { bounds: t, border: Border { radius: (BAR / 2.0).into(), ..Border::default() }, ..Quad::default() },
+                Quad {
+                    bounds: t,
+                    border: Border {
+                        radius: (BAR / 2.0).into(),
+                        ..Border::default()
+                    },
+                    ..Quad::default()
+                },
                 if hot { self.thumb_hover } else { self.thumb },
             );
         }
@@ -712,11 +850,18 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        self.content.as_widget_mut().operate(&mut tree.children[0], layout.children().next().unwrap(), renderer, operation);
+        self.content.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
+        );
     }
 }
 
-impl<'a, Message: 'a> From<Scroller<'a, Message>> for Element<'a, Message, iced::Theme, iced::Renderer> {
+impl<'a, Message: 'a> From<Scroller<'a, Message>>
+    for Element<'a, Message, iced::Theme, iced::Renderer>
+{
     fn from(s: Scroller<'a, Message>) -> Self {
         Element::new(s)
     }
@@ -730,9 +875,15 @@ mod tests {
     #[test]
     fn wheel_toward_user_scrolls_down() {
         // Wayland value120 = +120 (toward the user) → winit LineDelta y = -1.
-        assert_eq!(classify(Lines { x: 0.0, y: -1.0 }), ScrollInput::Notches(1.0));
+        assert_eq!(
+            classify(Lines { x: 0.0, y: -1.0 }),
+            ScrollInput::Notches(1.0)
+        );
         // Hi-res wheel: 1/8 notch.
-        assert_eq!(classify(Lines { x: 0.0, y: 0.125 }), ScrollInput::Notches(-0.125));
+        assert_eq!(
+            classify(Lines { x: 0.0, y: 0.125 }),
+            ScrollInput::Notches(-0.125)
+        );
     }
 
     #[test]
@@ -745,24 +896,55 @@ mod tests {
         assert_eq!(h, HoverSource::TouchPending(p));
         let mut pending = State::default();
         pending.hover = h;
-        let area0 = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
-        assert_eq!(pending.content_cursor(mouse::Cursor::Available(p), area0, 0.0), mouse::Cursor::Unavailable);
+        let area0 = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        assert_eq!(
+            pending.content_cursor(mouse::Cursor::Available(p), area0, 0.0),
+            mouse::Cursor::Unavailable
+        );
         // Becomes a scroll: nothing hovers while the content slides.
         let h = hover_after(h, TouchOutcome::ScrollStarted, q);
         assert_eq!(h, HoverSource::TouchNone);
-        assert_eq!(hover_after(h, TouchOutcome::Scrolling, q), HoverSource::TouchNone);
-        assert_eq!(hover_after(h, TouchOutcome::Ended, q), HoverSource::TouchNone);
+        assert_eq!(
+            hover_after(h, TouchOutcome::Scrolling, q),
+            HoverSource::TouchNone
+        );
+        assert_eq!(
+            hover_after(h, TouchOutcome::Ended, q),
+            HoverSource::TouchNone
+        );
         // A tap leaves the hover on the tapped point (content coordinates).
-        assert_eq!(hover_after(h, TouchOutcome::Tap, q), HoverSource::TouchAt(q));
+        assert_eq!(
+            hover_after(h, TouchOutcome::Tap, q),
+            HoverSource::TouchAt(q)
+        );
         // Other fingers change nothing.
-        assert_eq!(hover_after(HoverSource::TouchAt(q), TouchOutcome::Ignored, p), HoverSource::TouchAt(q));
+        assert_eq!(
+            hover_after(HoverSource::TouchAt(q), TouchOutcome::Ignored, p),
+            HoverSource::TouchAt(q)
+        );
 
         let mut st = State::default();
-        let area = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let area = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
         st.hover = HoverSource::TouchNone;
-        assert_eq!(st.content_cursor(mouse::Cursor::Available(Point::new(5.0, 5.0)), area, 100.0), mouse::Cursor::Unavailable);
+        assert_eq!(
+            st.content_cursor(mouse::Cursor::Available(Point::new(5.0, 5.0)), area, 100.0),
+            mouse::Cursor::Unavailable
+        );
         st.hover = HoverSource::TouchAt(q);
-        assert_eq!(st.content_cursor(mouse::Cursor::Available(Point::new(5.0, 5.0)), area, 100.0), mouse::Cursor::Available(q));
+        assert_eq!(
+            st.content_cursor(mouse::Cursor::Available(Point::new(5.0, 5.0)), area, 100.0),
+            mouse::Cursor::Available(q)
+        );
         st.hover = HoverSource::Mouse;
         assert_eq!(
             st.content_cursor(mouse::Cursor::Available(Point::new(5.0, 5.0)), area, 100.0),
@@ -772,7 +954,10 @@ mod tests {
 
     #[test]
     fn touchpad_is_precise_and_zero_frame_ends_gesture() {
-        assert_eq!(classify(Pixels { x: 0.0, y: -12.5 }), ScrollInput::Pixels(12.5));
+        assert_eq!(
+            classify(Pixels { x: 0.0, y: -12.5 }),
+            ScrollInput::Pixels(12.5)
+        );
         assert_eq!(classify(Pixels { x: 0.0, y: 0.0 }), ScrollInput::End);
         // Pure horizontal motion is not ours, and is not a gesture end.
         assert_eq!(classify(Pixels { x: 3.0, y: 0.0 }), ScrollInput::Ignore);
@@ -808,10 +993,23 @@ mod tests {
         }
     }
 
-    fn feed(r: &mut TouchRouter, a: &mut ScrollAxis, t: Instant, steps: &[(u8, u64, f32, u64)]) -> Vec<(TouchOutcome, Forward)> {
+    fn feed(
+        r: &mut TouchRouter,
+        a: &mut ScrollAxis,
+        t: Instant,
+        steps: &[(u8, u64, f32, u64)],
+    ) -> Vec<(TouchOutcome, Forward)> {
         steps
             .iter()
-            .map(|&(k, id, y, ms)| r.route(&ev(k, id, y), (100.0, y), true, t + std::time::Duration::from_millis(ms), a))
+            .map(|&(k, id, y, ms)| {
+                r.route(
+                    &ev(k, id, y),
+                    (100.0, y),
+                    true,
+                    t + std::time::Duration::from_millis(ms),
+                    a,
+                )
+            })
             .collect()
     }
 
@@ -825,8 +1023,16 @@ mod tests {
     #[test]
     fn tap_reaches_children_once() {
         let (mut r, mut a, t) = (TouchRouter::default(), axis(), Instant::now());
-        let out = feed(&mut r, &mut a, t, &[(0, 1, 300.0, 0), (1, 1, 306.0, 20), (2, 1, 306.0, 60)]);
-        assert_eq!(out.iter().map(|o| o.1).collect::<Vec<_>>(), [Forward::Pass, Forward::Pass, Forward::Pass]);
+        let out = feed(
+            &mut r,
+            &mut a,
+            t,
+            &[(0, 1, 300.0, 0), (1, 1, 306.0, 20), (2, 1, 306.0, 60)],
+        );
+        assert_eq!(
+            out.iter().map(|o| o.1).collect::<Vec<_>>(),
+            [Forward::Pass, Forward::Pass, Forward::Pass]
+        );
         assert_eq!(out[2].0, TouchOutcome::Tap);
         assert_eq!(a.offset(), 5_000.0, "inside the slop nothing scrolls");
     }
@@ -838,11 +1044,24 @@ mod tests {
             &mut r,
             &mut a,
             t,
-            &[(0, 1, 300.0, 0), (1, 1, 280.0, 16), (1, 1, 200.0, 32), (2, 1, 200.0, 2_000)],
+            &[
+                (0, 1, 300.0, 0),
+                (1, 1, 280.0, 16),
+                (1, 1, 200.0, 32),
+                (2, 1, 200.0, 2_000),
+            ],
         );
-        assert_eq!(out[1], (TouchOutcome::ScrollStarted, Forward::Lost), "children get FingerLost once");
+        assert_eq!(
+            out[1],
+            (TouchOutcome::ScrollStarted, Forward::Lost),
+            "children get FingerLost once"
+        );
         assert_eq!(out[2], (TouchOutcome::Scrolling, Forward::Swallow));
-        assert_eq!(out[3], (TouchOutcome::Ended, Forward::Swallow), "no click after a scroll");
+        assert_eq!(
+            out[3],
+            (TouchOutcome::Ended, Forward::Swallow),
+            "no click after a scroll"
+        );
         // 100 px up minus the 15 px slop: content moved 85 px, no jump.
         assert_eq!(a.offset(), 5_085.0);
         assert!(!a.is_animating(), "fingers rested before lifting: no fling");
@@ -867,7 +1086,11 @@ mod tests {
         a.wheel_notches(3.0, t);
         let out = feed(&mut r, &mut a, t, &[(0, 1, 300.0, 50), (2, 1, 300.0, 120)]);
         assert_eq!(out[0].1, Forward::Pass);
-        assert_eq!(out[1], (TouchOutcome::Ended, Forward::Lost), "the press is cancelled, not clicked");
+        assert_eq!(
+            out[1],
+            (TouchOutcome::Ended, Forward::Lost),
+            "the press is cancelled, not clicked"
+        );
         assert!(!a.is_animating());
     }
 
@@ -878,11 +1101,25 @@ mod tests {
             &mut r,
             &mut a,
             t,
-            &[(0, 1, 300.0, 0), (0, 2, 500.0, 10), (2, 2, 500.0, 20), (1, 1, 250.0, 30), (3, 1, 250.0, 40)],
+            &[
+                (0, 1, 300.0, 0),
+                (0, 2, 500.0, 10),
+                (2, 2, 500.0, 20),
+                (1, 1, 250.0, 30),
+                (3, 1, 250.0, 40),
+            ],
         );
-        assert_eq!(out[1].1, Forward::Swallow, "second finger never reaches children");
+        assert_eq!(
+            out[1].1,
+            Forward::Swallow,
+            "second finger never reaches children"
+        );
         assert_eq!(out[2].1, Forward::Swallow);
-        assert_eq!(out[4], (TouchOutcome::Ended, Forward::Swallow), "cancel after scroll: no fling, no click");
+        assert_eq!(
+            out[4],
+            (TouchOutcome::Ended, Forward::Swallow),
+            "cancel after scroll: no fling, no click"
+        );
         assert!(!a.is_animating());
         // A fresh touch works again.
         let out = feed(&mut r, &mut a, t, &[(0, 3, 300.0, 100), (2, 3, 300.0, 150)]);

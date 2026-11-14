@@ -39,7 +39,12 @@ pub struct Toasts {
 impl Toasts {
     pub fn push(&mut self, text: impl Into<String>, tone: Tone) -> u64 {
         self.next += 1;
-        self.items.push(Toast { id: self.next, text: text.into(), tone, born: Instant::now() });
+        self.items.push(Toast {
+            id: self.next,
+            text: text.into(),
+            tone,
+            born: Instant::now(),
+        });
         self.next
     }
     pub fn dismiss(&mut self, id: u64) {
@@ -53,13 +58,21 @@ impl Toasts {
 /// The stack, full-window, aligned bottom-right with 16 px margin; put it
 /// in a `stack` above the page. `dismiss(id)` is published on close and at
 /// the deadline.
-pub fn toast_stack<'a, M: Clone + 'a>(cx: &Ctx, toasts: &[Toast], dismiss: impl Fn(u64) -> M) -> El<'a, M> {
+pub fn toast_stack<'a, M: Clone + 'a>(
+    cx: &Ctx,
+    toasts: &[Toast],
+    dismiss: impl Fn(u64) -> M,
+) -> El<'a, M> {
     let cx = cx.on_card();
     let p = cx.p();
     // Every toast is as wide as the widest one; the message is `flex-1`.
     let text_w = toasts
         .iter()
-        .map(|t| label(t.text.clone(), 13.0, 19.5).shape(f32::INFINITY).width())
+        .map(|t| {
+            label(t.text.clone(), 13.0, 19.5)
+                .shape(f32::INFINITY)
+                .width()
+        })
         .fold(0.0f32, f32::max)
         .min(292.0);
     let mut col: Vec<El<'a, M>> = Vec::new();
@@ -80,14 +93,24 @@ pub fn toast_stack<'a, M: Clone + 'a>(cx: &Ctx, toasts: &[Toast], dismiss: impl 
         let (text, muted) = (p.text, p.muted);
         let close = surface(icon(Ico::X, 14.0))
             .on_press(dismiss(toast.id))
-            .style(move |s| BoxStyle::default().radius(4.0).fg(c(if s == Status::Hover { text } else { muted })));
+            .style(move |s| {
+                BoxStyle::default()
+                    .radius(4.0)
+                    .fg(c(if s == Status::Hover { text } else { muted }))
+            });
         col.push(
             timer(
                 surface(
                     row![
                         icon(ico, 16.0).color(c(color)),
-                        label(toast.text.clone(), 13.0, 19.5).color(c(p.text)).width(text_w).ellipsis(),
-                        container(close).padding(Padding { left: 4.0, ..Padding::ZERO }),
+                        label(toast.text.clone(), 13.0, 19.5)
+                            .color(c(p.text))
+                            .width(text_w)
+                            .ellipsis(),
+                        container(close).padding(Padding {
+                            left: 4.0,
+                            ..Padding::ZERO
+                        }),
                     ]
                     .spacing(12)
                     .align_y(Alignment::Center),

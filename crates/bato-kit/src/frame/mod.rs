@@ -46,6 +46,8 @@
 mod dialogs;
 mod sidebar;
 
+pub use sidebar::MOD_K;
+
 use std::time::{Duration, Instant};
 
 use bato_theme::settings::{Settings, backend_url};
@@ -217,7 +219,11 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     pub fn new(brand: Brand, nav: Vec<NavItem<P>>, settings: Settings, page: P) -> Self {
         let cx = Ctx::from_palette(palette(settings.theme, accent_rgb(&settings, &brand)));
         set_device_scale(settings.scale_factor());
-        let w = if settings.sidebar_collapsed { COLLAPSED } else { EXPANDED };
+        let w = if settings.sidebar_collapsed {
+            COLLAPSED
+        } else {
+            EXPANDED
+        };
         Self {
             server_url: backend_url(&settings),
             brand,
@@ -309,7 +315,10 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
 
     /// The window background and default text colour.
     pub fn style(&self) -> iced::theme::Style {
-        iced::theme::Style { background_color: c(self.cx.p().bg), text_color: c(self.cx.p().text) }
+        iced::theme::Style {
+            background_color: c(self.cx.p().bg),
+            text_color: c(self.cx.p().text),
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Msg<P>> {
@@ -324,7 +333,10 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     }
 
     fn retheme(&mut self) {
-        self.cx = Ctx::from_palette(palette(self.settings.theme, accent_rgb(&self.settings, &self.brand)));
+        self.cx = Ctx::from_palette(palette(
+            self.settings.theme,
+            accent_rgb(&self.settings, &self.brand),
+        ));
     }
 
     pub fn update(&mut self, msg: Msg<P>) -> Action<P> {
@@ -338,7 +350,12 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 self.settings.sidebar_collapsed = collapsed;
                 let now = Instant::now();
                 let from = self.sidebar.value(now);
-                self.sidebar = Tween::new(from, if collapsed { COLLAPSED } else { EXPANDED }, Duration::from_millis(200), ease_standard);
+                self.sidebar = Tween::new(
+                    from,
+                    if collapsed { COLLAPSED } else { EXPANDED },
+                    Duration::from_millis(200),
+                    ease_standard,
+                );
                 return Action::SaveSettings;
             }
             Msg::Tick(_) => {}
@@ -374,7 +391,11 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             Msg::CustomHex(h) => {
                 self.custom_hex = h.clone();
                 let h = h.trim();
-                let h = if h.starts_with('#') { h.to_string() } else { format!("#{h}") };
+                let h = if h.starts_with('#') {
+                    h.to_string()
+                } else {
+                    format!("#{h}")
+                };
                 if h.len() == 7 && Rgb::hex(&h).is_some() {
                     return self.update(Msg::Accent(h));
                 }
@@ -426,8 +447,11 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             .initial(self.start.scroll)
             .initial_anchor(self.start.anchor.clone())
             .autoscroll(self.autoscroll.clone());
-        let shell: El<'a, M> =
-            autoscroll_layer(row![self.sidebar_view(wrap), main].height(Length::Fill), self.autoscroll.clone()).into();
+        let shell: El<'a, M> = autoscroll_layer(
+            row![self.sidebar_view(wrap), main].height(Length::Fill),
+            self.autoscroll.clone(),
+        )
+        .into();
         let mut layers: Vec<El<'a, M>> = vec![shell];
         if let Some(d) = self.dialog {
             let (panel, w) = match d {
@@ -436,12 +460,22 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             };
             let animate = !self.start.no_animations;
             let cover = c(bato_theme::blend(Rgb::BLACK, 0.5, p.bg));
-            layers.push(modal(panel, w, wrap(Msg::Close), cover).animate(animate).backdrop(backdrop_blur(self.dialog_opened, animate)).into());
+            layers.push(
+                modal(panel, w, wrap(Msg::Close), cover)
+                    .animate(animate)
+                    .backdrop(backdrop_blur(self.dialog_opened, animate))
+                    .into(),
+            );
         }
         if !self.toasts.is_empty() {
-            layers.push(toast_stack(&self.cx, &self.toasts.items, move |id| wrap(Msg::Dismiss(id))));
+            layers.push(toast_stack(&self.cx, &self.toasts.items, move |id| {
+                wrap(Msg::Dismiss(id))
+            }));
         }
-        stack(layers).width(Length::Fill).height(Length::Fill).into()
+        stack(layers)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -458,8 +492,14 @@ fn normalize(u: &str) -> String {
 mod tests {
     use super::*;
 
-    const BRAND: Brand =
-        Brand { name: "Test", tagline: "t", version: "1.0.0", slug: "bato-kit-test", accent: "#8b5cf6", icon: Ico::Box };
+    const BRAND: Brand = Brand {
+        name: "Test",
+        tagline: "t",
+        version: "1.0.0",
+        slug: "bato-kit-test",
+        accent: "#8b5cf6",
+        icon: Ico::Box,
+    };
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Page {
@@ -468,7 +508,15 @@ mod tests {
     }
 
     fn frame() -> Frame<Page> {
-        Frame::new(BRAND, vec![NavItem::new(Page::A, Ico::Home, "A"), NavItem::new(Page::B, Ico::Rows3, "B")], Settings::default(), Page::A)
+        Frame::new(
+            BRAND,
+            vec![
+                NavItem::new(Page::A, Ico::Home, "A"),
+                NavItem::new(Page::B, Ico::Rows3, "B"),
+            ],
+            Settings::default(),
+            Page::A,
+        )
     }
 
     #[test]
@@ -480,10 +528,16 @@ mod tests {
         assert_eq!(f.settings().theme, ThemeId::Light);
         assert!(f.ctx().p().is_light());
         assert_eq!(f.update(Msg::Accent("not a colour".into())), Action::None);
-        assert_eq!(f.update(Msg::CustomHex("2563EB".into())), Action::SaveSettings);
+        assert_eq!(
+            f.update(Msg::CustomHex("2563EB".into())),
+            Action::SaveSettings
+        );
         assert_eq!(f.settings().accent.as_deref(), Some("#2563eb"));
         f.update(Msg::ServerUrl(" http://h:1/ ".into()));
-        assert_eq!(f.update(Msg::TestServer), Action::TestServer("http://h:1".into()));
+        assert_eq!(
+            f.update(Msg::TestServer),
+            Action::TestServer("http://h:1".into())
+        );
         assert_eq!(f.update(Msg::SaveServer), Action::ServerSaved);
         assert_eq!(f.settings().backend_url.as_deref(), Some("http://h:1"));
         assert_eq!(f.update(Msg::CheckUpdates), Action::CheckUpdates);
@@ -496,7 +550,10 @@ mod tests {
         assert!(f.settings().sidebar_collapsed);
         assert!(f.sidebar.is_running(Instant::now()));
         assert_eq!(f.sidebar.to, COLLAPSED);
-        assert_eq!(f.sidebar.value(Instant::now() + Duration::from_millis(250)), COLLAPSED);
+        assert_eq!(
+            f.sidebar.value(Instant::now() + Duration::from_millis(250)),
+            COLLAPSED
+        );
     }
 
     #[test]

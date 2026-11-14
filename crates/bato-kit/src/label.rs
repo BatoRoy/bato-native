@@ -60,7 +60,13 @@ pub struct Span {
 
 impl Span {
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into(), fam: None, size: None, weight: None, color: None }
+        Self {
+            text: text.into(),
+            fam: None,
+            size: None,
+            weight: None,
+            color: None,
+        }
     }
     pub fn mono(mut self) -> Self {
         self.fam = Some(Fam::Mono);
@@ -189,7 +195,9 @@ impl Label {
             s.fam.hash(&mut h);
             s.size.map(f32::to_bits).hash(&mut h);
             s.weight.hash(&mut h);
-            s.color.map(|c| [c.r, c.g, c.b, c.a].map(f32::to_bits)).hash(&mut h);
+            s.color
+                .map(|c| [c.r, c.g, c.b, c.a].map(f32::to_bits))
+                .hash(&mut h);
         }
         self.fam.hash(&mut h);
         self.size.to_bits().hash(&mut h);
@@ -227,16 +235,30 @@ impl Label {
         a
     }
 
-    fn buffer(&self, fs: &mut ct::FontSystem, spans: &[(String, usize)], width: Option<f32>) -> ct::Buffer {
+    fn buffer(
+        &self,
+        fs: &mut ct::FontSystem,
+        spans: &[(String, usize)],
+        width: Option<f32>,
+    ) -> ct::Buffer {
         let mut buf = ct::Buffer::new(fs, ct::Metrics::new(self.size, self.line_height));
         let default = ct::Attrs::new()
             .family(ct::Family::Name(self.fam.name()))
             .weight(ct::Weight(self.weight));
-        buf.set_wrap(fs, if width.is_some() { ct::Wrap::Word } else { ct::Wrap::None });
+        buf.set_wrap(
+            fs,
+            if width.is_some() {
+                ct::Wrap::Word
+            } else {
+                ct::Wrap::None
+            },
+        );
         buf.set_size(fs, width, None);
         buf.set_rich_text(
             fs,
-            spans.iter().map(|(t, i)| (t.as_str(), self.attrs(&self.spans[*i]))),
+            spans
+                .iter()
+                .map(|(t, i)| (t.as_str(), self.attrs(&self.spans[*i]))),
             &default,
             ct::Shaping::Advanced,
             None,
@@ -248,8 +270,17 @@ impl Label {
     fn build(&self, avail: f32) -> Cache {
         let mut guard = font_system().write().expect("font system");
         let fs = guard.raw();
-        let spans: Vec<(String, usize)> = self.spans.iter().enumerate().map(|(i, s)| (s.text.clone(), i)).collect();
-        let wrap_w = if self.wrap && avail.is_finite() { Some(avail.max(1.0)) } else { None };
+        let spans: Vec<(String, usize)> = self
+            .spans
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.text.clone(), i))
+            .collect();
+        let wrap_w = if self.wrap && avail.is_finite() {
+            Some(avail.max(1.0))
+        } else {
+            None
+        };
         let full = self.buffer(fs, &spans, wrap_w);
 
         // Byte ranges of each visual line in the concatenated text.
@@ -259,7 +290,12 @@ impl Label {
                 ranges.push((0, 0));
                 continue;
             };
-            let start = run.glyphs.iter().map(|g| g.start).min().unwrap_or(first.start);
+            let start = run
+                .glyphs
+                .iter()
+                .map(|g| g.start)
+                .min()
+                .unwrap_or(first.start);
             let end = run.glyphs.iter().map(|g| g.end).max().unwrap_or(last.end);
             ranges.push((start, end));
         }
@@ -304,19 +340,35 @@ impl Label {
                         break;
                     }
                 }
-                let idx = s.last().map(|x| x.1).or(line_spans.first().map(|x| x.1)).unwrap_or(0);
+                let idx = s
+                    .last()
+                    .map(|x| x.1)
+                    .or(line_spans.first().map(|x| x.1))
+                    .unwrap_or(0);
                 s.push(("…".to_string(), idx));
                 line_spans = s;
                 buf = self.buffer(fs, &line_spans, None);
                 w = line_width(&buf);
             }
-            let line_y = buf.layout_runs().next().map(|r| r.line_y).unwrap_or(self.line_height);
+            let line_y = buf
+                .layout_runs()
+                .next()
+                .map(|r| r.line_y)
+                .unwrap_or(self.line_height);
             // Dominant family of the line decides the strut metrics: the
             // block's own family (CSS uses the parent's strut).
-            lines.push(Line { buffer: Arc::new(buf), width: w, line_y });
+            lines.push(Line {
+                buffer: Arc::new(buf),
+                width: w,
+                line_y,
+            });
         }
         let width = lines.iter().map(|l| l.width).fold(0.0, f32::max);
-        Cache { key: 0, lines, width }
+        Cache {
+            key: 0,
+            lines,
+            width,
+        }
     }
 }
 
@@ -361,14 +413,36 @@ impl Shaped {
     pub fn height(&self) -> f32 {
         self.line_height * self.cache.lines.len() as f32
     }
-    pub fn draw(&self, renderer: &mut iced::Renderer, b: Rectangle, color: Color, viewport: &Rectangle) {
-        draw_lines(renderer, &self.cache, self.fam, self.size, self.line_height, self.align, b, color, viewport);
+    pub fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        b: Rectangle,
+        color: Color,
+        viewport: &Rectangle,
+    ) {
+        draw_lines(
+            renderer,
+            &self.cache,
+            self.fam,
+            self.size,
+            self.line_height,
+            self.align,
+            b,
+            color,
+            viewport,
+        );
     }
 }
 
 impl Label {
     pub fn shape(&self, avail: f32) -> Shaped {
-        Shaped { cache: self.build(avail), fam: self.fam, size: self.size, line_height: self.line_height, align: self.align }
+        Shaped {
+            cache: self.build(avail),
+            fam: self.fam,
+            size: self.size,
+            line_height: self.line_height,
+            align: self.align,
+        }
     }
 }
 
@@ -387,10 +461,16 @@ fn draw_lines(
     let s = device_scale();
     let color = crate::anim::fade(color);
     let base = blink_baseline(fam, size, line_height, s);
-    let clip = Rectangle { x: viewport.x - 2.0, y: viewport.y - 2.0, width: viewport.width + 4.0, height: viewport.height + 4.0 };
+    let clip = Rectangle {
+        x: viewport.x - 2.0,
+        y: viewport.y - 2.0,
+        width: viewport.width + 4.0,
+        height: viewport.height + 4.0,
+    };
     for (i, line) in cache.lines.iter().enumerate() {
         let top = b.y + i as f32 * line_height;
-        if top > viewport.y + viewport.height + line_height || top + 2.0 * line_height < viewport.y {
+        if top > viewport.y + viewport.height + line_height || top + 2.0 * line_height < viewport.y
+        {
             continue;
         }
         let baseline_dev = (top * s + base).round();
@@ -448,7 +528,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Label {
         tree::State::new(Cache::default())
     }
 
-    fn layout(&mut self, tree: &mut widget::Tree, _renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        _renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let limits = limits.width(self.width).max_width(self.max_width);
         let avail = limits.max().width;
         let key = self.key(avail);
@@ -460,7 +545,11 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Label {
         let h = self.line_height * cache.lines.len() as f32;
         let w = match self.width {
             Length::Shrink => cache.width.min(avail),
-            _ => limits.resolve(self.width, Length::Shrink, Size::new(cache.width, h)).width,
+            _ => {
+                limits
+                    .resolve(self.width, Length::Shrink, Size::new(cache.width, h))
+                    .width
+            }
         };
         layout::Node::new(Size::new(w, h))
     }
@@ -477,7 +566,17 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Label {
     ) {
         let cache = tree.state.downcast_ref::<Cache>();
         let color = self.color.unwrap_or(style.text_color);
-        draw_lines(renderer, cache, self.fam, self.size, self.line_height, self.align, layout.bounds(), color, viewport);
+        draw_lines(
+            renderer,
+            cache,
+            self.fam,
+            self.size,
+            self.line_height,
+            self.align,
+            layout.bounds(),
+            color,
+            viewport,
+        );
     }
 }
 
@@ -498,7 +597,12 @@ mod tests {
     #[test]
     fn variable_weights_shape_like_harfbuzz() {
         crate::fonts::setup();
-        for (t, w, hb) in [("Primary", 400, 47.5625), ("Primary", 500, 48.40625), ("Secondary", 500, 67.34375), ("Secondary", 600, 68.1875)] {
+        for (t, w, hb) in [
+            ("Primary", 400, 47.5625),
+            ("Primary", 500, 48.40625),
+            ("Secondary", 500, 67.34375),
+            ("Secondary", 600, 68.1875),
+        ] {
             let got = label(t, 13.0, 19.5).weight(w).shape(f32::INFINITY).width();
             assert!((got - hb).abs() < 0.05, "{t} {w}: {got} vs {hb}");
         }

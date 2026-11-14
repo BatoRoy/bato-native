@@ -57,7 +57,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Spinner {
         Size::new(Length::Fixed(self.size), Length::Fixed(self.size))
     }
 
-    fn layout(&mut self, _tree: &mut Tree, _renderer: &iced::Renderer, _limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        _limits: &layout::Limits,
+    ) -> layout::Node {
         layout::Node::new(Size::new(self.size, self.size))
     }
 
@@ -72,7 +77,10 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Spinner {
         shell: &mut iced::advanced::Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
-        if matches!(event, iced::Event::Window(iced::window::Event::RedrawRequested(_))) {
+        if matches!(
+            event,
+            iced::Event::Window(iced::window::Event::RedrawRequested(_))
+        ) {
             shell.request_redraw();
         }
     }
@@ -96,7 +104,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Spinner {
         });
         let rotation = (epoch().elapsed().as_secs_f32() % 1.0) * std::f32::consts::TAU;
         renderer.draw_svg(
-            svg::Svg { handle, color: Some(Color { a: 1.0, ..color }), rotation: Radians(rotation), opacity: color.a * current_opacity() },
+            svg::Svg {
+                handle,
+                color: Some(Color { a: 1.0, ..color }),
+                rotation: Radians(rotation),
+                opacity: color.a * current_opacity(),
+            },
             snap_rect(layout.bounds()),
             viewport.expand(2.0),
         );

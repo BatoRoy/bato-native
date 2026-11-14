@@ -19,7 +19,10 @@ use crate::anim::ease_out;
 
 /// The blurred page behind a modal: put it in [`crate::modal::Modal::backdrop`].
 pub fn backdrop_blur<'a, Message: 'a>(opened: Instant, animate: bool) -> Element<'a, Message> {
-    iced::widget::shader(Blur { opened, animate }).width(Length::Fill).height(Length::Fill).into()
+    iced::widget::shader(Blur { opened, animate })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 struct Blur {
@@ -32,8 +35,15 @@ impl<Message> shader::Program<Message> for Blur {
     type Primitive = BlurPrimitive;
 
     fn draw(&self, _state: &(), _cursor: mouse::Cursor, _bounds: Rectangle) -> BlurPrimitive {
-        let opacity = if self.animate { ease_out((self.opened.elapsed().as_secs_f32() / 0.150).min(1.0)) } else { 1.0 };
-        BlurPrimitive { opacity, sigma_css: 4.0 }
+        let opacity = if self.animate {
+            ease_out((self.opened.elapsed().as_secs_f32() / 0.150).min(1.0))
+        } else {
+            1.0
+        };
+        BlurPrimitive {
+            opacity,
+            sigma_css: 4.0,
+        }
     }
 }
 
@@ -54,7 +64,12 @@ struct Params {
 }
 
 fn as_bytes(p: &Params) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(p as *const Params as *const u8, std::mem::size_of::<Params>()) }
+    unsafe {
+        std::slice::from_raw_parts(
+            p as *const Params as *const u8,
+            std::mem::size_of::<Params>(),
+        )
+    }
 }
 
 pub struct BlurPipeline {
@@ -64,7 +79,13 @@ pub struct BlurPipeline {
     params_h: wgpu::Buffer,
     params_v: wgpu::Buffer,
     format: wgpu::TextureFormat,
-    textures: Option<(wgpu::Extent3d, wgpu::Texture, wgpu::Texture, wgpu::BindGroup, wgpu::BindGroup)>,
+    textures: Option<(
+        wgpu::Extent3d,
+        wgpu::Texture,
+        wgpu::Texture,
+        wgpu::BindGroup,
+        wgpu::BindGroup,
+    )>,
 }
 
 const SHADER: &str = r#"
@@ -145,7 +166,12 @@ impl Pipeline for BlurPipeline {
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("bato backdrop blur"),
             layout: Some(&pl),
-            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs"),
@@ -177,7 +203,15 @@ impl Pipeline for BlurPipeline {
                 mapped_at_creation: false,
             })
         };
-        Self { pipeline, layout, sampler, params_h: mk(), params_v: mk(), format, textures: None }
+        Self {
+            pipeline,
+            layout,
+            sampler,
+            params_h: mk(),
+            params_v: mk(),
+            format,
+            textures: None,
+        }
     }
 }
 
@@ -193,7 +227,11 @@ impl Primitive for BlurPrimitive {
         viewport: &Viewport,
     ) {
         let size = viewport.physical_size();
-        let extent = wgpu::Extent3d { width: size.width.max(1), height: size.height.max(1), depth_or_array_layers: 1 };
+        let extent = wgpu::Extent3d {
+            width: size.width.max(1),
+            height: size.height.max(1),
+            depth_or_array_layers: 1,
+        };
         if pipeline.textures.as_ref().is_none_or(|t| t.0 != extent) {
             let mk = |usage| {
                 device.create_texture(&wgpu::TextureDescriptor {
@@ -208,7 +246,8 @@ impl Primitive for BlurPrimitive {
                 })
             };
             let a = mk(wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING);
-            let b = mk(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+            let b =
+                mk(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
             let bg = |tex: &wgpu::Texture, buf: &wgpu::Buffer| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
@@ -216,10 +255,18 @@ impl Primitive for BlurPrimitive {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&tex.create_view(&Default::default())),
+                            resource: wgpu::BindingResource::TextureView(
+                                &tex.create_view(&Default::default()),
+                            ),
                         },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&pipeline.sampler) },
-                        wgpu::BindGroupEntry { binding: 2, resource: buf.as_entire_binding() },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: buf.as_entire_binding(),
+                        },
                     ],
                 })
             };
@@ -229,11 +276,27 @@ impl Primitive for BlurPrimitive {
         }
         let texel = [1.0 / extent.width as f32, 1.0 / extent.height as f32];
         let sigma = self.sigma_css * viewport.scale_factor();
-        queue.write_buffer(&pipeline.params_h, 0, as_bytes(&Params { texel, dir: [1.0, 0.0], sigma, opacity: 1.0, _pad: [0.0; 2] }));
+        queue.write_buffer(
+            &pipeline.params_h,
+            0,
+            as_bytes(&Params {
+                texel,
+                dir: [1.0, 0.0],
+                sigma,
+                opacity: 1.0,
+                _pad: [0.0; 2],
+            }),
+        );
         queue.write_buffer(
             &pipeline.params_v,
             0,
-            as_bytes(&Params { texel, dir: [0.0, 1.0], sigma, opacity: self.opacity, _pad: [0.0; 2] }),
+            as_bytes(&Params {
+                texel,
+                dir: [0.0, 1.0],
+                sigma,
+                opacity: self.opacity,
+                _pad: [0.0; 2],
+            }),
         );
     }
 
@@ -244,20 +307,28 @@ impl Primitive for BlurPrimitive {
         target: &wgpu::TextureView,
         clip: &Rectangle<u32>,
     ) {
-        let Some((extent, a, b, bg_h, bg_v)) = &pipeline.textures else { return };
+        let Some((extent, a, b, bg_h, bg_v)) = &pipeline.textures else {
+            return;
+        };
         let src = target.texture();
         if src.size() != *extent || !src.usage().contains(wgpu::TextureUsages::COPY_SRC) {
             return;
         }
         encoder.copy_texture_to_texture(src.as_image_copy(), a.as_image_copy(), *extent);
-        let pass = |encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, bg: &wgpu::BindGroup, scissor: bool| {
+        let pass = |encoder: &mut wgpu::CommandEncoder,
+                    view: &wgpu::TextureView,
+                    bg: &wgpu::BindGroup,
+                    scissor: bool| {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("bato blur"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
                     depth_slice: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,

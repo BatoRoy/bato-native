@@ -38,7 +38,10 @@ impl UiState {
     /// A store backed by any file.
     pub fn at(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let map = fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let map = fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         Self { path, map }
     }
 
@@ -48,7 +51,9 @@ impl UiState {
 
     /// The value at `key`, if present and of the right shape.
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
-        self.map.get(key).and_then(|v| serde_json::from_value(v.clone()).ok())
+        self.map
+            .get(key)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
     pub fn contains(&self, key: &str) -> bool {
@@ -57,12 +62,17 @@ impl UiState {
 
     /// Store `value` at `key` and write the file.
     pub fn set<T: Serialize + ?Sized>(&mut self, key: &str, value: &T) -> io::Result<()> {
-        self.map.insert(key.to_string(), serde_json::to_value(value)?);
+        self.map
+            .insert(key.to_string(), serde_json::to_value(value)?);
         self.save()
     }
 
     pub fn remove(&mut self, key: &str) -> io::Result<()> {
-        if self.map.remove(key).is_some() { self.save() } else { Ok(()) }
+        if self.map.remove(key).is_some() {
+            self.save()
+        } else {
+            Ok(())
+        }
     }
 
     fn save(&self) -> io::Result<()> {
@@ -91,7 +101,11 @@ mod tests {
         let again = UiState::at(&file);
         assert_eq!(again.get::<Vec<f32>>("panels"), Some(vec![30.0, 70.0]));
         assert_eq!(again.get::<String>("name").as_deref(), Some("x"));
-        assert_eq!(again.get::<u32>("name"), None, "wrong shape reads as absent");
+        assert_eq!(
+            again.get::<u32>("name"),
+            None,
+            "wrong shape reads as absent"
+        );
         fs::write(&file, "{not json").unwrap();
         assert!(!UiState::at(&file).contains("panels"));
         let _ = fs::remove_dir_all(&dir);

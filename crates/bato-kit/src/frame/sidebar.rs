@@ -22,9 +22,20 @@ pub const MOD_K: &str = "Ctrl K";
 
 /// One nav / footer row: 36 px, icon 16, 13 px label; active `text@.07`,
 /// hover `text@.05`; a rail tip when collapsed.
-fn nav_row<'a, M: Clone + 'a>(cx: &Ctx, collapsed: bool, ico: Ico, text: &'a str, active: bool, msg: M) -> El<'a, M> {
+fn nav_row<'a, M: Clone + 'a>(
+    cx: &Ctx,
+    collapsed: bool,
+    ico: Ico,
+    text: &'a str,
+    active: bool,
+    msg: M,
+) -> El<'a, M> {
     let p = cx.p();
-    let icon_color = if active { c(p.accent_bright) } else { c(p.muted) };
+    let icon_color = if active {
+        c(p.accent_bright)
+    } else {
+        c(p.muted)
+    };
     let mut items: Vec<El<'a, M>> = vec![icon(ico, 16.0).color(icon_color).into()];
     if !collapsed {
         let mut l = label(text, 13.0, 19.5).ellipsis().width(Length::Fill);
@@ -37,20 +48,34 @@ fn nav_row<'a, M: Clone + 'a>(cx: &Ctx, collapsed: bool, ico: Ico, text: &'a str
     let s = surface(row(items).spacing(10).align_y(Alignment::Center))
         .width(Length::Fill)
         .height(36)
-        .padding(if collapsed { Padding::ZERO } else { Padding::from([0.0, 12.0]) })
+        .padding(if collapsed {
+            Padding::ZERO
+        } else {
+            Padding::from([0.0, 12.0])
+        })
         .center_y()
         .on_press(msg)
         .style(move |st| {
             let p = &t.p;
             if active {
-                BoxStyle::default().bg(c(t.wash(0.07, p.bg))).fg(c(p.text)).radius(8.0)
+                BoxStyle::default()
+                    .bg(c(t.wash(0.07, p.bg)))
+                    .fg(c(p.text))
+                    .radius(8.0)
             } else if st == Status::Hover {
-                BoxStyle::default().bg(c(t.wash(0.05, p.bg))).fg(c(p.text)).radius(8.0)
+                BoxStyle::default()
+                    .bg(c(t.wash(0.05, p.bg)))
+                    .fg(c(p.text))
+                    .radius(8.0)
             } else {
                 BoxStyle::default().fg(c(p.subtext)).radius(8.0)
             }
         });
-    if collapsed { rail_tip(cx, s.align_x(Alignment::Center), text) } else { s.into() }
+    if collapsed {
+        rail_tip(cx, s.align_x(Alignment::Center), text)
+    } else {
+        s.into()
+    }
 }
 
 impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
@@ -65,9 +90,14 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             if !collapsed {
                 items.push(
                     column![
-                        label(self.brand.name, 14.0, 17.5).semibold().color(c(p.text)).ellipsis(),
+                        label(self.brand.name, 14.0, 17.5)
+                            .semibold()
+                            .color(c(p.text))
+                            .ellipsis(),
                         vgap(2.0),
-                        label(format!("v{}", self.brand.version), 11.0, 13.75).mono().color(c(p.muted)),
+                        label(format!("v{}", self.brand.version), 11.0, 13.75)
+                            .mono()
+                            .color(c(p.muted)),
                     ]
                     .width(Length::Fill)
                     .into(),
@@ -75,7 +105,11 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             }
             let r = row(items).spacing(12).align_y(Alignment::Center);
             let s = surface(r).width(Length::Fill).height(64).center_y();
-            if collapsed { s.align_x(Alignment::Center).into() } else { s.padding(Padding::from([0.0, 16.0])).into() }
+            if collapsed {
+                s.align_x(Alignment::Center).into()
+            } else {
+                s.padding(Padding::from([0.0, 16.0])).into()
+            }
         };
 
         let search: El<'a, M> = {
@@ -85,22 +119,52 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 items.push(kbd(&cx.on(cx.wash(0.03)), MOD_K));
             }
             let t = cx.t.clone();
-            let s = surface(row(items).spacing(8).align_y(Alignment::Center)).width(Length::Fill).height(32).center_y().style(move |st| {
-                let p = &t.p;
-                let bg = t.wash(if st == Status::Hover { 0.06 } else { 0.03 }, p.bg);
-                BoxStyle::default().bg(c(bg)).border(c(t.line_on(bg))).radius(8.0).fg(c(if st == Status::Hover { p.subtext } else { p.muted }))
-            });
+            let s = surface(row(items).spacing(8).align_y(Alignment::Center))
+                .width(Length::Fill)
+                .height(32)
+                .center_y()
+                .style(move |st| {
+                    let p = &t.p;
+                    let bg = t.wash(if st == Status::Hover { 0.06 } else { 0.03 }, p.bg);
+                    BoxStyle::default()
+                        .bg(c(bg))
+                        .border(c(t.line_on(bg)))
+                        .radius(8.0)
+                        .fg(c(if st == Status::Hover {
+                            p.subtext
+                        } else {
+                            p.muted
+                        }))
+                });
             let s: El<'a, M> = if collapsed {
-                rail_tip(cx, s.align_x(Alignment::Center), &format!("Search ({MOD_K})"))
+                rail_tip(
+                    cx,
+                    s.align_x(Alignment::Center),
+                    &format!("Search ({MOD_K})"),
+                )
             } else {
                 s.padding(Padding::from([0.0, 11.0])).into()
             };
-            container(s).padding(Padding { top: 0.0, right: 12.0, bottom: 12.0, left: 12.0 }).into()
+            container(s)
+                .padding(Padding {
+                    top: 0.0,
+                    right: 12.0,
+                    bottom: 12.0,
+                    left: 12.0,
+                })
+                .into()
         };
 
-        let nav = column(
-            self.nav.iter().map(|n| nav_row(cx, collapsed, n.icon, n.label, self.page == n.page, wrap(Msg::Navigate(n.page)))),
-        )
+        let nav = column(self.nav.iter().map(|n| {
+            nav_row(
+                cx,
+                collapsed,
+                n.icon,
+                n.label,
+                self.page == n.page,
+                wrap(Msg::Navigate(n.page)),
+            )
+        }))
         .spacing(4)
         .padding(Padding::from([0.0, 12.0]))
         .height(Length::Fill);
@@ -108,12 +172,30 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         let footer = column![
             hline(c(cx.line())),
             column![
-                nav_row(cx, collapsed, Ico::Info, "About", false, wrap(Msg::Open(Dialog::About))),
-                nav_row(cx, collapsed, Ico::Settings, "App Options", false, wrap(Msg::Open(Dialog::Options))),
                 nav_row(
                     cx,
                     collapsed,
-                    if collapsed { Ico::PanelLeftOpen } else { Ico::PanelLeftClose },
+                    Ico::Info,
+                    "About",
+                    false,
+                    wrap(Msg::Open(Dialog::About))
+                ),
+                nav_row(
+                    cx,
+                    collapsed,
+                    Ico::Settings,
+                    "App Options",
+                    false,
+                    wrap(Msg::Open(Dialog::Options))
+                ),
+                nav_row(
+                    cx,
+                    collapsed,
+                    if collapsed {
+                        Ico::PanelLeftOpen
+                    } else {
+                        Ico::PanelLeftClose
+                    },
                     if collapsed { "Expand" } else { "Collapse" },
                     false,
                     wrap(Msg::ToggleSidebar)
@@ -123,7 +205,9 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             .padding(12),
         ];
 
-        let body = column![header, search, nav, footer].width(w - 1.0).height(Length::Fill);
+        let body = column![header, search, nav, footer]
+            .width(w - 1.0)
+            .height(Length::Fill);
         let side = row![body, vline(c(cx.line()))].height(Length::Fill);
         surface(side).width(w).height(Length::Fill).clip().into()
     }

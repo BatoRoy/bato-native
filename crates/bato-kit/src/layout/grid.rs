@@ -40,7 +40,14 @@ pub struct Grid<'a, Message> {
 pub fn grid<'a, Message>(cells: Vec<El<'a, Message>>, gap: f32) -> Grid<'a, Message> {
     let n = cells.len().max(1);
     let spans = vec![1; cells.len()];
-    Grid { cells, spans, columns: Columns::Tracks(vec![Track::Fr(1.0); n]), gap_x: gap, gap_y: gap, equal_rows: false }
+    Grid {
+        cells,
+        spans,
+        columns: Columns::Tracks(vec![Track::Fr(1.0); n]),
+        gap_x: gap,
+        gap_y: gap,
+        equal_rows: false,
+    }
 }
 
 impl<'a, Message> Grid<'a, Message> {
@@ -51,12 +58,26 @@ impl<'a, Message> Grid<'a, Message> {
 
     /// `grid-cols-[…]`: explicit tracks, e.g. `[Px(48.0), Fr(1.0) × 7]`.
     pub fn tracks(tracks: Vec<Track>) -> Self {
-        Grid { cells: Vec::new(), spans: Vec::new(), columns: Columns::Tracks(tracks), gap_x: 0.0, gap_y: 0.0, equal_rows: false }
+        Grid {
+            cells: Vec::new(),
+            spans: Vec::new(),
+            columns: Columns::Tracks(tracks),
+            gap_x: 0.0,
+            gap_y: 0.0,
+            equal_rows: false,
+        }
     }
 
     /// AutoGrid: `repeat(auto-fill, minmax(min, 1fr))`.
     pub fn auto_fill(min: f32) -> Self {
-        Grid { cells: Vec::new(), spans: Vec::new(), columns: Columns::AutoFill(min), gap_x: 0.0, gap_y: 0.0, equal_rows: false }
+        Grid {
+            cells: Vec::new(),
+            spans: Vec::new(),
+            columns: Columns::AutoFill(min),
+            gap_x: 0.0,
+            gap_y: 0.0,
+            equal_rows: false,
+        }
     }
 
     /// `gap-G` (both axes).
@@ -99,8 +120,14 @@ fn column_widths(columns: &Columns, total: f32, gap: f32) -> Vec<f32> {
         }
     };
     let n = tracks.len().max(1);
-    let fixed: f32 = tracks.iter().map(|t| if let Track::Px(p) = t { *p } else { 0.0 }).sum();
-    let frs: f32 = tracks.iter().map(|t| if let Track::Fr(f) = t { *f } else { 0.0 }).sum();
+    let fixed: f32 = tracks
+        .iter()
+        .map(|t| if let Track::Px(p) = t { *p } else { 0.0 })
+        .sum();
+    let frs: f32 = tracks
+        .iter()
+        .map(|t| if let Track::Fr(f) = t { *f } else { 0.0 })
+        .sum();
     let free = (total - gap * (n as f32 - 1.0) - fixed).max(0.0);
     tracks
         .iter()
@@ -146,18 +173,33 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Grid<'a, 
         Size::new(Length::Fill, Length::Shrink)
     }
 
-    fn layout(&mut self, tree: &mut iced::advanced::widget::Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut iced::advanced::widget::Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let total = limits.max().width;
         let widths = column_widths(&self.columns, total, self.gap_x);
         let xs = offsets(&widths, self.gap_x);
         let placed = place(&self.spans, widths.len());
         let gap_x = self.gap_x;
-        let span_w = |c: usize, s: usize| widths[c..c + s].iter().sum::<f32>() + gap_x * (s as f32 - 1.0);
+        let span_w =
+            |c: usize, s: usize| widths[c..c + s].iter().sum::<f32>() + gap_x * (s as f32 - 1.0);
         let rows = placed.last().map_or(0, |p| p.0 + 1);
         let mut row_h = vec![0.0f32; rows];
-        for ((cell, t), &(r, c, s)) in self.cells.iter_mut().zip(tree.children.iter_mut()).zip(&placed) {
+        for ((cell, t), &(r, c, s)) in self
+            .cells
+            .iter_mut()
+            .zip(tree.children.iter_mut())
+            .zip(&placed)
+        {
             let w = span_w(c, s);
-            let node = cell.as_widget_mut().layout(t, renderer, &layout::Limits::new(Size::new(w, 0.0), Size::new(w, f32::INFINITY)));
+            let node = cell.as_widget_mut().layout(
+                t,
+                renderer,
+                &layout::Limits::new(Size::new(w, 0.0), Size::new(w, f32::INFINITY)),
+            );
             row_h[r] = row_h[r].max(node.size().height);
         }
         if self.equal_rows {
@@ -166,12 +208,25 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Grid<'a, 
         }
         let ys = offsets(&row_h, self.gap_y);
         let mut nodes = Vec::with_capacity(self.cells.len());
-        for ((cell, t), &(r, c, s)) in self.cells.iter_mut().zip(tree.children.iter_mut()).zip(&placed) {
+        for ((cell, t), &(r, c, s)) in self
+            .cells
+            .iter_mut()
+            .zip(tree.children.iter_mut())
+            .zip(&placed)
+        {
             let (w, h) = (span_w(c, s), row_h[r]);
-            let node = cell.as_widget_mut().layout(t, renderer, &layout::Limits::new(Size::new(w, h), Size::new(w, h)));
+            let node = cell.as_widget_mut().layout(
+                t,
+                renderer,
+                &layout::Limits::new(Size::new(w, h), Size::new(w, h)),
+            );
             nodes.push(node.move_to(Point::new(xs[c], ys[r])));
         }
-        let height = if rows == 0 { 0.0 } else { ys[rows - 1] + row_h[rows - 1] };
+        let height = if rows == 0 {
+            0.0
+        } else {
+            ys[rows - 1] + row_h[rows - 1]
+        };
         layout::Node::with_children(Size::new(total, height), nodes)
     }
 
@@ -186,7 +241,10 @@ mod tests {
 
     #[test]
     fn equal_columns_with_gap() {
-        assert_eq!(column_widths(&Columns::Tracks(vec![Track::Fr(1.0); 2]), 816.0, 16.0), vec![400.0, 400.0]);
+        assert_eq!(
+            column_widths(&Columns::Tracks(vec![Track::Fr(1.0); 2]), 816.0, 16.0),
+            vec![400.0, 400.0]
+        );
     }
 
     #[test]
@@ -202,13 +260,22 @@ mod tests {
     #[test]
     fn auto_fill_columns() {
         // minmax(140px, 1fr) with gap 12 in 600 px: 4 columns.
-        assert_eq!(column_widths(&Columns::AutoFill(140.0), 600.0, 12.0).len(), 4);
-        assert_eq!(column_widths(&Columns::AutoFill(140.0), 100.0, 12.0).len(), 1);
+        assert_eq!(
+            column_widths(&Columns::AutoFill(140.0), 600.0, 12.0).len(),
+            4
+        );
+        assert_eq!(
+            column_widths(&Columns::AutoFill(140.0), 100.0, 12.0).len(),
+            1
+        );
     }
 
     #[test]
     fn spans_wrap_to_the_next_row() {
-        assert_eq!(place(&[1, 1, 2, 1], 2), vec![(0, 0, 1), (0, 1, 1), (1, 0, 2), (2, 0, 1)]);
+        assert_eq!(
+            place(&[1, 1, 2, 1], 2),
+            vec![(0, 0, 1), (0, 1, 1), (1, 0, 2), (2, 0, 1)]
+        );
         assert_eq!(place(&[1, 2], 2), vec![(0, 0, 1), (1, 0, 2)]);
         assert_eq!(place(&[5], 2), vec![(0, 0, 2)]);
     }

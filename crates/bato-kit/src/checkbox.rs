@@ -30,8 +30,19 @@ pub struct Checkbox<'a, M> {
     on_toggle: Box<dyn Fn(bool) -> M + 'a>,
 }
 
-pub fn checkbox<'a, M: Clone + 'a>(cx: &Ctx, checked: bool, on_toggle: impl Fn(bool) -> M + 'a) -> Checkbox<'a, M> {
-    Checkbox { cx: cx.clone(), checked, indeterminate: false, disabled: false, label: None, on_toggle: Box::new(on_toggle) }
+pub fn checkbox<'a, M: Clone + 'a>(
+    cx: &Ctx,
+    checked: bool,
+    on_toggle: impl Fn(bool) -> M + 'a,
+) -> Checkbox<'a, M> {
+    Checkbox {
+        cx: cx.clone(),
+        checked,
+        indeterminate: false,
+        disabled: false,
+        label: None,
+        on_toggle: Box::new(on_toggle),
+    }
 }
 
 impl<'a, M: Clone + 'a> Checkbox<'a, M> {
@@ -63,15 +74,30 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
         } else {
             Space::new().width(12).height(12).into()
         };
-        let boxed = surface(glyph).width(16).height(16).center().style(move |st| {
-            let p = &t.p;
-            if filled {
-                BoxStyle::default().bg(c(p.accent)).border(c(p.accent)).fg(c(p.accent_ink)).radius(4.0)
-            } else {
-                let border = if st == Status::Hover && !disabled { p.accent_bright } else { p.control };
-                BoxStyle::default().bg(c(t.recessed(over))).border(c(border)).radius(4.0)
-            }
-        });
+        let boxed = surface(glyph)
+            .width(16)
+            .height(16)
+            .center()
+            .style(move |st| {
+                let p = &t.p;
+                if filled {
+                    BoxStyle::default()
+                        .bg(c(p.accent))
+                        .border(c(p.accent))
+                        .fg(c(p.accent_ink))
+                        .radius(4.0)
+                } else {
+                    let border = if st == Status::Hover && !disabled {
+                        p.accent_bright
+                    } else {
+                        p.control
+                    };
+                    BoxStyle::default()
+                        .bg(c(t.recessed(over)))
+                        .border(c(border))
+                        .radius(4.0)
+                }
+            });
         let mut items: Vec<El<'a, M>> = vec![boxed.into()];
         if let Some(l) = cb.label {
             items.push(label(l, 14.0, 20.0).color(c(cb.cx.p().subtext)).into());
@@ -79,7 +105,15 @@ impl<'a, M: Clone + 'a> From<Checkbox<'a, M>> for El<'a, M> {
         let msg = (!disabled).then(|| (cb.on_toggle)(!cb.checked));
         let whole = surface(row(items).spacing(10).align_y(Alignment::Center))
             .on_press_maybe(msg)
-            .cursor(if disabled { Cursor::Default } else { Cursor::Pointer });
-        if disabled { Element::from(opacity(0.5, whole)) } else { whole.into() }
+            .cursor(if disabled {
+                Cursor::Default
+            } else {
+                Cursor::Pointer
+            });
+        if disabled {
+            Element::from(opacity(0.5, whole))
+        } else {
+            whole.into()
+        }
     }
 }

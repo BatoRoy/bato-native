@@ -33,7 +33,10 @@ pub use stretch::{StretchColumn, stretch_column};
 macro_rules! forward_cells {
     () => {
         fn children(&self) -> Vec<iced::advanced::widget::Tree> {
-            self.cells.iter().map(iced::advanced::widget::Tree::new).collect()
+            self.cells
+                .iter()
+                .map(iced::advanced::widget::Tree::new)
+                .collect()
         }
         fn diff(&self, tree: &mut iced::advanced::widget::Tree) {
             tree.diff_children(&self.cells);
@@ -49,8 +52,14 @@ macro_rules! forward_cells {
             shell: &mut iced::advanced::Shell<'_, Message>,
             viewport: &iced::Rectangle,
         ) {
-            for ((cell, t), l) in self.cells.iter_mut().zip(tree.children.iter_mut()).zip(layout.children()) {
-                cell.as_widget_mut().update(t, event, l, cursor, renderer, clipboard, shell, viewport);
+            for ((cell, t), l) in self
+                .cells
+                .iter_mut()
+                .zip(tree.children.iter_mut())
+                .zip(layout.children())
+            {
+                cell.as_widget_mut()
+                    .update(t, event, l, cursor, renderer, clipboard, shell, viewport);
             }
         }
         fn mouse_interaction(
@@ -65,7 +74,10 @@ macro_rules! forward_cells {
                 .iter()
                 .zip(&tree.children)
                 .zip(layout.children())
-                .map(|((c, t), l)| c.as_widget().mouse_interaction(t, l, cursor, viewport, renderer))
+                .map(|((c, t), l)| {
+                    c.as_widget()
+                        .mouse_interaction(t, l, cursor, viewport, renderer)
+                })
                 .max()
                 .unwrap_or_default()
         }
@@ -77,7 +89,12 @@ macro_rules! forward_cells {
             operation: &mut dyn iced::advanced::widget::Operation,
         ) {
             operation.traverse(&mut |operation| {
-                for ((cell, t), l) in self.cells.iter_mut().zip(tree.children.iter_mut()).zip(layout.children()) {
+                for ((cell, t), l) in self
+                    .cells
+                    .iter_mut()
+                    .zip(tree.children.iter_mut())
+                    .zip(layout.children())
+                {
                     cell.as_widget_mut().operate(t, l, renderer, operation);
                 }
             });
@@ -93,7 +110,8 @@ macro_rules! forward_cells {
             viewport: &iced::Rectangle,
         ) {
             for ((cell, t), l) in self.cells.iter().zip(&tree.children).zip(layout.children()) {
-                cell.as_widget().draw(t, renderer, theme, style, l, cursor, viewport);
+                cell.as_widget()
+                    .draw(t, renderer, theme, style, l, cursor, viewport);
             }
         }
         fn overlay<'b>(
@@ -104,7 +122,14 @@ macro_rules! forward_cells {
             viewport: &iced::Rectangle,
             translation: iced::Vector,
         ) -> Option<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
-            iced::advanced::overlay::from_children(&mut self.cells, tree, layout, renderer, viewport, translation)
+            iced::advanced::overlay::from_children(
+                &mut self.cells,
+                tree,
+                layout,
+                renderer,
+                viewport,
+                translation,
+            )
         }
     };
 }
@@ -113,7 +138,9 @@ pub(crate) use forward_cells;
 /// `impl From<$ty> for Element`.
 macro_rules! into_element {
     ($ty:ident) => {
-        impl<'a, Message: 'a> From<$ty<'a, Message>> for iced::Element<'a, Message, iced::Theme, iced::Renderer> {
+        impl<'a, Message: 'a> From<$ty<'a, Message>>
+            for iced::Element<'a, Message, iced::Theme, iced::Renderer>
+        {
             fn from(w: $ty<'a, Message>) -> Self {
                 iced::Element::new(w)
             }

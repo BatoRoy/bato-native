@@ -83,12 +83,24 @@ pub struct Tween {
 
 impl Tween {
     pub fn new(from: f32, to: f32, duration: Duration, easing: fn(f32) -> f32) -> Self {
-        Self { from, to, start: Instant::now(), duration, easing }
+        Self {
+            from,
+            to,
+            start: Instant::now(),
+            duration,
+            easing,
+        }
     }
 
     /// A tween that has already finished at `v`.
     pub fn settled(v: f32) -> Self {
-        Self { from: v, to: v, start: Instant::now(), duration: Duration::ZERO, easing: linear }
+        Self {
+            from: v,
+            to: v,
+            start: Instant::now(),
+            duration: Duration::ZERO,
+            easing: linear,
+        }
     }
 
     /// Progress 0..1 at `now` (before easing).
@@ -96,12 +108,17 @@ impl Tween {
         if self.duration.is_zero() {
             return 1.0;
         }
-        (now.saturating_duration_since(self.start).as_secs_f32() / self.duration.as_secs_f32()).min(1.0)
+        (now.saturating_duration_since(self.start).as_secs_f32() / self.duration.as_secs_f32())
+            .min(1.0)
     }
 
     pub fn value(&self, now: Instant) -> f32 {
         let f = self.progress(now);
-        if f >= 1.0 { self.to } else { self.from + (self.to - self.from) * (self.easing)(f) }
+        if f >= 1.0 {
+            self.to
+        } else {
+            self.from + (self.to - self.from) * (self.easing)(f)
+        }
     }
 
     pub fn is_running(&self, now: Instant) -> bool {
@@ -121,9 +138,17 @@ impl Tween {
 pub fn pulse(t: Duration) -> f32 {
     let phase = (t.as_secs_f32() % 2.0) / 2.0;
     // keyframes: 0% / 100% opacity 1, 50% opacity .5
-    let (a, f) = if phase < 0.5 { (1.0, phase * 2.0) } else { (0.5, (phase - 0.5) * 2.0) };
+    let (a, f) = if phase < 0.5 {
+        (1.0, phase * 2.0)
+    } else {
+        (0.5, (phase - 0.5) * 2.0)
+    };
     let e = cubic_bezier(0.4, 0.0, 0.6, 1.0, f);
-    if a == 1.0 { 1.0 - 0.5 * e } else { 0.5 + 0.5 * e }
+    if a == 1.0 {
+        1.0 - 0.5 * e
+    } else {
+        0.5 + 0.5 * e
+    }
 }
 
 /// A process-wide epoch for infinite animations (spin, pulse), so every
@@ -150,7 +175,10 @@ impl HoldRepeat {
 
     /// Pressed at `now` (the caller fires the first step itself).
     pub fn press(now: Instant) -> Self {
-        Self { next: now + Self::DELAY, interval: Self::START }
+        Self {
+            next: now + Self::DELAY,
+            interval: Self::START,
+        }
     }
 
     /// Steps due by `now`, and the deadline of the next one.
@@ -159,7 +187,9 @@ impl HoldRepeat {
         while now >= self.next {
             n += 1;
             self.next += self.interval;
-            self.interval = Duration::from_secs_f32((self.interval.as_secs_f32() * 0.9).max(Self::MIN.as_secs_f32()));
+            self.interval = Duration::from_secs_f32(
+                (self.interval.as_secs_f32() * 0.9).max(Self::MIN.as_secs_f32()),
+            );
         }
         (n, self.next)
     }
@@ -177,7 +207,11 @@ pub fn current_opacity() -> f32 {
 /// `c` with its alpha multiplied by the current group opacity.
 pub fn fade(c: Color) -> Color {
     let o = current_opacity();
-    if o >= 1.0 { c } else { Color { a: c.a * o, ..c } }
+    if o >= 1.0 {
+        c
+    } else {
+        Color { a: c.a * o, ..c }
+    }
 }
 
 /// Run `f` with the group opacity multiplied by `alpha`.
@@ -195,8 +229,14 @@ pub struct Opacity<'a, Message> {
     alpha: f32,
 }
 
-pub fn opacity<'a, Message>(alpha: f32, content: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>) -> Opacity<'a, Message> {
-    Opacity { content: content.into(), alpha }
+pub fn opacity<'a, Message>(
+    alpha: f32,
+    content: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+) -> Opacity<'a, Message> {
+    Opacity {
+        content: content.into(),
+        alpha,
+    }
 }
 
 impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Opacity<'a, Message> {
@@ -209,8 +249,16 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Opacity<'
     fn diff(&self, tree: &mut Tree) {
         tree.diff_children(std::slice::from_ref(&self.content));
     }
-    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
-        let n = self.content.as_widget_mut().layout(&mut tree.children[0], renderer, limits);
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let n = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
         layout::Node::with_children(n.size(), vec![n])
     }
     fn update(
@@ -224,18 +272,73 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Opacity<'
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget_mut().update(&mut tree.children[0], event, layout.children().next().unwrap(), cursor, renderer, clipboard, shell, viewport);
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout.children().next().unwrap(),
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
     }
-    fn mouse_interaction(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle, renderer: &iced::Renderer) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(&tree.children[0], layout.children().next().unwrap(), cursor, viewport, renderer)
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout.children().next().unwrap(),
+            cursor,
+            viewport,
+            renderer,
+        )
     }
-    fn operate(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &iced::Renderer, operation: &mut dyn widget::Operation) {
-        self.content.as_widget_mut().operate(&mut tree.children[0], layout.children().next().unwrap(), renderer, operation);
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
+        );
     }
-    fn draw(&self, tree: &Tree, renderer: &mut iced::Renderer, theme: &iced::Theme, style: &renderer::Style, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle) {
-        let style = renderer::Style { text_color: Color { a: style.text_color.a * self.alpha, ..style.text_color } };
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let style = renderer::Style {
+            text_color: Color {
+                a: style.text_color.a * self.alpha,
+                ..style.text_color
+            },
+        };
         with_opacity(self.alpha, || {
-            self.content.as_widget().draw(&tree.children[0], renderer, theme, &style, layout.children().next().unwrap(), cursor, viewport);
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                &style,
+                layout.children().next().unwrap(),
+                cursor,
+                viewport,
+            );
         });
     }
     fn overlay<'b>(
@@ -246,11 +349,19 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Opacity<'
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
-        self.content.as_widget_mut().overlay(&mut tree.children[0], layout.children().next().unwrap(), renderer, viewport, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
-impl<'a, Message: 'a> From<Opacity<'a, Message>> for Element<'a, Message, iced::Theme, iced::Renderer> {
+impl<'a, Message: 'a> From<Opacity<'a, Message>>
+    for Element<'a, Message, iced::Theme, iced::Renderer>
+{
     fn from(o: Opacity<'a, Message>) -> Self {
         Element::new(o)
     }

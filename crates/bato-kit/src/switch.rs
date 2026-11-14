@@ -21,13 +21,32 @@ pub struct Switch<'a, Message> {
 }
 
 /// A switch in the theme's colours (`app-control` off, `app-accent` on).
-pub fn switch<'a, Message>(cx: &crate::Ctx, on: bool, f: impl Fn(bool) -> Message + 'a) -> Switch<'a, Message> {
-    Switch::new(on, crate::style::c(cx.p().control), crate::style::c(cx.p().accent), f)
+pub fn switch<'a, Message>(
+    cx: &crate::Ctx,
+    on: bool,
+    f: impl Fn(bool) -> Message + 'a,
+) -> Switch<'a, Message> {
+    Switch::new(
+        on,
+        crate::style::c(cx.p().control),
+        crate::style::c(cx.p().accent),
+        f,
+    )
 }
 
 impl<'a, Message> Switch<'a, Message> {
-    pub fn new(on: bool, off_color: Color, on_color: Color, f: impl Fn(bool) -> Message + 'a) -> Self {
-        Switch { on, on_toggle: Box::new(f), off_color, on_color }
+    pub fn new(
+        on: bool,
+        off_color: Color,
+        on_color: Color,
+        f: impl Fn(bool) -> Message + 'a,
+    ) -> Self {
+        Switch {
+            on,
+            on_toggle: Box::new(f),
+            off_color,
+            on_color,
+        }
     }
 }
 
@@ -52,7 +71,12 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
     fn state(&self) -> tree::State {
         tree::State::new(State::default())
     }
-    fn layout(&mut self, tree: &mut Tree, _r: &iced::Renderer, _l: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        _r: &iced::Renderer,
+        _l: &layout::Limits,
+    ) -> layout::Node {
         let st = tree.state.downcast_mut::<State>();
         if !st.initialized {
             st.initialized = true;
@@ -93,7 +117,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
                     }
                 }
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if cursor.is_over(layout.bounds()) => {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cursor.is_over(layout.bounds()) =>
+            {
                 st.pressed = true;
                 shell.capture_event();
             }
@@ -103,14 +129,18 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
                 st.finger = Some(id.0);
                 shell.capture_event();
             }
-            Event::Touch(iced::touch::Event::FingerLifted { id, position }) if st.finger == Some(id.0) => {
+            Event::Touch(iced::touch::Event::FingerLifted { id, position })
+                if st.finger == Some(id.0) =>
+            {
                 st.finger = None;
                 if layout.bounds().contains(*position) {
                     shell.publish((self.on_toggle)(!self.on));
                 }
                 shell.capture_event();
             }
-            Event::Touch(iced::touch::Event::FingerLost { id, .. }) if st.finger == Some(id.0) => st.finger = None,
+            Event::Touch(iced::touch::Event::FingerLost { id, .. }) if st.finger == Some(id.0) => {
+                st.finger = None
+            }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if st.pressed => {
                 st.pressed = false;
                 if cursor.is_over(layout.bounds()) {
@@ -122,8 +152,19 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
         }
     }
 
-    fn mouse_interaction(&self, _t: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, _v: &Rectangle, _r: &iced::Renderer) -> mouse::Interaction {
-        if cursor.is_over(layout.bounds()) { mouse::Interaction::Pointer } else { mouse::Interaction::None }
+    fn mouse_interaction(
+        &self,
+        _t: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _v: &Rectangle,
+        _r: &iced::Renderer,
+    ) -> mouse::Interaction {
+        if cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::None
+        }
     }
 
     fn draw(
@@ -139,15 +180,34 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
         let st = tree.state.downcast_ref::<State>();
         let b = crate::scale::snap_rect(layout.bounds());
         renderer.fill_quad(
-            Quad { bounds: b, border: Border { radius: 10.0.into(), ..Border::default() }, ..Quad::default() },
+            Quad {
+                bounds: b,
+                border: Border {
+                    radius: 10.0.into(),
+                    ..Border::default()
+                },
+                ..Quad::default()
+            },
             fade(lerp(self.off_color, self.on_color, st.t)),
         );
-        let knob = Rectangle { x: b.x + 2.0 + 16.0 * st.t, y: b.y + 2.0, width: 16.0, height: 16.0 };
+        let knob = Rectangle {
+            x: b.x + 2.0 + 16.0 * st.t,
+            y: b.y + 2.0,
+            width: 16.0,
+            height: 16.0,
+        };
         renderer.fill_quad(
             Quad {
                 bounds: knob,
-                border: Border { radius: 8.0.into(), ..Border::default() },
-                shadow: Shadow { color: fade(Color::from_rgba(0.0, 0.0, 0.0, 0.3)), offset: Vector::new(0.0, 1.0), blur_radius: 3.0 },
+                border: Border {
+                    radius: 8.0.into(),
+                    ..Border::default()
+                },
+                shadow: Shadow {
+                    color: fade(Color::from_rgba(0.0, 0.0, 0.0, 0.3)),
+                    offset: Vector::new(0.0, 1.0),
+                    blur_radius: 3.0,
+                },
                 snap: false,
             },
             fade(Color::WHITE),
@@ -155,7 +215,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Switch<'_, Messag
     }
 }
 
-impl<'a, Message: 'a> From<Switch<'a, Message>> for Element<'a, Message, iced::Theme, iced::Renderer> {
+impl<'a, Message: 'a> From<Switch<'a, Message>>
+    for Element<'a, Message, iced::Theme, iced::Renderer>
+{
     fn from(s: Switch<'a, Message>) -> Self {
         Element::new(s)
     }

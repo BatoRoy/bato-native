@@ -28,11 +28,17 @@ pub struct Segment<T> {
 
 impl<T> Segment<T> {
     pub fn new(value: T, text: impl Into<String>) -> Self {
-        Self { value, spans: vec![(text.into(), false)] }
+        Self {
+            value,
+            spans: vec![(text.into(), false)],
+        }
     }
     /// `(text, muted)` spans.
     pub fn rich<S: Into<String>>(value: T, spans: impl IntoIterator<Item = (S, bool)>) -> Self {
-        Self { value, spans: spans.into_iter().map(|(s, m)| (s.into(), m)).collect() }
+        Self {
+            value,
+            spans: spans.into_iter().map(|(s, m)| (s.into(), m)).collect(),
+        }
     }
 }
 
@@ -53,16 +59,29 @@ fn seg_style(cx: &Ctx, active: bool, radius: f32) -> impl Fn(Status) -> BoxStyle
         let p = &t.p;
         if active {
             let bg = t.tint(0.15, track);
-            BoxStyle::default().bg(c(bg)).inner_ring(c(bato_theme::blend(p.accent, 0.40, bg))).fg(c(p.accent_bright)).radius(radius)
+            BoxStyle::default()
+                .bg(c(bg))
+                .inner_ring(c(bato_theme::blend(p.accent, 0.40, bg)))
+                .fg(c(p.accent_bright))
+                .radius(radius)
         } else if st == Status::Hover {
-            BoxStyle::default().bg(c(t.wash(0.05, track))).fg(c(p.text)).radius(radius)
+            BoxStyle::default()
+                .bg(c(t.wash(0.05, track)))
+                .fg(c(p.text))
+                .radius(radius)
         } else {
             BoxStyle::default().fg(c(p.subtext)).radius(radius)
         }
     }
 }
 
-fn seg_label<'a, M: 'a>(cx: &Ctx, spans: &[(String, bool)], active: bool, size: f32, lh: f32) -> El<'a, M> {
+fn seg_label<'a, M: 'a>(
+    cx: &Ctx,
+    spans: &[(String, bool)],
+    active: bool,
+    size: f32,
+    lh: f32,
+) -> El<'a, M> {
     if spans.len() == 1 && !spans[0].1 {
         return label(spans[0].0.clone(), size, lh).medium().into();
     }
@@ -92,7 +111,13 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a, M: Clone + 'a>(
     options: impl IntoIterator<Item = Segment<T>>,
     on_change: impl Fn(T) -> M + 'a,
 ) -> Segmented<'a, T, M> {
-    Segmented { cx: cx.clone(), value, options: options.into_iter().collect(), on_change: Box::new(on_change), size: SegSize::Md }
+    Segmented {
+        cx: cx.clone(),
+        value,
+        options: options.into_iter().collect(),
+        on_change: Box::new(on_change),
+        size: SegSize::Md,
+    }
 }
 
 impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> Segmented<'a, T, M> {
@@ -128,7 +153,10 @@ impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> From<Segmented<'a, T, M>> for 
                     .into()
             })
             .collect();
-        let box_style = BoxStyle::default().bg(c(track)).border(c(s.cx.t.line_on(track))).radius(8.0);
+        let box_style = BoxStyle::default()
+            .bg(c(track))
+            .border(c(s.cx.t.line_on(track)))
+            .radius(8.0);
         surface(row(segs)).padding(3).fixed(box_style).into()
     }
 }
@@ -157,6 +185,13 @@ pub fn tabs<'a, T: Copy + PartialEq + 'a, M: Clone + 'a>(
                 .into()
         })
         .collect();
-    let box_style = BoxStyle::default().bg(c(track)).border(c(cx.t.line_on(track))).radius(12.0);
-    surface(row(cells).spacing(4).width(Length::Fill)).width(Length::Fill).padding(5).fixed(box_style).into()
+    let box_style = BoxStyle::default()
+        .bg(c(track))
+        .border(c(cx.t.line_on(track)))
+        .radius(12.0);
+    surface(row(cells).spacing(4).width(Length::Fill))
+        .width(Length::Fill)
+        .padding(5)
+        .fixed(box_style)
+        .into()
 }

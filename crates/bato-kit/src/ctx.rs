@@ -46,7 +46,10 @@ impl Ctx {
 
     /// The same theme on another backdrop.
     pub fn on(&self, over: Rgb) -> Self {
-        Self { t: self.t.clone(), over }
+        Self {
+            t: self.t.clone(),
+            over,
+        }
     }
 
     /// Inside a Card, dialog panel or popover (`bg-app-card`).

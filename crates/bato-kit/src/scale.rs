@@ -27,5 +27,10 @@ pub fn snap_rect(r: Rectangle) -> Rectangle {
     let y0 = (r.y * s).round();
     let x1 = ((r.x + r.width) * s).round();
     let y1 = ((r.y + r.height) * s).round();
-    Rectangle { x: x0 / s, y: y0 / s, width: (x1 - x0) / s, height: (y1 - y0) / s }
+    Rectangle {
+        x: x0 / s,
+        y: y0 / s,
+        width: (x1 - x0) / s,
+        height: (y1 - y0) / s,
+    }
 }

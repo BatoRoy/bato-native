@@ -13,8 +13,10 @@ use iced::advanced::graphics::text::cosmic_text::fontdb;
 use iced::advanced::graphics::text::font_system;
 
 pub const INTER: &[u8] = include_bytes!("../../../assets/fonts/InterVariable-latin.ttf");
-pub const JBM_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular-latin.ttf");
-pub const JBM_MEDIUM: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Medium-latin.ttf");
+pub const JBM_REGULAR: &[u8] =
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Regular-latin.ttf");
+pub const JBM_MEDIUM: &[u8] =
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Medium-latin.ttf");
 
 pub const SANS: &str = "Inter";
 pub const MONO: &str = "JetBrains Mono";
@@ -40,9 +42,11 @@ fn setup_once() {
             .faces()
             .filter(|f| !matches!(f.source, fontdb::Source::Binary(_)))
             .filter(|f| {
-                f.families
-                    .iter()
-                    .any(|(name, _)| name == "Inter" || name.starts_with("Inter ") || name.starts_with("JetBrains Mono"))
+                f.families.iter().any(|(name, _)| {
+                    name == "Inter"
+                        || name.starts_with("Inter ")
+                        || name.starts_with("JetBrains Mono")
+                })
             })
             .map(|f| f.id)
             .collect();
@@ -63,7 +67,10 @@ fn setup_once() {
     let db = fs.raw().db_mut();
     let inter: Vec<fontdb::FaceInfo> = db
         .faces()
-        .filter(|f| matches!(f.source, fontdb::Source::Binary(_)) && f.families.iter().any(|(n, _)| n == SANS))
+        .filter(|f| {
+            matches!(f.source, fontdb::Source::Binary(_))
+                && f.families.iter().any(|(n, _)| n == SANS)
+        })
         .cloned()
         .collect();
     for face in inter {

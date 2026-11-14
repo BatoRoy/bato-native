@@ -89,7 +89,7 @@ pub mod prelude {
     pub use crate::surface::{BoxStyle, Status, surface};
     pub use crate::switch::switch;
     pub use crate::{El, iced};
-    pub use iced::widget::{Space, column, container, row};
+    pub use iced::widget::{Space, container};
     pub use iced::{Alignment, Length, Padding};
 }
 
@@ -98,7 +98,12 @@ pub mod prelude {
 /// the `[patch.crates-io]` block fails here instead of silently losing the
 /// fix (wheel deltas, text hinting, gamma, backdrop blur).
 #[doc(hidden)]
-pub const BATO_PATCHES: [&str; 4] = [winit::BATO_PATCH, cosmic_text::BATO_PATCH, cryoglyph::BATO_PATCH, iced_wgpu::BATO_PATCH];
+pub const BATO_PATCHES: [&str; 4] = [
+    winit::BATO_PATCH,
+    cosmic_text::BATO_PATCH,
+    cryoglyph::BATO_PATCH,
+    iced_wgpu::BATO_PATCH,
+];
 
 // Linked for its `bundled` feature only (FreeType built from source).
 use freetype_sys as _;
@@ -107,6 +112,9 @@ use freetype_sys as _;
 mod tests {
     #[test]
     fn patched_crates_are_linked() {
-        assert_eq!(super::BATO_PATCHES, ["winit", "cosmic-text", "cryoglyph", "iced_wgpu"]);
+        assert_eq!(
+            super::BATO_PATCHES,
+            ["winit", "cosmic-text", "cryoglyph", "iced_wgpu"]
+        );
     }
 }

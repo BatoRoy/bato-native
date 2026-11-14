@@ -24,7 +24,12 @@ pub fn rgba(rgb: Rgb, a: f32) -> Color {
 }
 
 pub fn lerp(a: Color, b: Color, t: f32) -> Color {
-    Color { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t, a: a.a + (b.a - a.a) * t }
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
 }
 
 /// The resolved palette plus the composites the components use.
@@ -61,12 +66,24 @@ impl Tokens {
 
 /// One token shadow layer, its alpha multiplied by `alpha_mul`.
 pub fn sh(s: &Shadow, alpha_mul: f32) -> Sh {
-    Sh { x: s.x, y: s.y, blur: s.blur, spread: s.spread, color: Color { a: s.color.a * alpha_mul, ..ca(s.color) } }
+    Sh {
+        x: s.x,
+        y: s.y,
+        blur: s.blur,
+        spread: s.spread,
+        color: Color {
+            a: s.color.a * alpha_mul,
+            ..ca(s.color)
+        },
+    }
 }
 
 /// Outer shadows of a token list (inset layers handled by [`inset_of`]).
 pub fn shadows(list: &[Shadow]) -> Vec<Sh> {
-    list.iter().filter(|s| !s.inset).map(|s| sh(s, 1.0)).collect()
+    list.iter()
+        .filter(|s| !s.inset)
+        .map(|s| sh(s, 1.0))
+        .collect()
 }
 
 /// The `inset 0 1px 0` highlight of a token list, composited over `bg`.
@@ -77,5 +94,9 @@ pub fn inset_of(list: &[Shadow], bg: Rgb) -> Option<Color> {
 /// `inkFor(hex)`: white unless near-black reads better on `raw`.
 pub fn ink_for(raw: Rgb) -> Rgb {
     let dark = Rgb::new(6, 6, 9);
-    if bato_theme::contrast(Rgb::WHITE, raw) >= bato_theme::contrast(dark, raw) { Rgb::WHITE } else { dark }
+    if bato_theme::contrast(Rgb::WHITE, raw) >= bato_theme::contrast(dark, raw) {
+        Rgb::WHITE
+    } else {
+        dark
+    }
 }

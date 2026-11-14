@@ -16,13 +16,21 @@ pub struct Absolute<'a, Message> {
 
 /// An empty absolute box; `height: None` = as tall as the lowest child.
 pub fn absolute<'a, Message>(height: Option<f32>) -> Absolute<'a, Message> {
-    Absolute { cells: Vec::new(), rects: Vec::new(), height }
+    Absolute {
+        cells: Vec::new(),
+        rects: Vec::new(),
+        height,
+    }
 }
 
 impl<'a, Message> Absolute<'a, Message> {
     /// A child at `rect` (relative to the box's top-left), laid out at
     /// exactly that size.
-    pub fn push(mut self, rect: Rectangle, child: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>) -> Self {
+    pub fn push(
+        mut self,
+        rect: Rectangle,
+        child: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    ) -> Self {
         self.cells.push(child.into());
         self.rects.push(rect);
         self
@@ -31,9 +39,17 @@ impl<'a, Message> Absolute<'a, Message> {
 
 impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Absolute<'a, Message> {
     fn size(&self) -> Size<Length> {
-        Size::new(Length::Fill, self.height.map_or(Length::Shrink, Length::Fixed))
+        Size::new(
+            Length::Fill,
+            self.height.map_or(Length::Shrink, Length::Fixed),
+        )
     }
-    fn layout(&mut self, tree: &mut iced::advanced::widget::Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        tree: &mut iced::advanced::widget::Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
         let w = limits.max().width;
         let mut bottom: f32 = 0.0;
         let nodes = self
@@ -44,7 +60,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Absolute<
             .map(|((cell, t), r)| {
                 bottom = bottom.max(r.y + r.height);
                 let size = Size::new(r.width, r.height);
-                cell.as_widget_mut().layout(t, renderer, &layout::Limits::new(size, size)).move_to(Point::new(r.x, r.y))
+                cell.as_widget_mut()
+                    .layout(t, renderer, &layout::Limits::new(size, size))
+                    .move_to(Point::new(r.x, r.y))
             })
             .collect();
         layout::Node::with_children(Size::new(w, self.height.unwrap_or(bottom)), nodes)

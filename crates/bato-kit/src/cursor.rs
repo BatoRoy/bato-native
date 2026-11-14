@@ -75,8 +75,14 @@ mod tests {
 
     #[test]
     fn maps_resize_cursors() {
-        assert_eq!(Interaction::from(Cursor::ColResize), Interaction::ResizingColumn);
-        assert_eq!(Interaction::from(Cursor::NwseResize), Interaction::ResizingDiagonallyDown);
+        assert_eq!(
+            Interaction::from(Cursor::ColResize),
+            Interaction::ResizingColumn
+        );
+        assert_eq!(
+            Interaction::from(Cursor::NwseResize),
+            Interaction::ResizingDiagonallyDown
+        );
         assert_eq!(Interaction::from(Cursor::Pointer), Interaction::Pointer);
     }
 }

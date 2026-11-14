@@ -27,7 +27,13 @@ pub fn timer<'a, Message>(
     after: Duration,
     message: Message,
 ) -> Timer<'a, Message> {
-    Timer { content: content.into(), born, after, message, slide_in: false }
+    Timer {
+        content: content.into(),
+        born,
+        after,
+        message,
+        slide_in: false,
+    }
 }
 
 impl<Message> Timer<'_, Message> {
@@ -48,8 +54,16 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for T
     fn diff(&self, tree: &mut Tree) {
         tree.diff_children(std::slice::from_ref(&self.content));
     }
-    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
-        let n = self.content.as_widget_mut().layout(&mut tree.children[0], renderer, limits);
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let n = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
         layout::Node::with_children(n.size(), vec![n])
     }
     fn update(
@@ -63,35 +77,93 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for T
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget_mut().update(&mut tree.children[0], event, layout.children().next().unwrap(), cursor, renderer, clipboard, shell, viewport);
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout.children().next().unwrap(),
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
         if let Event::Window(window::Event::RedrawRequested(now)) = event {
             let deadline = self.born + self.after;
             if *now >= deadline {
                 shell.publish(self.message.clone());
-            } else if self.slide_in && now.saturating_duration_since(self.born) < Duration::from_millis(200) {
+            } else if self.slide_in
+                && now.saturating_duration_since(self.born) < Duration::from_millis(200)
+            {
                 shell.request_redraw();
             } else {
                 shell.request_redraw_at(deadline);
             }
         }
     }
-    fn mouse_interaction(&self, tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle, renderer: &iced::Renderer) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(&tree.children[0], layout.children().next().unwrap(), cursor, viewport, renderer)
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout.children().next().unwrap(),
+            cursor,
+            viewport,
+            renderer,
+        )
     }
-    fn operate(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &iced::Renderer, operation: &mut dyn widget::Operation) {
-        self.content.as_widget_mut().operate(&mut tree.children[0], layout.children().next().unwrap(), renderer, operation);
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
+        );
     }
-    fn draw(&self, tree: &Tree, renderer: &mut iced::Renderer, theme: &iced::Theme, style: &renderer::Style, layout: Layout<'_>, cursor: mouse::Cursor, viewport: &Rectangle) {
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
         use iced::advanced::Renderer as _;
-        let f = if self.slide_in { (self.born.elapsed().as_secs_f32() / 0.2).min(1.0) } else { 1.0 };
+        let f = if self.slide_in {
+            (self.born.elapsed().as_secs_f32() / 0.2).min(1.0)
+        } else {
+            1.0
+        };
         let dx = -8.0 * (1.0 - ease_out(f));
         renderer.with_translation(Vector::new(dx, 0.0), |renderer| {
-            self.content.as_widget().draw(&tree.children[0], renderer, theme, style, layout.children().next().unwrap(), cursor, viewport);
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout.children().next().unwrap(),
+                cursor,
+                viewport,
+            );
         });
     }
 }
 
-impl<'a, Message: Clone + 'a> From<Timer<'a, Message>> for Element<'a, Message, iced::Theme, iced::Renderer> {
+impl<'a, Message: Clone + 'a> From<Timer<'a, Message>>
+    for Element<'a, Message, iced::Theme, iced::Renderer>
+{
     fn from(t: Timer<'a, Message>) -> Self {
         Element::new(t)
     }

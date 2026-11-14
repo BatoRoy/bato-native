@@ -36,7 +36,14 @@ pub struct Badge<'a, M> {
 }
 
 pub fn badge<'a, M: Clone + 'a>(cx: &Ctx, tone: Tone, text: impl Into<String>) -> Badge<'a, M> {
-    Badge { cx: cx.clone(), tone, text: text.into(), content: None, dot: false, mono: false }
+    Badge {
+        cx: cx.clone(),
+        tone,
+        text: text.into(),
+        content: None,
+        dot: false,
+        mono: false,
+    }
 }
 
 impl<'a, M: Clone + 'a> Badge<'a, M> {
@@ -69,7 +76,12 @@ impl<'a, M: Clone + 'a> From<Badge<'a, M>> for El<'a, M> {
             }
             Tone::Info => {
                 let bg = cx.tint(0.10);
-                (bg, p.accent_bright, bato_theme::blend(p.accent, 0.25, bg), p.accent)
+                (
+                    bg,
+                    p.accent_bright,
+                    bato_theme::blend(p.accent, 0.25, bg),
+                    p.accent,
+                )
             }
             Tone::Success | Tone::Warning | Tone::Error => {
                 let tone = match b.tone {
@@ -84,13 +96,21 @@ impl<'a, M: Clone + 'a> From<Badge<'a, M>> for El<'a, M> {
         let mut items: Vec<El<'a, M>> = Vec::new();
         if b.dot {
             let dc = c(dotc);
-            items.push(surface(Space::new().width(6).height(6)).fixed(BoxStyle::default().bg(dc).radius(3.0)).into());
+            items.push(
+                surface(Space::new().width(6).height(6))
+                    .fixed(BoxStyle::default().bg(dc).radius(3.0))
+                    .into(),
+            );
         }
         items.push(b.content.unwrap_or_else(|| {
             let l = label(b.text, 12.0, 16.0).medium();
             if b.mono { l.mono().into() } else { l.into() }
         }));
-        let style = BoxStyle::default().bg(c(bg)).inner_ring(c(ring)).radius(12.0).fg(c(fg));
+        let style = BoxStyle::default()
+            .bg(c(bg))
+            .inner_ring(c(ring))
+            .radius(12.0)
+            .fg(c(fg));
         surface(row(items).spacing(6).align_y(Alignment::Center))
             .height(24)
             .padding(Padding::from([0.0, 10.0]))

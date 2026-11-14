@@ -14,7 +14,11 @@ use crate::label::label;
 use crate::style::{c, shadows};
 use crate::surface::{BoxStyle, surface};
 
-pub fn rail_tip<'a, M: Clone + 'a>(cx: &Ctx, anchor: impl Into<El<'a, M>>, text: &str) -> El<'a, M> {
+pub fn rail_tip<'a, M: Clone + 'a>(
+    cx: &Ctx,
+    anchor: impl Into<El<'a, M>>,
+    text: &str,
+) -> El<'a, M> {
     let p = cx.p();
     let st = BoxStyle {
         bg: Some(c(p.card)),
@@ -23,6 +27,12 @@ pub fn rail_tip<'a, M: Clone + 'a>(cx: &Ctx, anchor: impl Into<El<'a, M>>, text:
         shadows: shadows(&p.shadow_lg),
         ..BoxStyle::default()
     };
-    let bubble = surface(label(text.to_string(), 12.0, 16.0).color(c(p.text))).padding(Padding::from([5.0, 9.0])).fixed(st);
-    tooltip(anchor, bubble, tooltip::Position::Right).gap(8).padding(0).delay(Duration::from_millis(400)).into()
+    let bubble = surface(label(text.to_string(), 12.0, 16.0).color(c(p.text)))
+        .padding(Padding::from([5.0, 9.0]))
+        .fixed(st);
+    tooltip(anchor, bubble, tooltip::Position::Right)
+        .gap(8)
+        .padding(0)
+        .delay(Duration::from_millis(400))
+        .into()
 }

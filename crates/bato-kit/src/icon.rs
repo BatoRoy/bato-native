@@ -152,7 +152,15 @@ pub struct Icon {
 
 /// A lucide icon `size` px square, in the inherited text colour.
 pub fn icon(ico: Ico, size: f32) -> Icon {
-    Icon { ico, size, color: None, filled: false, stroke: None, rotation: 0.0, spin: false }
+    Icon {
+        ico,
+        size,
+        color: None,
+        filled: false,
+        stroke: None,
+        rotation: 0.0,
+        spin: false,
+    }
 }
 
 impl Icon {
@@ -192,7 +200,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Icon {
         Size::new(Length::Fixed(self.size), Length::Fixed(self.size))
     }
 
-    fn layout(&mut self, _tree: &mut Tree, _renderer: &iced::Renderer, _limits: &layout::Limits) -> layout::Node {
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        _limits: &layout::Limits,
+    ) -> layout::Node {
         layout::Node::new(Size::new(self.size, self.size))
     }
 
@@ -207,7 +220,12 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Icon {
         shell: &mut iced::advanced::Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
-        if self.spin && matches!(event, iced::Event::Window(iced::window::Event::RedrawRequested(_))) {
+        if self.spin
+            && matches!(
+                event,
+                iced::Event::Window(iced::window::Event::RedrawRequested(_))
+            )
+        {
             shell.request_redraw();
         }
     }
@@ -224,7 +242,11 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Icon {
     ) {
         let color = self.color.unwrap_or(style.text_color);
         let b = snap_rect(layout.bounds());
-        let rotation = if self.spin { (epoch().elapsed().as_secs_f32() % 1.0) * std::f32::consts::TAU } else { self.rotation };
+        let rotation = if self.spin {
+            (epoch().elapsed().as_secs_f32() % 1.0) * std::f32::consts::TAU
+        } else {
+            self.rotation
+        };
         renderer.draw_svg(
             svg::Svg {
                 handle: handle(self.ico, self.filled, self.stroke),
@@ -253,8 +275,18 @@ mod tests {
         assert_eq!(Ico::ALL.len(), 57);
         for i in Ico::ALL {
             let s = i.src();
-            assert!(s.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\""), "{}", i.name());
-            assert!(s.contains("stroke=\"#000000\" stroke-width=\"2\""), "{}", i.name());
+            assert!(
+                s.starts_with(
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\""
+                ),
+                "{}",
+                i.name()
+            );
+            assert!(
+                s.contains("stroke=\"#000000\" stroke-width=\"2\""),
+                "{}",
+                i.name()
+            );
         }
     }
 
