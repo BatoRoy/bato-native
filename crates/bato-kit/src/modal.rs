@@ -1,65 +1,200 @@
-//! `Modal` overlay (spec §4.3): full-window scrim `#000@.5` (+ backdrop blur,
-//! see `blur.rs`), panel centred with 16 px margin, max 85% of the window
-//! height. Enter: overlay fadeIn 150 ms ease-out, panel scaleIn .96→1 +
-//! opacity 0→1, 120 ms ease-out. No exit animation. Closes when a press
-//! both starts and ends on the scrim, or on Escape.
+//! The overlay stack (INF-6): one level per open modal, drawer or command
+//! palette, each a full-window layer with its own scrim (`#000@.5`, drawers
+//! `@.6`, plus the 4 px backdrop blur, see `blur.rs`) and panel. Levels are
+//! stacked in order ([`crate::frame::Frame::view_with`]); the topmost one
+//! takes the input:
 //!
-//! iced has no group opacity, so the panel's fade is drawn as a cover quad in
-//! the scrim's composite colour fading out over the panel.
+//! - **Escape** closes the top level only (`Modal.tsx`'s dialog stack). The
+//!   level captures it, so the levels under it never see it.
+//! - A press that **both starts and ends on the scrim** closes it (a drag out
+//!   of the panel does not).
+//! - **Scroll lock**: wheel, touch and the scrolling keys (arrows, Page
+//!   Up/Down, Home/End, Space) never reach the page or a lower level;
+//!   hover under the scrim is blocked.
+//!
+//! Kinds ([`Kind`]):
+//!
+//! | Kind | React | Panel | Enter |
+//! |---|---|---|---|
+//! | [`Kind::Center`] | `Modal.tsx` | centred, 16 px margin, max 85 % height | scrim fadeIn 150 ms, panel scaleIn .96→1 + opacity 120 ms ease-out |
+//! | [`Kind::Top`] | `CommandPalette.tsx` | top-aligned at 12 vh, 16 px side margin | same |
+//! | [`Kind::Drawer`] | `Drawer.tsx` | against one window edge, full height (width) | scrim fadeIn 150 ms, panel slides in from its edge 200 ms ease-out |
+//!
+//! No exit animations: React unmounts at once.
+//!
+//! **Group opacity**: iced has none, so a level over the plain page (the
+//! frame's App Options and About) fades its panel in with a cover quad in the
+//! scrim-over-page colour ([`modal`]'s `cover`); other levels use the kit's
+//! opacity multiplier ([`crate::anim::with_opacity`]).
+//!
+//! **Focus**: each level's panel is a container with the level's
+//! [`widget::Id`] ([`Modal::id`], [`level_id`]) so a focus trap can scope
+//! `focus_next` to it, and [`Modal::wrap_panel`] lets the focus system wrap
+//! the panel in its trap widget.
 
 use std::time::Instant;
 
 use iced::advanced::layout::{self, Layout};
+use iced::advanced::overlay;
 use iced::advanced::renderer::{self, Quad, Renderer as _};
 use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::{
-    Border, Color, Element, Event, Length, Rectangle, Size, Transformation, keyboard, mouse, window,
+    Border, Color, Element, Event, Length, Point, Rectangle, Size, Transformation, Vector,
+    keyboard, mouse, window,
 };
 
-use crate::anim::ease_out;
+use crate::anim::{ease_out, with_opacity};
 
-pub struct Modal<'a, Message> {
-    panel: Element<'a, Message, iced::Theme, iced::Renderer>,
-    max_width: f32,
-    on_close: Message,
-    /// Opaque colour of the scrim over the page, for the panel fade cover.
-    cover: Color,
-    backdrop: Option<Element<'a, Message, iced::Theme, iced::Renderer>>,
-    animate: bool,
+type El<'a, M> = Element<'a, M, iced::Theme, iced::Renderer>;
+
+/// A drawer's edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
 }
 
-/// `panel` centred over the window, at most `max_width` wide (`max-w-md` =
-/// 448, `lg` = 512); `cover` is the opaque scrim-over-page colour
-/// (`blend(#000, .5, bg)`) used for the panel's fade.
+/// Where a level's panel sits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kind {
+    /// A dialog, centred.
+    Center,
+    /// The command palette, top-aligned at 12 % of the window height.
+    Top,
+    /// A drawer against `Side`, `size` px wide (left/right) or tall
+    /// (top/bottom).
+    Drawer(Side, f32),
+}
+
+/// The id of the `depth`-th level of a stack (0 = bottom).
+pub fn level_id(depth: usize) -> widget::Id {
+    widget::Id::from(format!("bato-overlay-level-{depth}"))
+}
+
+/// One level of the overlay stack.
+pub struct Modal<'a, Message> {
+    panel: El<'a, Message>,
+    kind: Kind,
+    max_width: f32,
+    on_close: Message,
+    scrim: f32,
+    /// Opaque colour of the scrim over the page, for the panel fade cover.
+    cover: Option<Color>,
+    backdrop: Option<El<'a, Message>>,
+    blur: bool,
+    animate: bool,
+    id: Option<widget::Id>,
+}
+
+/// A dialog level: `panel` centred over the window, at most `max_width` wide
+/// (`max-w-md` = 448, `lg` = 512); `cover` is the opaque scrim-over-page
+/// colour (`blend(#000, .5, bg)`) used for the panel's fade.
 pub fn modal<'a, Message>(
-    panel: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
+    panel: impl Into<El<'a, Message>>,
     max_width: f32,
     on_close: Message,
     cover: Color,
 ) -> Modal<'a, Message> {
     Modal {
         panel: panel.into(),
+        kind: Kind::Center,
         max_width,
         on_close,
-        cover,
+        scrim: 0.5,
+        cover: Some(cover),
         backdrop: None,
+        blur: false,
         animate: true,
+        id: None,
+    }
+}
+
+/// A level of any kind (nested dialogs, drawers, the palette). The panel
+/// fades with the group opacity.
+pub fn level<'a, Message>(
+    kind: Kind,
+    panel: impl Into<El<'a, Message>>,
+    on_close: Message,
+) -> Modal<'a, Message> {
+    Modal {
+        panel: panel.into(),
+        kind,
+        max_width: match kind {
+            Kind::Top => 512.0,
+            _ => 448.0,
+        },
+        on_close,
+        scrim: match kind {
+            Kind::Drawer(..) => 0.6,
+            _ => 0.5,
+        },
+        cover: None,
+        backdrop: None,
+        blur: false,
+        animate: true,
+        id: None,
     }
 }
 
 impl<'a, Message> Modal<'a, Message> {
     /// Drawn under the scrim (the blurred page).
-    pub fn backdrop(
-        mut self,
-        b: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
-    ) -> Self {
+    pub fn backdrop(mut self, b: impl Into<El<'a, Message>>) -> Self {
         self.backdrop = Some(b.into());
+        self
+    }
+    /// Blur what is under the level (`backdrop-blur-sm`), fading in with
+    /// the scrim. The frame turns it on for every level.
+    pub fn blur(mut self, on: bool) -> Self {
+        self.blur = on;
         self
     }
     pub fn animate(mut self, on: bool) -> Self {
         self.animate = on;
         self
+    }
+    /// `max-w-*` of a centred or top panel.
+    pub fn max_width(mut self, w: f32) -> Self {
+        self.max_width = w;
+        self
+    }
+    /// Scrim alpha (`bg-black/50` = .5).
+    pub fn scrim(mut self, a: f32) -> Self {
+        self.scrim = a;
+        self
+    }
+    /// The panel's container id (focus trap scope).
+    pub fn id(mut self, id: widget::Id) -> Self {
+        self.id = Some(id);
+        self
+    }
+    /// Wrap the panel, e.g. in the focus system's trap.
+    pub fn wrap_panel(mut self, f: impl FnOnce(El<'a, Message>) -> El<'a, Message>) -> Self {
+        self.panel = f(self.panel);
+        self
+    }
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+    /// Lift the level's messages (a page's levels into the app's).
+    pub fn map<B: 'a>(self, f: impl Fn(Message) -> B + Clone + 'a) -> Modal<'a, B>
+    where
+        Message: 'a,
+    {
+        Modal {
+            panel: self.panel.map(f.clone()),
+            kind: self.kind,
+            max_width: self.max_width,
+            on_close: f(self.on_close),
+            scrim: self.scrim,
+            cover: self.cover,
+            backdrop: self.backdrop.map(|b| b.map(f)),
+            blur: self.blur,
+            animate: self.animate,
+            id: self.id,
+        }
     }
 }
 
@@ -69,6 +204,88 @@ struct State {
     progress_overlay: f32,
     progress_panel: f32,
     down_on_backdrop: bool,
+}
+
+impl<Message> Modal<'_, Message> {
+    fn panel_duration(&self) -> f32 {
+        match self.kind {
+            Kind::Drawer(..) => 0.200,
+            _ => 0.120,
+        }
+    }
+
+    /// The panel's limits and top-left in a window of `size`.
+    fn place(&self, size: Size, panel: Size) -> Point {
+        match self.kind {
+            Kind::Center => Point::new(
+                ((size.width - panel.width) / 2.0).round(),
+                ((size.height - panel.height) / 2.0).round(),
+            ),
+            Kind::Top => Point::new(
+                ((size.width - panel.width) / 2.0).round(),
+                (size.height * 0.12).round(),
+            ),
+            Kind::Drawer(side, _) => match side {
+                Side::Left | Side::Top => Point::ORIGIN,
+                Side::Right => Point::new(size.width - panel.width, 0.0),
+                Side::Bottom => Point::new(0.0, size.height - panel.height),
+            },
+        }
+    }
+
+    fn limits(&self, size: Size) -> layout::Limits {
+        match self.kind {
+            Kind::Center => {
+                let w = self.max_width.min(size.width - 32.0);
+                let max_h = (size.height * 0.85).floor();
+                layout::Limits::new(Size::new(w, 0.0), Size::new(w, max_h))
+            }
+            Kind::Top => {
+                let w = self.max_width.min(size.width - 32.0);
+                let top = (size.height * 0.12).round();
+                layout::Limits::new(Size::new(w, 0.0), Size::new(w, size.height - top))
+            }
+            Kind::Drawer(side, px) => match side {
+                Side::Left | Side::Right => {
+                    let w = px.min(size.width);
+                    layout::Limits::new(Size::new(w, size.height), Size::new(w, size.height))
+                }
+                Side::Top | Side::Bottom => {
+                    let h = px.min(size.height);
+                    layout::Limits::new(Size::new(size.width, h), Size::new(size.width, h))
+                }
+            },
+        }
+    }
+
+    /// The panel's slide offset for drawer progress `p` (translate ±100 %).
+    fn slide(&self, panel: Rectangle, p: f32) -> Vector {
+        let k = 1.0 - p;
+        match self.kind {
+            Kind::Drawer(Side::Left, _) => Vector::new(-panel.width * k, 0.0),
+            Kind::Drawer(Side::Right, _) => Vector::new(panel.width * k, 0.0),
+            Kind::Drawer(Side::Top, _) => Vector::new(0.0, -panel.height * k),
+            Kind::Drawer(Side::Bottom, _) => Vector::new(0.0, panel.height * k),
+            _ => Vector::ZERO,
+        }
+    }
+}
+
+/// Keys that scroll the page: a level swallows them (body scroll lock).
+fn scrolls_page(key: &keyboard::Key) -> bool {
+    use keyboard::key::Named;
+    matches!(
+        key,
+        keyboard::Key::Named(
+            Named::ArrowUp
+                | Named::ArrowDown
+                | Named::PageUp
+                | Named::PageDown
+                | Named::Home
+                | Named::End
+                | Named::Space
+        )
+    )
 }
 
 impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for Modal<'a, Message> {
@@ -89,7 +306,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
         v
     }
     fn diff(&self, tree: &mut Tree) {
-        let mut v: Vec<&Element<'a, Message, iced::Theme, iced::Renderer>> = vec![&self.panel];
+        let mut v: Vec<&El<'a, Message>> = vec![&self.panel];
         if let Some(b) = &self.backdrop {
             v.push(b);
         }
@@ -103,17 +320,13 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
         limits: &layout::Limits,
     ) -> layout::Node {
         let size = limits.max();
-        let w = self.max_width.min(size.width - 32.0);
-        let max_h = (size.height * 0.85).floor();
-        let l = layout::Limits::new(Size::new(w, 0.0), Size::new(w, max_h));
+        let l = self.limits(size);
         let panel = self
             .panel
             .as_widget_mut()
             .layout(&mut tree.children[0], renderer, &l);
-        let ps = panel.size();
-        let x = ((size.width - ps.width) / 2.0).round();
-        let y = ((size.height - ps.height) / 2.0).round();
-        let mut children = vec![panel.move_to(iced::Point::new(x, y))];
+        let at = self.place(size, panel.size());
+        let mut children = vec![panel.move_to(at)];
         if let Some(b) = &mut self.backdrop {
             let full = layout::Limits::new(Size::ZERO, size);
             children.push(
@@ -154,9 +367,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
                 st.progress_panel = 1.0;
             } else {
                 let t = now.saturating_duration_since(opened).as_secs_f32();
+                let d = self.panel_duration();
                 st.progress_overlay = ease_out((t / 0.150).min(1.0));
-                st.progress_panel = ease_out((t / 0.120).min(1.0));
-                if t < 0.150 {
+                st.progress_panel = ease_out((t / d).min(1.0));
+                if t < 0.150f32.max(d) {
                     shell.request_redraw();
                 }
             }
@@ -199,6 +413,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
                 shell.publish(self.on_close.clone());
                 shell.capture_event();
             }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if scrolls_page(key) => {
+                shell.capture_event();
+            }
             _ => {}
         }
     }
@@ -232,12 +449,16 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
         renderer: &iced::Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        self.panel.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout.children().next().unwrap(),
-            renderer,
-            operation,
-        );
+        let panel_layout = layout.children().next().unwrap();
+        operation.container(self.id.as_ref(), panel_layout.bounds());
+        operation.traverse(&mut |operation| {
+            self.panel.as_widget_mut().operate(
+                &mut tree.children[0],
+                panel_layout,
+                renderer,
+                operation,
+            );
+        });
     }
 
     fn draw(
@@ -270,6 +491,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
                 viewport,
             );
         }
+        if self.blur && po > 0.0 {
+            iced_wgpu::primitive::Renderer::draw_primitive(renderer, b, crate::blur::primitive(po));
+        }
         // The blur primitive (if any) samples everything drawn before it, so the
         // scrim must live in a later layer.
         renderer.with_layer(b, |renderer| {
@@ -278,34 +502,51 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
                     bounds: b,
                     ..Quad::default()
                 },
-                Color::from_rgba(0.0, 0.0, 0.0, 0.5 * po),
+                Color::from_rgba(0.0, 0.0, 0.0, self.scrim * po),
             );
         });
         let pb = panel_layout.bounds();
+        let draw_panel = |renderer: &mut iced::Renderer| {
+            self.panel.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                panel_layout,
+                cursor,
+                viewport,
+            );
+        };
+        if let Kind::Drawer(..) = self.kind {
+            let v = self.slide(pb, pp);
+            renderer.with_layer(b, |renderer| {
+                if pp < 1.0 {
+                    renderer.with_translation(v, draw_panel);
+                } else {
+                    draw_panel(renderer);
+                }
+            });
+            return;
+        }
         let k = 0.96 + 0.04 * pp;
         let c = pb.center();
         let tf = Transformation::translate(c.x, c.y)
             * Transformation::scale(k)
             * Transformation::translate(-c.x, -c.y);
+        // Without a cover colour the panel fades with the group opacity.
+        let alpha = if self.cover.is_some() { 1.0 } else { pp };
         renderer.with_layer(b, |renderer| {
-            let draw_panel = |renderer: &mut iced::Renderer| {
-                self.panel.as_widget().draw(
-                    &tree.children[0],
-                    renderer,
-                    theme,
-                    style,
-                    panel_layout,
-                    cursor,
-                    viewport,
-                );
-            };
-            if pp < 1.0 {
-                renderer.with_transformation(tf, draw_panel);
-            } else {
-                draw_panel(renderer);
-            }
+            with_opacity(alpha, || {
+                if pp < 1.0 {
+                    renderer.with_transformation(tf, draw_panel);
+                } else {
+                    draw_panel(renderer);
+                }
+            });
         });
-        if pp < 1.0 {
+        if let Some(cover) = self.cover
+            && pp < 1.0
+        {
             renderer.with_layer(b, |renderer| {
                 renderer.with_transformation(tf, |renderer| {
                     renderer.fill_quad(
@@ -319,18 +560,34 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for M
                         },
                         Color {
                             a: 1.0 - pp,
-                            ..self.cover
+                            ..cover
                         },
                     );
                 });
             });
         }
     }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        // Popovers and menus inside the panel (z-50 over the modal's z-40).
+        self.panel.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            viewport,
+            translation,
+        )
+    }
 }
 
-impl<'a, Message: Clone + 'a> From<Modal<'a, Message>>
-    for Element<'a, Message, iced::Theme, iced::Renderer>
-{
+impl<'a, Message: Clone + 'a> From<Modal<'a, Message>> for El<'a, Message> {
     fn from(m: Modal<'a, Message>) -> Self {
         Element::new(m)
     }
@@ -410,4 +667,137 @@ pub fn modal_panel<'a, Message: Clone + 'a>(
     .width(Length::Fill)
     .fixed(lg)
     .into()
+}
+
+/// The drawer panel (`Drawer.tsx` markup): `bg-app-card`, a 1 px
+/// `lineStrong` border on the inner edge, shadow lg; an optional header (14/20
+/// semibold title, a muted ✕ that turns `text` on hover, `px-5 py-4`,
+/// bottom border `app-border`) over the body with `p-5`. Put it in
+/// `level(Kind::Drawer(side, 320.0), …)`; build `body` with `cx.on_card()`.
+pub fn drawer_panel<'a, Message: Clone + 'a>(
+    cx: &crate::Ctx,
+    side: Side,
+    title: Option<&str>,
+    on_close: Message,
+    body: impl Into<El<'a, Message>>,
+) -> El<'a, Message> {
+    use iced::widget::{column, container, row};
+    use iced::{Alignment, Padding};
+
+    use crate::icon::{Ico, icon};
+    use crate::label::label;
+    use crate::layout::{hline, vline};
+    use crate::style::{c, shadows};
+    use crate::surface::{BoxStyle, Status, surface};
+
+    let cx = cx.on_card();
+    let p = cx.p();
+    let mut col: Vec<El<'a, Message>> = Vec::new();
+    if let Some(t) = title {
+        let (muted, text) = (c(p.muted), c(p.text));
+        let close = surface(icon(Ico::X, 16.0))
+            .style(move |s| BoxStyle::default().fg(if s == Status::Hover { text } else { muted }))
+            .on_press(on_close);
+        col.push(
+            container(
+                row![
+                    label(t.to_string(), 14.0, 20.0)
+                        .semibold()
+                        .color(c(p.text))
+                        .width(Length::Fill),
+                    close
+                ]
+                .align_y(Alignment::Center),
+            )
+            .padding(Padding::from([16.0, 20.0]))
+            .into(),
+        );
+        col.push(hline(c(p.border)));
+    }
+    col.push(
+        container(body)
+            .padding(20)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+    );
+    let edge = c(cx.line_strong());
+    let content: El<'a, Message> = column(col).width(Length::Fill).height(Length::Fill).into();
+    let framed: El<'a, Message> = match side {
+        Side::Right => row![vline(edge), content].into(),
+        Side::Left => row![content, vline(edge)].into(),
+        Side::Bottom => column![hline(edge), content].into(),
+        Side::Top => column![content, hline(edge)].into(),
+    };
+    surface(framed)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .fixed(BoxStyle {
+            bg: Some(c(p.card)),
+            shadows: shadows(&p.shadow_lg),
+            ..BoxStyle::default()
+        })
+        .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lvl(kind: Kind) -> Modal<'static, ()> {
+        level(kind, iced::widget::Space::new(), ())
+    }
+
+    #[test]
+    fn placement_per_kind() {
+        let win = Size::new(1280.0, 800.0);
+        let m = lvl(Kind::Center);
+        let l = m.limits(win);
+        assert_eq!(l.max(), Size::new(448.0, 680.0));
+        assert_eq!(
+            m.place(win, Size::new(448.0, 300.0)),
+            Point::new(416.0, 250.0)
+        );
+        let p = lvl(Kind::Top);
+        assert_eq!(p.limits(win).max().width, 512.0);
+        assert_eq!(
+            p.place(win, Size::new(512.0, 200.0)),
+            Point::new(384.0, 96.0)
+        );
+        let d = lvl(Kind::Drawer(Side::Right, 320.0));
+        assert_eq!(d.limits(win).max(), Size::new(320.0, 800.0));
+        assert_eq!(
+            d.place(win, Size::new(320.0, 800.0)),
+            Point::new(960.0, 0.0)
+        );
+        let b = lvl(Kind::Drawer(Side::Bottom, 240.0));
+        assert_eq!(
+            b.place(win, Size::new(1280.0, 240.0)),
+            Point::new(0.0, 560.0)
+        );
+        // A narrow window keeps the 16 px margins.
+        assert_eq!(m.limits(Size::new(400.0, 800.0)).max().width, 368.0);
+    }
+
+    #[test]
+    fn scrim_and_drawer_slide() {
+        assert_eq!(lvl(Kind::Center).scrim, 0.5);
+        assert_eq!(lvl(Kind::Drawer(Side::Left, 320.0)).scrim, 0.6);
+        let d = lvl(Kind::Drawer(Side::Right, 320.0));
+        let pb = Rectangle::new(Point::new(960.0, 0.0), Size::new(320.0, 800.0));
+        assert_eq!(d.slide(pb, 0.0), Vector::new(320.0, 0.0));
+        assert_eq!(d.slide(pb, 1.0), Vector::new(0.0, 0.0));
+        let t = lvl(Kind::Drawer(Side::Top, 200.0));
+        assert_eq!(t.slide(pb, 0.5), Vector::new(0.0, -400.0));
+        assert_eq!(lvl(Kind::Center).slide(pb, 0.0), Vector::ZERO);
+    }
+
+    #[test]
+    fn scroll_keys_are_locked() {
+        use keyboard::key::Named;
+        assert!(scrolls_page(&keyboard::Key::Named(Named::PageDown)));
+        assert!(scrolls_page(&keyboard::Key::Named(Named::Space)));
+        assert!(!scrolls_page(&keyboard::Key::Named(Named::Tab)));
+        assert!(!scrolls_page(&keyboard::Key::Character("a".into())));
+    }
 }

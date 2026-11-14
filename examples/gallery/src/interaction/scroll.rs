@@ -66,7 +66,9 @@ const WORDS: [&str; 8] = [
 ];
 
 fn vheights() -> Vec<f32> {
-    (0..VROWS).map(|i| 28.0 + ((i * 7) % 5) as f32 * 9.0).collect()
+    (0..VROWS)
+        .map(|i| 28.0 + ((i * 7) % 5) as f32 * 9.0)
+        .collect()
 }
 
 #[derive(Debug)]
@@ -357,10 +359,9 @@ fn scroll_card<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
 fn fields_card<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
     let on = cx.on_card();
     let p = on.p().clone();
-    let eye = surface(
-        icon(if state.reveal { Ico::EyeOff } else { Ico::Eye }, 15.0).color(c(p.muted)),
-    )
-    .on_press(Msg::Reveal);
+    let eye =
+        surface(icon(if state.reveal { Ico::EyeOff } else { Ico::Eye }, 15.0).color(c(p.muted)))
+            .on_press(Msg::Reveal);
     let pair = |a: El<'a, Msg>, b: El<'a, Msg>| -> El<'a, Msg> { row![a, b].spacing(16).into() };
     let grid = column![
         pair(
@@ -389,10 +390,13 @@ fn fields_card<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
             )
             .label("Password")
             .into(),
-            field(&on, text_control(&on, "", "bad value", Msg::Noop).error(true))
-                .label("With error")
-                .error(Some("That doesn't look right"))
-                .into(),
+            field(
+                &on,
+                text_control(&on, "", "bad value", Msg::Noop).error(true)
+            )
+            .label("With error")
+            .error(Some("That doesn't look right"))
+            .into(),
         ),
         pair(
             field(&on, text_control(&on, "Max 20", &state.count, Msg::Count))
@@ -490,10 +494,7 @@ impl Probe {
         self.now.get(n).copied().unwrap_or((f32::NAN, f32::NAN))
     }
     fn d(&self, n: &str) -> (f32, f32) {
-        let (a, b) = (
-            self.at(n),
-            self.mark.get(n).copied().unwrap_or((0.0, 0.0)),
-        );
+        let (a, b) = (self.at(n), self.mark.get(n).copied().unwrap_or((0.0, 0.0)));
         (a.0 - b.0, a.1 - b.1)
     }
     fn still(&self, n: &str) -> bool {
@@ -545,9 +546,10 @@ fn script() -> Vec<(u64, Act)> {
     s.push((16, Touch(2, 0.0, 0.0)));
     s.push((
         300,
-        Check("touch: a sideways swipe scrolls the strip, the page stays", |p| {
-            p.d(STRIP).0 > 150.0 && p.still("page")
-        }),
+        Check(
+            "touch: a sideways swipe scrolls the strip, the page stays",
+            |p| p.d(STRIP).0 > 150.0 && p.still("page"),
+        ),
     ));
     // …a vertical one goes to the page (the strip can't scroll that way).
     s.extend([(800, Mark), (0, Touch(0, 0.0, 0.0))]);
@@ -557,9 +559,10 @@ fn script() -> Vec<(u64, Act)> {
     s.push((300, Touch(2, 0.0, 0.0)));
     s.push((
         300,
-        Check("touch: a vertical swipe on the strip scrolls the page", |p| {
-            p.d("page").1 > 80.0 && p.still(STRIP)
-        }),
+        Check(
+            "touch: a vertical swipe on the strip scrolls the page",
+            |p| p.d("page").1 > 80.0 && p.still(STRIP),
+        ),
     ));
     s.extend([
         (300, Show(GRID)),
@@ -600,9 +603,10 @@ fn script() -> Vec<(u64, Act)> {
         (0, Release(mouse::Button::Middle)),
         (
             200,
-            Check("middle-click autoscroll scrolls the area under the pointer", |p| {
-                p.d(FADE).1 > 20.0 && p.still("page")
-            }),
+            Check(
+                "middle-click autoscroll scrolls the area under the pointer",
+                |p| p.d(FADE).1 > 20.0 && p.still("page"),
+            ),
         ),
         (300, Show(LIST)),
         (800, At(LIST, 0.5, 0.5)),
@@ -634,10 +638,13 @@ fn script() -> Vec<(u64, Act)> {
         (0, Go(Goto::Cell(19, 11))),
         (
             700,
-            Check("scroll_to(cell) moves the grid and the page together", |p| {
-                let g = p.at(GRID);
-                g.0 > 0.0 && g.1 > 0.0 && !p.still("page")
-            }),
+            Check(
+                "scroll_to(cell) moves the grid and the page together",
+                |p| {
+                    let g = p.at(GRID);
+                    g.0 > 0.0 && g.1 > 0.0 && !p.still("page")
+                },
+            ),
         ),
         (0, Shot("nested-reveal")),
         (300, Show(VLIST)),
@@ -762,9 +769,12 @@ impl<'a, M: 'a> SelfTest<'a, M> {
                         id: container_of(name),
                         found: None,
                     };
-                    self.content
-                        .as_widget_mut()
-                        .operate(&mut tree.children[0], child, renderer, &mut f);
+                    self.content.as_widget_mut().operate(
+                        &mut tree.children[0],
+                        child,
+                        renderer,
+                        &mut f,
+                    );
                     let st = tree.state.downcast_mut::<TState>();
                     match f.found {
                         Some(b) if fx < 0.0 => {
@@ -780,10 +790,8 @@ impl<'a, M: 'a> SelfTest<'a, M> {
                         Some(b) => {
                             // Page-level containers: on screen = layout - page offset.
                             let o = scroller::page_offset();
-                            st.cursor = Point::new(
-                                b.x - o.x + b.width * fx,
-                                b.y - o.y + b.height * fy,
-                            );
+                            st.cursor =
+                                Point::new(b.x - o.x + b.width * fx, b.y - o.y + b.height * fy);
                             events.push(Event::Mouse(mouse::Event::CursorMoved {
                                 position: st.cursor,
                             }));
@@ -792,7 +800,7 @@ impl<'a, M: 'a> SelfTest<'a, M> {
                     }
                 }
                 Act::By(dx, dy) => {
-                    st.cursor = st.cursor + Vector::new(dx, dy);
+                    st.cursor += Vector::new(dx, dy);
                     events.push(Event::Mouse(mouse::Event::CursorMoved {
                         position: st.cursor,
                     }));
@@ -813,7 +821,7 @@ impl<'a, M: 'a> SelfTest<'a, M> {
                 Act::Press(b) => events.push(Event::Mouse(mouse::Event::ButtonPressed(b))),
                 Act::Release(b) => events.push(Event::Mouse(mouse::Event::ButtonReleased(b))),
                 Act::Touch(kind, dx, dy) => {
-                    st.cursor = st.cursor + Vector::new(dx, dy);
+                    st.cursor += Vector::new(dx, dy);
                     let position = st.cursor;
                     events.push(Event::Touch(match kind {
                         0 => touch::Event::FingerPressed {

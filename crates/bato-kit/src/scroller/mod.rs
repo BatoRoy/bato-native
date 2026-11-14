@@ -520,7 +520,12 @@ impl Default for State {
 impl State {
     /// The cursor the content sees. `area` is where the real mouse cursor
     /// counts (the visible viewport, scrollbars excluded).
-    fn content_cursor(&self, cursor: mouse::Cursor, area: Rectangle, offset: Vector) -> mouse::Cursor {
+    fn content_cursor(
+        &self,
+        cursor: mouse::Cursor,
+        area: Rectangle,
+        offset: Vector,
+    ) -> mouse::Cursor {
         match self.hover {
             HoverSource::TouchNone | HoverSource::TouchPending(_) => mouse::Cursor::Unavailable,
             HoverSource::TouchAt(p) => mouse::Cursor::Available(p),
@@ -633,7 +638,13 @@ struct Down<'l, 'c, 'sh, Message> {
 }
 
 impl<'a, Message: 'a> Scroller<'a, Message> {
-    fn forward(&mut self, tree: &mut Tree, event: &Event, cursor: mouse::Cursor, d: &mut Down<'_, '_, '_, Message>) {
+    fn forward(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        cursor: mouse::Cursor,
+        d: &mut Down<'_, '_, '_, Message>,
+    ) {
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -663,7 +674,15 @@ impl<'a, Message: 'a> Scroller<'a, Message> {
     }
 
     /// Touch events: tap vs drag, and which scroller drags.
-    fn touch(&mut self, tree: &mut Tree, te: &itouch::Event, visible: Rectangle, offset: Vector, root: bool, d: &mut Down<'_, '_, '_, Message>) {
+    fn touch(
+        &mut self,
+        tree: &mut Tree,
+        te: &itouch::Event,
+        visible: Rectangle,
+        offset: Vector,
+        root: bool,
+        d: &mut Down<'_, '_, '_, Message>,
+    ) {
         let id = tree.state.downcast_ref::<State>().id;
         let now = Instant::now();
         let s = device_scale();
@@ -853,13 +872,11 @@ impl<'a, Message: 'a> Scroller<'a, Message> {
                         r.chain = Some(stack.clone());
                     }
                 }
-                Target::Rect(rect) if r.chain.is_none() => {
-                    // Posted from outside any scroller: the first (innermost)
-                    // scroller whose content contains it takes it.
-                    if origin.contains(rect.center()) {
-                        r.rect = Some(*rect);
-                        r.chain = Some(stack.clone());
-                    }
+                // Posted from outside any scroller: the first (innermost)
+                // scroller whose content contains it takes it.
+                Target::Rect(rect) if r.chain.is_none() && origin.contains(rect.center()) => {
+                    r.rect = Some(*rect);
+                    r.chain = Some(stack.clone());
                 }
                 _ => {}
             }
@@ -871,9 +888,23 @@ impl<'a, Message: 'a> Scroller<'a, Message> {
                     let mut to = Vector::ZERO;
                     for horizontal in [true, false] {
                         let (ax, on, view, lo, len, align) = if horizontal {
-                            (&mut st.x, self.axis.x(), st.view.width, rect.x - origin.x, rect.width, r.align.0)
+                            (
+                                &mut st.x,
+                                self.axis.x(),
+                                st.view.width,
+                                rect.x - origin.x,
+                                rect.width,
+                                r.align.0,
+                            )
                         } else {
-                            (&mut st.y, self.axis.y(), st.view.height, rect.y - origin.y, rect.height, r.align.1)
+                            (
+                                &mut st.y,
+                                self.axis.y(),
+                                st.view.height,
+                                rect.y - origin.y,
+                                rect.height,
+                                r.align.1,
+                            )
                         };
                         let cur = ax.target() / s;
                         let new = if on && ax.max() > 0.0 {
@@ -1063,7 +1094,11 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         let id = tree.state.downcast_ref::<State>().id;
         let (clip, offset, dragging) = {
             let st = tree.state.downcast_ref::<State>();
-            (st.clip(b), st.offset(), st.drag.is_some() || st.touch.is_scrolling())
+            (
+                st.clip(b),
+                st.offset(),
+                st.drag.is_some() || st.touch.is_scrolling(),
+            )
         };
         let _entered = chain::enter(id, self.autoscroll.as_ref(), (offset.x, offset.y));
         let root = chain::is_root();
@@ -1260,12 +1295,26 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if let Some(drag) = state.drag {
                     let (track, len) = if drag.horizontal {
-                        (state.clip(b).width, state.h_thumb(b).unwrap_or_default().width)
+                        (
+                            state.clip(b).width,
+                            state.h_thumb(b).unwrap_or_default().width,
+                        )
                     } else {
-                        (state.clip(b).height, state.v_thumb(b).unwrap_or_default().height)
+                        (
+                            state.clip(b).height,
+                            state.v_thumb(b).unwrap_or_default().height,
+                        )
                     };
-                    let moved = if drag.horizontal { position.x } else { position.y } - drag.grab;
-                    let ax = if drag.horizontal { &mut state.x } else { &mut state.y };
+                    let moved = if drag.horizontal {
+                        position.x
+                    } else {
+                        position.y
+                    } - drag.grab;
+                    let ax = if drag.horizontal {
+                        &mut state.x
+                    } else {
+                        &mut state.y
+                    };
                     let max = ax.max();
                     ax.set_offset(geom::drag_offset(drag.start, moved, track, len, max, s));
                     d.shell.request_redraw();
@@ -1304,7 +1353,11 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                     let Some(t) = thumb.filter(|_| in_bar) else {
                         continue;
                     };
-                    let ax = if horizontal { &mut state.x } else { &mut state.y };
+                    let ax = if horizontal {
+                        &mut state.x
+                    } else {
+                        &mut state.y
+                    };
                     if t.contains(p) {
                         let start = ax.offset();
                         state.drag = Some(ThumbDrag {
@@ -1480,8 +1533,14 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         });
         let dragging = state.drag.map(|d| d.horizontal);
         for (t, hot) in [
-            (state.v_thumb(b), state.thumb_hover.1 || dragging == Some(false)),
-            (state.h_thumb(b), state.thumb_hover.0 || dragging == Some(true)),
+            (
+                state.v_thumb(b),
+                state.thumb_hover.1 || dragging == Some(false),
+            ),
+            (
+                state.h_thumb(b),
+                state.thumb_hover.0 || dragging == Some(true),
+            ),
         ] {
             if let Some(t) = t {
                 renderer.fill_quad(

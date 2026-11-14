@@ -83,6 +83,8 @@ struct App {
     status: Status,
     backend_version: Option<String>,
     smoke: Smoke,
+    /// `BATO_SELFTEST=<name>`: a scripted input run (see `interaction`).
+    script: Option<Vec<bato_kit::overlay::script::Step<Msg>>>,
 }
 
 /// The page, Showcase tab and `card=` anchor a `BATO_VIEW` asks for.
@@ -147,6 +149,10 @@ impl App {
             status: Status::Checking,
             backend_version: None,
             smoke: Smoke::default(),
+            script: std::env::var("BATO_SELFTEST")
+                .ok()
+                .and_then(|n| gallery::interaction::selftest(&n))
+                .map(|steps| steps.into_iter().map(|s| s.map(Msg::Interaction)).collect()),
         };
         let mut task = app.ping();
         match app.selftest.clone() {
@@ -296,6 +302,7 @@ impl App {
             // Nothing for a dev build.
             iced_ext::update_status(&self.updater, true).map(Msg::Update),
             iced_ext::smoke_frames().map(|_| Msg::SmokeFrame),
+            gallery::interaction::subscription(&self.interaction).map(Msg::Interaction),
         ])
     }
 
@@ -321,8 +328,21 @@ impl App {
                 gallery::interaction::view(&self.interaction, cx, wide).map(Msg::Interaction)
             }
         };
+        let levels = if self.frame.page() == Page::Interaction {
+            gallery::interaction::levels(&self.interaction, cx)
+                .into_iter()
+                .map(|l| l.map(Msg::Interaction))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let root = self.frame.view_with(page, levels, Msg::Frame);
+        let root = match &self.script {
+            Some(steps) => bato_kit::overlay::script::script(root, steps.clone()).into(),
+            None => root,
+        };
         // `BATO_SELFTEST=scroll`: scripted scroll input (otherwise a no-op).
-        gallery::interaction::scroll::selftest(self.frame.view(page, Msg::Frame))
+        gallery::interaction::scroll::selftest(root)
     }
 }
 

@@ -7,8 +7,8 @@ pub mod gaps;
 pub mod overlay;
 pub mod scroll;
 
-use bato_kit::iced::Task;
 use bato_kit::iced::widget::column;
+use bato_kit::iced::{Subscription, Task};
 use bato_kit::prelude::*;
 
 #[derive(Debug, Default)]
@@ -43,6 +43,31 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Focus(m) => focus::update(&mut state.focus, m).map(Msg::Focus),
         Msg::Scroll(m) => scroll::update(&mut state.scroll, m).map(Msg::Scroll),
         Msg::Gaps(m) => gaps::update(&mut state.gaps, m).map(Msg::Gaps),
+    }
+}
+
+pub fn subscription(state: &State) -> Subscription<Msg> {
+    overlay::subscription(&state.overlay).map(Msg::Overlay)
+}
+
+/// The overlay-stack levels the lab has open, for `Frame::view_with`.
+pub fn levels<'a>(state: &'a State, cx: &Ctx) -> Vec<bato_kit::modal::Modal<'a, Msg>> {
+    overlay::levels(&state.overlay, cx)
+        .into_iter()
+        .map(|l| l.map(Msg::Overlay))
+        .collect()
+}
+
+/// `BATO_SELFTEST=<name>` scripts.
+pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>> {
+    match name {
+        "overlay" => Some(
+            overlay::selftest()
+                .into_iter()
+                .map(|s| s.map(Msg::Overlay))
+                .collect(),
+        ),
+        _ => None,
     }
 }
 

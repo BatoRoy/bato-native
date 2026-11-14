@@ -78,7 +78,13 @@ impl TouchRouter {
 
     /// `FingerPressed`. Stops any fling on these axes (Chromium cancels the
     /// fling on touch-down).
-    pub fn press(&mut self, id: u64, pos: (f32, f32), inside: bool, axes: Axes) -> (TouchOutcome, Forward) {
+    pub fn press(
+        &mut self,
+        id: u64,
+        pos: (f32, f32),
+        inside: bool,
+        axes: Axes,
+    ) -> (TouchOutcome, Forward) {
         if self.finger.is_some() {
             return (TouchOutcome::Ignored, Forward::Swallow);
         }
@@ -231,26 +237,64 @@ mod tests {
                 let now = t + Duration::from_millis(ms);
                 let pos = (100.0, y);
                 match k {
-                    0 => r.press(id, pos, true, Axes { x: None, y: Some(a) }),
+                    0 => r.press(
+                        id,
+                        pos,
+                        true,
+                        Axes {
+                            x: None,
+                            y: Some(a),
+                        },
+                    ),
                     1 => match r.tracking() {
                         Some((f, Phase::Pending)) if f == id => {
                             if r.beyond_slop(pos) {
-                                (r.claim(id, pos, now, Axes { x: None, y: Some(a) }), Forward::Lost)
+                                (
+                                    r.claim(
+                                        id,
+                                        pos,
+                                        now,
+                                        Axes {
+                                            x: None,
+                                            y: Some(a),
+                                        },
+                                    ),
+                                    Forward::Lost,
+                                )
                             } else {
                                 (TouchOutcome::Pending, Forward::Pass)
                             }
                         }
-                        Some((f, Phase::Scrolling)) if f == id => {
-                            (r.drag(id, pos, now, Axes { x: None, y: Some(a) }), Forward::Swallow)
-                        }
+                        Some((f, Phase::Scrolling)) if f == id => (
+                            r.drag(
+                                id,
+                                pos,
+                                now,
+                                Axes {
+                                    x: None,
+                                    y: Some(a),
+                                },
+                            ),
+                            Forward::Swallow,
+                        ),
                         _ => (TouchOutcome::Ignored, r.other_finger()),
                     },
                     2 => match r.tracking() {
-                        Some((f, _)) if f == id => r.lift(id, now, Axes { x: None, y: Some(a) }),
+                        Some((f, _)) if f == id => r.lift(
+                            id,
+                            now,
+                            Axes {
+                                x: None,
+                                y: Some(a),
+                            },
+                        ),
                         _ => (TouchOutcome::Ignored, r.other_finger()),
                     },
                     _ => match r.tracking() {
-                        Some((f, _)) if f == id => r.lost(Axes { x: None, y: Some(a) }),
+                        Some((f, _)) if f == id => r.lost(Axes {
+                            x: None,
+                            y: Some(a),
+                        }),
                         _ => (TouchOutcome::Ignored, r.other_finger()),
                     },
                 }
@@ -261,7 +305,12 @@ mod tests {
     #[test]
     fn tap_reaches_children_once() {
         let (mut r, mut a, t) = (TouchRouter::default(), axis(), Instant::now());
-        let out = feed(&mut r, &mut a, t, &[(0, 1, 300.0, 0), (1, 1, 306.0, 20), (2, 1, 306.0, 60)]);
+        let out = feed(
+            &mut r,
+            &mut a,
+            t,
+            &[(0, 1, 300.0, 0), (1, 1, 306.0, 20), (2, 1, 306.0, 60)],
+        );
         assert_eq!(
             out.iter().map(|o| o.1).collect::<Vec<_>>(),
             [Forward::Pass, Forward::Pass, Forward::Pass]
@@ -277,11 +326,20 @@ mod tests {
             &mut r,
             &mut a,
             t,
-            &[(0, 1, 300.0, 0), (1, 1, 280.0, 16), (1, 1, 200.0, 32), (2, 1, 200.0, 2_000)],
+            &[
+                (0, 1, 300.0, 0),
+                (1, 1, 280.0, 16),
+                (1, 1, 200.0, 32),
+                (2, 1, 200.0, 2_000),
+            ],
         );
         assert_eq!(out[1], (TouchOutcome::ScrollStarted, Forward::Lost));
         assert_eq!(out[2], (TouchOutcome::Scrolling, Forward::Swallow));
-        assert_eq!(out[3], (TouchOutcome::Ended, Forward::Swallow), "no click after a scroll");
+        assert_eq!(
+            out[3],
+            (TouchOutcome::Ended, Forward::Swallow),
+            "no click after a scroll"
+        );
         // 100 px up minus the 15 px slop: content moved 85 px, no jump.
         assert_eq!(a.offset(), 5_085.0);
         assert!(!a.is_animating(), "fingers rested before lifting: no fling");
@@ -306,7 +364,11 @@ mod tests {
         a.wheel_notches(3.0, t);
         let out = feed(&mut r, &mut a, t, &[(0, 1, 300.0, 50), (2, 1, 300.0, 120)]);
         assert_eq!(out[0].1, Forward::Pass);
-        assert_eq!(out[1], (TouchOutcome::Ended, Forward::Lost), "the press is cancelled");
+        assert_eq!(
+            out[1],
+            (TouchOutcome::Ended, Forward::Lost),
+            "the press is cancelled"
+        );
         assert!(!a.is_animating());
     }
 
@@ -317,11 +379,25 @@ mod tests {
             &mut r,
             &mut a,
             t,
-            &[(0, 1, 300.0, 0), (0, 2, 500.0, 10), (2, 2, 500.0, 20), (1, 1, 250.0, 30), (3, 1, 250.0, 40)],
+            &[
+                (0, 1, 300.0, 0),
+                (0, 2, 500.0, 10),
+                (2, 2, 500.0, 20),
+                (1, 1, 250.0, 30),
+                (3, 1, 250.0, 40),
+            ],
         );
-        assert_eq!(out[1].1, Forward::Swallow, "second finger never reaches children");
+        assert_eq!(
+            out[1].1,
+            Forward::Swallow,
+            "second finger never reaches children"
+        );
         assert_eq!(out[2].1, Forward::Swallow);
-        assert_eq!(out[4], (TouchOutcome::Ended, Forward::Swallow), "cancel after scroll");
+        assert_eq!(
+            out[4],
+            (TouchOutcome::Ended, Forward::Swallow),
+            "cancel after scroll"
+        );
         assert!(!a.is_animating());
         let out = feed(&mut r, &mut a, t, &[(0, 3, 300.0, 100), (2, 3, 300.0, 150)]);
         assert_eq!(out[1].0, TouchOutcome::Tap, "a fresh touch works again");
@@ -330,7 +406,15 @@ mod tests {
     #[test]
     fn outside_the_viewport_passes_through() {
         let (mut r, mut a) = (TouchRouter::default(), axis());
-        let o = r.press(1, (100.0, 300.0), false, Axes { x: None, y: Some(&mut a) });
+        let o = r.press(
+            1,
+            (100.0, 300.0),
+            false,
+            Axes {
+                x: None,
+                y: Some(&mut a),
+            },
+        );
         assert_eq!(o, (TouchOutcome::Ignored, Forward::Pass));
         assert_eq!(r.tracking(), None);
     }
@@ -338,11 +422,29 @@ mod tests {
     #[test]
     fn stepping_aside_moves_nothing_and_lifts_quietly() {
         let (mut r, mut a, t) = (TouchRouter::default(), axis(), Instant::now());
-        r.press(1, (100.0, 300.0), true, Axes { x: None, y: Some(&mut a) });
+        r.press(
+            1,
+            (100.0, 300.0),
+            true,
+            Axes {
+                x: None,
+                y: Some(&mut a),
+            },
+        );
         assert!(r.beyond_slop((100.0, 200.0)));
-        r.step_aside(Axes { x: None, y: Some(&mut a) });
+        r.step_aside(Axes {
+            x: None,
+            y: Some(&mut a),
+        });
         assert_eq!(r.tracking(), Some((1, Phase::SteppedAside)));
-        let o = r.lift(1, t, Axes { x: None, y: Some(&mut a) });
+        let o = r.lift(
+            1,
+            t,
+            Axes {
+                x: None,
+                y: Some(&mut a),
+            },
+        );
         assert_eq!(o, (TouchOutcome::Ignored, Forward::Pass));
         assert_eq!(a.offset(), 5_000.0);
         assert!(!a.is_animating());
@@ -351,12 +453,36 @@ mod tests {
     #[test]
     fn two_axes_pan_together() {
         let (mut r, mut x, mut y, t) = (TouchRouter::default(), axis(), axis(), Instant::now());
-        r.press(1, (300.0, 300.0), true, Axes { x: Some(&mut x), y: Some(&mut y) });
+        r.press(
+            1,
+            (300.0, 300.0),
+            true,
+            Axes {
+                x: Some(&mut x),
+                y: Some(&mut y),
+            },
+        );
         // 60 px left and 80 px up: 100 px travel, both axes beyond the slop.
         let pos = (240.0, 220.0);
         assert!(r.beyond_slop(pos));
-        r.claim(1, pos, t, Axes { x: Some(&mut x), y: Some(&mut y) });
-        r.drag(1, (140.0, 120.0), t + Duration::from_millis(16), Axes { x: Some(&mut x), y: Some(&mut y) });
+        r.claim(
+            1,
+            pos,
+            t,
+            Axes {
+                x: Some(&mut x),
+                y: Some(&mut y),
+            },
+        );
+        r.drag(
+            1,
+            (140.0, 120.0),
+            t + Duration::from_millis(16),
+            Axes {
+                x: Some(&mut x),
+                y: Some(&mut y),
+            },
+        );
         assert_eq!(x.offset(), 5_000.0 + 45.0 + 100.0);
         assert_eq!(y.offset(), 5_000.0 + 65.0 + 100.0);
     }

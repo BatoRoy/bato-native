@@ -233,7 +233,10 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for VirtualLi
         let b = layout.bounds();
         let lo = viewport.y - b.y;
         let need = self.extents.range(lo, lo + viewport.height);
-        let built = self.built.first().map_or(0..0, |f| f.0..f.0 + self.built.len());
+        let built = self
+            .built
+            .first()
+            .map_or(0..0, |f| f.0..f.0 + self.built.len());
         let state = tree.state.downcast_mut::<State>();
         if !covers(&built, &need) {
             let o = self.overscan;

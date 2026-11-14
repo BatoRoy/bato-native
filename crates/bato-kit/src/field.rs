@@ -635,16 +635,24 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for ControlBox<'a, M> {
         let kids: Vec<_> = layout.children().collect();
         if let Some(r) = &self.right {
             let i = kids.len() - 1;
-            let m = r
-                .as_widget()
-                .mouse_interaction(&tree.children[i], kids[i], cursor, viewport, renderer);
+            let m = r.as_widget().mouse_interaction(
+                &tree.children[i],
+                kids[i],
+                cursor,
+                viewport,
+                renderer,
+            );
             if m != mouse::Interaction::None {
                 return m;
             }
         }
-        self.input
-            .as_widget()
-            .mouse_interaction(&tree.children[0], kids[0], cursor, viewport, renderer)
+        self.input.as_widget().mouse_interaction(
+            &tree.children[0],
+            kids[0],
+            cursor,
+            viewport,
+            renderer,
+        )
     }
     fn operate(
         &mut self,

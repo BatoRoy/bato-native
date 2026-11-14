@@ -75,7 +75,15 @@ pub fn page_step(view: f32) -> f32 {
 /// coordinates — in a viewport of length `view` currently at `cur`, per CSS
 /// `scrollIntoView` alignment, with `margin` around the target, clamped to
 /// `0..=max`.
-pub fn into_view(cur: f32, view: f32, max: f32, lo: f32, hi: f32, align: Align, margin: f32) -> f32 {
+pub fn into_view(
+    cur: f32,
+    view: f32,
+    max: f32,
+    lo: f32,
+    hi: f32,
+    align: Align,
+    margin: f32,
+) -> f32 {
     let (a, b) = (lo - margin, hi + margin);
     let size = b - a;
     let end = cur + view;
@@ -168,26 +176,62 @@ mod tests {
     #[test]
     fn into_view_nearest_follows_cssom() {
         // Visible: no move.
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 150.0, 180.0, Align::Nearest, 0.0), 100.0);
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 150.0, 180.0, Align::Nearest, 0.0),
+            100.0
+        );
         // Above: align start; below: align end.
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 40.0, 60.0, Align::Nearest, 0.0), 40.0);
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 400.0, 450.0, Align::Nearest, 0.0), 250.0);
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 40.0, 60.0, Align::Nearest, 0.0),
+            40.0
+        );
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 400.0, 450.0, Align::Nearest, 0.0),
+            250.0
+        );
         // Larger than the viewport and covering it: stay.
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 50.0, 500.0, Align::Nearest, 0.0), 100.0);
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 50.0, 500.0, Align::Nearest, 0.0),
+            100.0
+        );
         // Larger, below: align its start (shows as much of it as possible).
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 250.0, 800.0, Align::Nearest, 0.0), 250.0);
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 250.0, 800.0, Align::Nearest, 0.0),
+            250.0
+        );
         // Margins and clamping.
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 40.0, 60.0, Align::Nearest, 8.0), 32.0);
-        assert_eq!(into_view(100.0, 200.0, 1000.0, 2.0, 20.0, Align::Nearest, 8.0), 0.0);
-        assert_eq!(into_view(0.0, 200.0, 300.0, 480.0, 500.0, Align::Nearest, 0.0), 300.0);
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 40.0, 60.0, Align::Nearest, 8.0),
+            32.0
+        );
+        assert_eq!(
+            into_view(100.0, 200.0, 1000.0, 2.0, 20.0, Align::Nearest, 8.0),
+            0.0
+        );
+        assert_eq!(
+            into_view(0.0, 200.0, 300.0, 480.0, 500.0, Align::Nearest, 0.0),
+            300.0
+        );
     }
 
     #[test]
     fn into_view_explicit_alignments() {
-        assert_eq!(into_view(0.0, 200.0, 1000.0, 500.0, 520.0, Align::Start, 0.0), 500.0);
-        assert_eq!(into_view(0.0, 200.0, 1000.0, 500.0, 520.0, Align::End, 0.0), 320.0);
-        assert_eq!(into_view(0.0, 200.0, 1000.0, 500.0, 520.0, Align::Center, 0.0), 410.0);
-        assert_eq!(into_view(0.0, 200.0, 900.0, 990.0, 1200.0, Align::Start, 0.0), 900.0);
+        assert_eq!(
+            into_view(0.0, 200.0, 1000.0, 500.0, 520.0, Align::Start, 0.0),
+            500.0
+        );
+        assert_eq!(
+            into_view(0.0, 200.0, 1000.0, 500.0, 520.0, Align::End, 0.0),
+            320.0
+        );
+        assert_eq!(
+            into_view(0.0, 200.0, 1000.0, 500.0, 520.0, Align::Center, 0.0),
+            410.0
+        );
+        assert_eq!(
+            into_view(0.0, 200.0, 900.0, 990.0, 1200.0, Align::Start, 0.0),
+            900.0
+        );
     }
 
     #[test]

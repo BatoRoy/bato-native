@@ -412,9 +412,17 @@ mod tests {
         assert_eq!(wheel_latched(Kind::Wheel, p, false, ms(850)), Some(7));
         assert_eq!(wheel_latched(Kind::Wheel, p, false, ms(901)), None, "gap");
         let moved = Point::new(111.0, 100.0);
-        assert_eq!(wheel_latched(Kind::Wheel, moved, false, ms(450)), None, "slop");
+        assert_eq!(
+            wheel_latched(Kind::Wheel, moved, false, ms(450)),
+            None,
+            "slop"
+        );
         assert_eq!(wheel_latched(Kind::Wheel, p, true, ms(450)), None, "shift");
-        assert_eq!(wheel_latched(Kind::Precise, p, false, ms(450)), None, "kind");
+        assert_eq!(
+            wheel_latched(Kind::Precise, p, false, ms(450)),
+            None,
+            "kind"
+        );
         let out = Point::new(600.0, 100.0);
         assert_eq!(
             wheel_latched(Kind::Wheel, out, false, ms(450)),
@@ -455,7 +463,10 @@ mod tests {
         assert!(key_eligible(101, false));
         assert!(key_eligible(100, true));
         assert!(!key_eligible(102, false));
-        assert!(!key_eligible(103, true), "another root while the chain is on screen");
+        assert!(
+            !key_eligible(103, true),
+            "another root while the chain is on screen"
+        );
     }
 
     #[test]
