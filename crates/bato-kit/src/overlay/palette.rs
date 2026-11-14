@@ -367,7 +367,8 @@ impl Palette {
 
 /// ↑ ↓ Enter on the search field (React's `onKeyDown` on the input): only
 /// while a text field has focus ([`crate::hotkeys::typing`]); a focused row
-/// keeps Enter for itself (a click), like a focused `<button>`.
+/// keeps Enter for itself (a click), like a focused `<button>`. Esc goes
+/// past the panel to the level.
 struct Keys<'a, M> {
     content: El<'a, M>,
     up: M,
@@ -532,6 +533,15 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for Keys<'a, M> {
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) {
+        // Esc must reach the level (which closes the palette): iced's text
+        // input would take it to blur itself (`input::Halo` does the same).
+        if let Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::Escape),
+            ..
+        }) = event
+        {
+            return;
+        }
         if let Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(named),
             modifiers,

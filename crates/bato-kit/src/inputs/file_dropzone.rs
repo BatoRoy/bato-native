@@ -497,6 +497,37 @@ mod tests {
         assert!(accept_extensions("").is_empty());
     }
 
+    /// The patched winit's `text/uri-list` parser (Wayland drops).
+    #[test]
+    fn wayland_uri_list_parsing() {
+        use winit::bato_uri_list::parse;
+        let p = |v: &[&str]| v.iter().map(PathBuf::from).collect::<Vec<_>>();
+        // CRLF (RFC 2483), a comment, a blank line, percent-escapes.
+        let list =
+            b"# from Nautilus\r\nfile:///home/ada/My%20Photo.png\r\n\r\nfile:///tmp/a%2Cb.txt\r\n";
+        assert_eq!(
+            parse(list, None),
+            p(&["/home/ada/My Photo.png", "/tmp/a,b.txt"])
+        );
+        // LF only, no trailing newline, localhost and the own host name.
+        let list = b"file://localhost/etc/hosts\nfile://box/srv/x\nFILE:///y";
+        assert_eq!(
+            parse(list, Some("box")),
+            p(&["/etc/hosts", "/srv/x", "/y"])
+        );
+        // Other hosts and schemes are not local files; `file:/p` is.
+        let list = b"file://other/srv/x\nhttps://example.com/a.png\nfile:/z\n  file:///trim  \n";
+        assert_eq!(parse(list, Some("box")), p(&["/z", "/trim"]));
+        // Bad escapes stay; a query or fragment is cut; UTF-8 decodes.
+        let list = b"file:///a%zz%2\nfile:///q.txt?x=1#f\nfile:///%C3%A9t%C3%A9";
+        assert_eq!(
+            parse(list, None),
+            p(&["/a%zz%2", "/q.txt", "/\u{e9}t\u{e9}"])
+        );
+        assert!(parse(b"", None).is_empty());
+        assert!(parse(b"file://\nfile:", None).is_empty());
+    }
+
     #[test]
     fn drag_position_rules() {
         let b = Rectangle::new(iced::Point::new(10.0, 10.0), Size::new(100.0, 50.0));

@@ -57,6 +57,9 @@ pub struct WinitSeatState {
 
     /// Whether we have pending modifiers.
     modifiers_pending: bool,
+
+    /// bato-native: the seat's data device (file drops).
+    pub data_device: Option<sctk::data_device_manager::data_device::DataDevice>,
 }
 
 impl WinitSeatState {
@@ -202,10 +205,13 @@ impl SeatHandler for WinitState {
     fn new_seat(
         &mut self,
         _connection: &Connection,
-        _queue_handle: &QueueHandle<Self>,
+        queue_handle: &QueueHandle<Self>,
         seat: WlSeat,
     ) {
-        self.seats.insert(seat.id(), WinitSeatState::new());
+        let mut state = WinitSeatState::new();
+        state.data_device =
+            self.data_device_manager.as_ref().map(|m| m.get_data_device(queue_handle, &seat));
+        self.seats.insert(seat.id(), state);
     }
 
     fn remove_seat(

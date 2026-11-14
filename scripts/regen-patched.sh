@@ -3,7 +3,7 @@
 # reproducible:
 #
 #   upstream (crates.io .crate, or iced's winit fork at a pinned commit)
-#   + patches/<crate>.patch
+#   + patches/<crate>*.patch (in the order listed below)
 #   + patches/tripwires/<crate>.rs appended to src/lib.rs (the BATO_PATCH
 #     constant bato-kit references, so an unpatched build fails to compile)
 #
@@ -16,8 +16,10 @@
 # The winit fork is cloned from $WINIT_REPO (default: GitHub).
 #
 # To change a patch: edit the crate under patched/, `diff -ru` it against a
-# fresh upstream copy into patches/<crate>.patch (without the tripwire),
-# rerun this script and check `git diff patched/` is empty.
+# fresh upstream copy (plus the patches listed before it) into
+# patches/<crate>.patch (without the tripwire), rerun this script and check
+# `git diff patched/` is empty. A crate with several patches (winit) gets
+# each one on top of the previous.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 out=${1:-$here/patched}
@@ -40,9 +42,12 @@ fetch_crate() { # name version sha256 -> path of the .crate
   echo "$file"
 }
 
-finish() { # dir dest-name patch
-  local dir=$1 dest=$2 patch=$3
-  git -C "$dir" apply --whitespace=nowarn "$here/patches/$patch"
+finish() { # dir dest-name patch...
+  local dir=$1 dest=$2 patch
+  shift 2
+  for patch in "$@"; do
+    git -C "$dir" apply --whitespace=nowarn "$here/patches/$patch"
+  done
   cat "$here/patches/tripwires/$dest.rs" >> "$dir/src/lib.rs"
   rm -rf "${out:?}/$dest"
   mv "$dir" "$out/$dest"
@@ -71,8 +76,9 @@ crate cryoglyph 0.1.0 08bc795bdbccdbd461736fb163930a009da6597b226d6f6fce33e7a8eb
 crate iced_wgpu 0.14.0 ff144a999b0ca0f8a10257934500060240825c42e950ec0ebee9c8ae30561c13 \
   iced_wgpu-0.14.0-surface-copy-src.patch
 
-# iced's winit fork (value120 wheel deltas on Wayland), pinned, with smol_str 0.2.
+# iced's winit fork (value120 wheel deltas on Wayland), pinned, with smol_str 0.2,
+# and desktop file drops on Wayland (wl_data_device text/uri-list).
 git clone -q --no-checkout "$WINIT_REPO" "$work/winit"
 git -C "$work/winit" -c advice.detachedHead=false checkout -q "$WINIT_REV"
-finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch
+finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch winit-wayland-file-drop.patch
 rm -rf "$out/winit/.git"
