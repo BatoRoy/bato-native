@@ -58,6 +58,9 @@ pub struct BoxStyle {
     pub inner_ring: Option<Color>,
     /// `0 0 0 Npx color` outer rings, innermost first.
     pub rings: Vec<(f32, Color)>,
+    /// The `:focus-visible` ring layers (same form), painted outside the box
+    /// only, over the drop shadows.
+    pub focus_rings: Vec<(f32, Color)>,
     /// Inherited text colour for the content.
     pub fg: Option<Color>,
 }
@@ -124,6 +127,7 @@ impl BoxStyle {
             inset_top: oc(self.inset_top, o.inset_top),
             inner_ring: oc(self.inner_ring, o.inner_ring),
             rings: o.rings.clone(),
+            focus_rings: o.focus_rings.clone(),
             fg: oc(self.fg, o.fg),
         }
     }
@@ -206,6 +210,7 @@ pub fn paint(renderer: &mut iced::Renderer, b: Rectangle, s: &BoxStyle) {
             fade(*c),
         );
     }
+    crate::focus::paint_layers(renderer, b, r, &s.focus_rings);
     if s.bg.is_some() || s.border.is_some() {
         renderer.fill_quad(
             Quad {
@@ -690,7 +695,8 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
             && state.focus.ring_visible()
             && self.is_focusable()
         {
-            s.rings = ring.layers();
+            s.rings.clear();
+            s.focus_rings = ring.layers();
         }
         let b = snap_rect(layout.bounds());
         let content_style = renderer::Style {

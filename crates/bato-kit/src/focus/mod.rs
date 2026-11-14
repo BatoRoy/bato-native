@@ -227,18 +227,34 @@ impl Ring {
 /// Paint `ring` around `b` (a box with corner radius `radius`), for widgets
 /// that draw themselves instead of through a `Surface`.
 pub fn paint_ring(renderer: &mut iced::Renderer, b: Rectangle, radius: f32, ring: &Ring) {
-    for (w, col) in ring.layers().iter().rev() {
+    paint_layers(renderer, b, radius, &ring.layers());
+}
+
+/// Paint `0 0 0 Npx` shadow layers (cumulative, innermost first) as rings
+/// **outside** the box only: CSS never paints a box shadow under the
+/// element's own border box, which matters for transparent boxes (a ghost
+/// button, an inactive segment or nav row).
+pub fn paint_layers(
+    renderer: &mut iced::Renderer,
+    b: Rectangle,
+    radius: f32,
+    layers: &[(f32, Color)],
+) {
+    let mut prev = 0.0;
+    for (w, col) in layers {
         renderer.fill_quad(
             Quad {
                 bounds: b.expand(*w),
                 border: Border {
                     radius: (radius + w).into(),
-                    ..Border::default()
+                    width: w - prev,
+                    color: fade(*col),
                 },
                 ..Quad::default()
             },
-            fade(*col),
+            Color::TRANSPARENT,
         );
+        prev = *w;
     }
 }
 
