@@ -14,6 +14,7 @@ use iced::{Border, Color, Point, Rectangle, Size};
 
 use crate::anim::fade;
 use crate::ctx::Ctx;
+use crate::data::draw::{Cap, Join, PathData, layer, stroke};
 use crate::scale::device_scale;
 use crate::style::{c, inset_of, rgba, shadows};
 use crate::surface::{BoxStyle, Sh, paint};
@@ -107,65 +108,30 @@ impl Colors {
     }
 }
 
-fn hex(col: Color) -> String {
-    let [r, g, b, _] = col.into_rgba8();
-    format!("#{r:02x}{g:02x}{b:02x}")
-}
-
 /// Chromium's 1 px edge strokes (inside the scaled viewport) cover about
 /// 27 % more than resvg's at the same width (measured on the reference
-/// capture at four points of the edges); widen ours to match.
+/// capture at several points of the edges); widen ours to match.
 pub const STROKE_GAIN: f32 = 1.27;
 
-/// A stroked cubic (window coordinates, logical px) as an SVG handle and the
-/// device-pixel-aligned box to draw it in. Identical geometry gives
-/// identical bytes, so iced's raster cache reuses it while nothing moves.
-pub fn curve(c: &Cubic, width: f32, color: Color) -> (svg::Handle, Rectangle) {
-    let s = device_scale();
-    let bb = cubic_bounds(c).expand(width + 2.0);
-    let x0 = (bb.x * s).floor() / s;
-    let y0 = (bb.y * s).floor() / s;
-    let x1 = ((bb.x + bb.width) * s).ceil() / s;
-    let y1 = ((bb.y + bb.height) * s).ceil() / s;
-    let (w, h) = (x1 - x0, y1 - y0);
-    let q = |p: Point| format!("{:.3},{:.3}", p.x - x0, p.y - y0);
-    let src = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w:.3}\" height=\"{h:.3}\" \
-         viewBox=\"0 0 {w:.3} {h:.3}\"><path d=\"M{} C{} {} {}\" fill=\"none\" \
-         stroke=\"{}\" stroke-opacity=\"{:.3}\" stroke-width=\"{width:.4}\"/></svg>",
-        q(c[0]),
-        q(c[1]),
-        q(c[2]),
-        q(c[3]),
-        hex(color),
-        color.a,
-    );
+/// The SVG body of a stroked cubic in local px (B6's `draw` helpers).
+pub fn curve_body(c: &Cubic, width: f32) -> (String, Rectangle) {
+    let d = PathData::new().move_to(c[0]).cubic_to(c[1], c[2], c[3]);
     (
-        svg::Handle::from_memory(src.into_bytes()),
-        Rectangle {
-            x: x0,
-            y: y0,
-            width: w,
-            height: h,
-        },
+        stroke(&d, width, Cap::Butt, Join::Miter, None),
+        cubic_bounds(c).expand(width / 2.0 + 1.0),
     )
 }
 
+/// A stroked cubic (window coordinates, logical px) as one resvg layer on
+/// the device-pixel grid ([`crate::data::draw::layer`]). The bytes depend
+/// only on the geometry (the colour is a tint), so iced's raster cache
+/// reuses an edge while it doesn't move.
 pub fn draw_curve(r: &mut iced::Renderer, c: &Cubic, width: f32, color: Color, clip: Rectangle) {
-    let (handle, b) = curve(c, width, color);
-    if b.intersection(&clip).is_none() {
+    let (body, bbox) = curve_body(c, width);
+    if bbox.intersection(&clip).is_none() {
         return;
     }
-    r.draw_svg(
-        svg::Svg {
-            handle,
-            color: None,
-            rotation: iced::Radians(0.0),
-            opacity: crate::anim::current_opacity(),
-        },
-        b,
-        clip,
-    );
+    layer(r, Point::ORIGIN, bbox, &body, color, 1.0, &clip);
 }
 
 /// A filled circle (anti-aliased quad, not snapped).
@@ -415,20 +381,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn curve_box_is_pixel_aligned_and_bytes_are_stable() {
-        crate::scale::set_device_scale(1.0);
+    fn curve_body_is_a_cubic_path_with_its_bounds() {
         let c = [
-            Point::new(10.2, 20.7),
-            Point::new(60.0, 20.7),
-            Point::new(60.0, 80.1),
-            Point::new(110.5, 80.1),
+            Point::new(10.0, 20.0),
+            Point::new(60.0, 20.0),
+            Point::new(60.0, 80.0),
+            Point::new(110.0, 80.0),
         ];
-        let (h1, b) = curve(&c, 1.5, Color::WHITE);
-        let (h2, _) = curve(&c, 1.5, Color::WHITE);
-        assert_eq!(h1.id(), h2.id());
-        assert_eq!(b.x, b.x.floor());
-        assert_eq!(b.y, b.y.floor());
-        assert!(b.x <= 10.2 - 1.5 && b.x + b.width >= 110.5 + 1.5);
+        let (body, bb) = curve_body(&c, 1.5);
+        assert!(body.contains("M10,20 C60 20 60 80 110 80"), "{body}");
+        assert!(bb.x <= 10.0 - 0.75 && bb.x + bb.width >= 110.0 + 0.75);
     }
 
     #[test]

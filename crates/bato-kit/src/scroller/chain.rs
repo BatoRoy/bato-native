@@ -111,6 +111,15 @@ pub enum Target {
     Container(iced::widget::Id),
     /// A scroller (by its `.id()`) to an absolute offset (logical px).
     Offset(iced::widget::Id, Option<f32>, Option<f32>),
+    /// Drag auto-scroll (dnd-kit's `autoScroll`, see [`crate::dnd`]): the
+    /// innermost scroller of the chain whose edge band holds `at` (its
+    /// content coordinates) scrolls by its speed for `ms` milliseconds, on
+    /// the directions `intent` allows (x−, x+, y−, y+); the others pass it up.
+    Edge {
+        at: Point,
+        ms: f32,
+        intent: [bool; 4],
+    },
 }
 
 #[derive(Default)]
@@ -135,6 +144,7 @@ thread_local! {
     static SHIFT: Cell<bool> = const { Cell::new(false) };
     static SYNTHETIC_LOST: Cell<bool> = const { Cell::new(false) };
     static PAGE: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
+    static EDGE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The page scroller (the one owning the autoscroll bus) was drawn at these
@@ -199,15 +209,25 @@ pub fn to_window() -> (f32, f32) {
     })
 }
 
-/// What to add to a position a scroller's *content* received to get window
-/// coordinates (all running scrollers' offsets): for widgets inside a
-/// scroller that latch wheel gestures themselves (the node graph).
-pub fn content_to_window() -> (f32, f32) {
+/// What to subtract from a position a widget inside the running scrollers
+/// received to get window coordinates: every scroller's offset (drag
+/// sessions keep the pointer in window coordinates).
+pub fn content_shift() -> (f32, f32) {
     with(|s| {
         s.shifts
             .iter()
-            .fold((0.0, 0.0), |a, o| (a.0 - o.0, a.1 - o.1))
+            .fold((0.0, 0.0), |a, o| (a.0 + o.0, a.1 + o.1))
     })
+}
+
+/// A scroller moved for a [`Target::Edge`] request.
+pub fn edge_scrolled() {
+    EDGE.with(|e| e.set(true));
+}
+
+/// Did a scroller move for an edge request since the last call?
+pub fn take_edge_scrolled() -> bool {
+    EDGE.with(|e| e.replace(false))
 }
 
 /// Is the running scroller the outermost one?

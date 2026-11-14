@@ -780,7 +780,8 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for NodeGraph<'a, M> {
                     return;
                 }
                 // Latching: a gesture that started on the page stays there.
-                let (dx, dy) = chain::content_to_window();
+                let (sx, sy) = chain::content_shift();
+                let (dx, dy) = (-sx, -sy);
                 let win = Point::new(pw.x + dx, pw.y + dy);
                 let kind = match delta {
                     ScrollDelta::Lines { .. } => chain::Kind::Wheel,
