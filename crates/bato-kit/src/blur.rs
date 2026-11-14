@@ -47,6 +47,15 @@ impl<Message> shader::Program<Message> for Blur {
     }
 }
 
+/// The blur as a bare primitive at `opacity` (an overlay level draws it
+/// itself with its own fade progress).
+pub fn primitive(opacity: f32) -> BlurPrimitive {
+    BlurPrimitive {
+        opacity,
+        sigma_css: 4.0,
+    }
+}
+
 #[derive(Debug)]
 pub struct BlurPrimitive {
     opacity: f32,

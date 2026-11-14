@@ -857,6 +857,27 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
             operation,
         );
     }
+
+    /// Anchored overlays in the page: their anchors move with the scroll.
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        let offset = tree.state.downcast_ref::<State>().offset();
+        let b = layout.bounds();
+        let visible = b.intersection(viewport).unwrap_or(*viewport);
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            &visible,
+            translation - Vector::new(0.0, offset),
+        )
+    }
 }
 
 impl<'a, Message: 'a> From<Scroller<'a, Message>>
