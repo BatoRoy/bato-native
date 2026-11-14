@@ -24,10 +24,12 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use ashpd::WindowIdentifier;
 use ashpd::desktop::ResponseError;
 use ashpd::desktop::file_chooser::{FileFilter as PortalFilter, SelectedFiles};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
 /// Electron's `{ name, extensions }`; `"*"` matches everything.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -71,27 +73,153 @@ impl FileFilter {
 }
 
 /// The window a dialog belongs to, so the backend can make it modal.
+///
+/// Get one with [`Parent::from_window`] (or `iced_ext::dialog_parent`, which
+/// the `iced_ext` dialog wrappers call for you when `parent` is `None`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub enum Parent {
     #[default]
     None,
     /// An X11 window id.
     X11(u64),
-    /// An xdg-foreign exported handle (Wayland), as `wayland:<handle>` without
-    /// the prefix.
-    WaylandExported(String),
+    /// A Wayland toplevel exported through xdg-foreign.
+    Wayland(Exported),
+}
+
+/// An xdg-foreign handle for a Wayland toplevel (`wayland:<handle>` without
+/// the prefix). One made by [`Parent::from_window`] owns the export: the
+/// compositor revokes the handle when the last clone drops, i.e. when the
+/// dialog that holds it has finished.
+#[derive(Clone)]
+pub struct Exported {
+    handle: String,
+    /// The export (ashpd unexports on drop); `None` for a handle the app
+    /// exported and keeps alive itself.
+    export: Option<Arc<WindowIdentifier>>,
+}
+
+impl Exported {
+    /// A handle the app exported itself and keeps alive for the dialog.
+    pub fn from_handle(handle: impl Into<String>) -> Self {
+        Self {
+            handle: handle.into(),
+            export: None,
+        }
+    }
+
+    pub fn handle(&self) -> &str {
+        &self.handle
+    }
+
+    /// Whether this value owns the export (made by [`Parent::from_window`]).
+    pub fn owns_export(&self) -> bool {
+        self.export.is_some()
+    }
+}
+
+impl std::fmt::Debug for Exported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Exported").field(&self.handle).finish()
+    }
+}
+
+impl PartialEq for Exported {
+    fn eq(&self, o: &Self) -> bool {
+        self.handle == o.handle
+    }
+}
+
+impl Eq for Exported {}
+
+impl std::hash::Hash for Exported {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        self.handle.hash(h);
+    }
 }
 
 impl Parent {
+    /// The parent for a live window: its id on X11; on Wayland an
+    /// xdg-foreign export of its toplevel (`zxdg_exporter_v2`, else v1),
+    /// which blocks for two compositor roundtrips on a private event queue.
+    /// `None` on other platforms, or when the compositor has no exporter
+    /// (the dialog then opens unparented, as before).
+    ///
+    /// Call it where the window is borrowed (iced: `window::run`), not with
+    /// handles saved for later: the export needs the live `wl_surface`.
+    pub fn from_window<W>(window: &W) -> Self
+    where
+        W: HasWindowHandle + HasDisplayHandle + ?Sized,
+    {
+        let Ok(w) = window.window_handle() else {
+            return Parent::None;
+        };
+        let display = window.display_handle().ok().map(|d| d.as_raw());
+        // SAFETY: both handles are borrowed from `window` for this whole
+        // call, and `from_raw` finishes the export before it returns.
+        unsafe { Self::from_raw(w.as_raw(), display) }
+    }
+
+    /// [`from_window`](Self::from_window) on raw handles.
+    ///
+    /// # Safety
+    ///
+    /// For a Wayland handle, `window.surface` and `display.display` must be
+    /// a live `wl_surface` and `wl_display` for the duration of the call, and
+    /// the display must outlive the returned value (dropping it unexports the
+    /// surface on that display). X11 handles are plain ids.
+    pub unsafe fn from_raw(window: RawWindowHandle, display: Option<RawDisplayHandle>) -> Self {
+        match (window, display) {
+            (RawWindowHandle::Xlib(h), _) => {
+                // c_ulong: u64 here, u32 on 32-bit targets.
+                #[allow(clippy::unnecessary_cast)]
+                Parent::X11(h.window as u64)
+            }
+            (RawWindowHandle::Xcb(h), _) => Parent::X11(u64::from(h.window.get())),
+            (RawWindowHandle::Wayland(_), Some(RawDisplayHandle::Wayland(_))) => {
+                let export = futures::executor::block_on(WindowIdentifier::from_raw_handle(
+                    &window,
+                    display.as_ref(),
+                ));
+                export.map_or(Parent::None, Parent::from_export)
+            }
+            _ => Parent::None,
+        }
+    }
+
+    /// Wrap an export ashpd made; `None` unless it is a non-empty
+    /// `wayland:` handle (a compositor that never sent the handle event).
+    fn from_export(export: WindowIdentifier) -> Self {
+        match wayland_handle(&export.to_string()) {
+            Some(handle) => Parent::Wayland(Exported {
+                handle: handle.to_string(),
+                export: Some(Arc::new(export)),
+            }),
+            None => Parent::None,
+        }
+    }
+
+    /// The portal's `parent_window` string: `x11:<hex>`, `wayland:<handle>`,
+    /// or `""` for none.
+    pub fn portal_string(&self) -> String {
+        self.identifier().map(|i| i.to_string()).unwrap_or_default()
+    }
+
     fn identifier(&self) -> Option<WindowIdentifier> {
         match self {
             Parent::None => None,
             Parent::X11(xid) => Some(WindowIdentifier::from_xid(*xid as std::os::raw::c_ulong)),
-            Parent::WaylandExported(h) => {
-                Some(WindowIdentifier::from_xdg_foreign_exported(h.clone()))
-            }
+            Parent::Wayland(e) => Some(WindowIdentifier::from_xdg_foreign_exported(
+                e.handle.clone(),
+            )),
         }
     }
+}
+
+/// `wayland:<handle>` → `<handle>`, if non-empty.
+fn wayland_handle(identifier: &str) -> Option<&str> {
+    identifier
+        .strip_prefix("wayland:")
+        .filter(|h| !h.is_empty())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -379,6 +507,59 @@ mod tests {
             }
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn x11_handles_become_parents() {
+        use raw_window_handle::{XcbWindowHandle, XlibWindowHandle};
+        let xlib = RawWindowHandle::Xlib(XlibWindowHandle::new(0x4a0_0007));
+        // SAFETY: X11 handles are plain ids.
+        let p = unsafe { Parent::from_raw(xlib, None) };
+        assert_eq!(p, Parent::X11(0x4a0_0007));
+        assert_eq!(p.portal_string(), "x11:4a00007");
+        let xcb =
+            RawWindowHandle::Xcb(XcbWindowHandle::new(std::num::NonZeroU32::new(42).unwrap()));
+        assert_eq!(unsafe { Parent::from_raw(xcb, None) }, Parent::X11(42));
+    }
+
+    #[test]
+    fn wayland_needs_its_display() {
+        use raw_window_handle::{WaylandWindowHandle, XlibDisplayHandle};
+        // Never dereferenced: without a Wayland display handle there is no
+        // export, so no compositor is needed here.
+        let surface = std::ptr::NonNull::<std::ffi::c_void>::dangling();
+        let wl = RawWindowHandle::Wayland(WaylandWindowHandle::new(surface));
+        assert_eq!(unsafe { Parent::from_raw(wl, None) }, Parent::None);
+        let x = RawDisplayHandle::Xlib(XlibDisplayHandle::new(None, 0));
+        assert_eq!(unsafe { Parent::from_raw(wl, Some(x)) }, Parent::None);
+        let web = RawWindowHandle::Web(raw_window_handle::WebWindowHandle::new(1));
+        assert_eq!(unsafe { Parent::from_raw(web, None) }, Parent::None);
+        assert_eq!(Parent::None.portal_string(), "");
+    }
+
+    #[test]
+    fn exported_handles() {
+        // What ashpd hands back after a successful export.
+        let id = WindowIdentifier::from_xdg_foreign_exported("a1b2-c3".into());
+        let p = Parent::from_export(id);
+        let Parent::Wayland(e) = &p else {
+            panic!("{p:?}")
+        };
+        assert_eq!(e.handle(), "a1b2-c3");
+        assert!(e.owns_export());
+        assert_eq!(p.portal_string(), "wayland:a1b2-c3");
+        // Equality and hashing go by handle, so an owned export equals a
+        // handle the app passes itself.
+        assert_eq!(p, Parent::Wayland(Exported::from_handle("a1b2-c3")));
+        assert!(!Exported::from_handle("x").owns_export());
+        // Clones share the export; it ends with the last one.
+        let q = p.clone();
+        drop(p);
+        assert_eq!(q.portal_string(), "wayland:a1b2-c3");
+        // A compositor that never sent the handle: no parent.
+        let empty = WindowIdentifier::from_xdg_foreign_exported(String::new());
+        assert_eq!(Parent::from_export(empty), Parent::None);
+        assert_eq!(wayland_handle("x11:12"), None);
     }
 
     #[test]

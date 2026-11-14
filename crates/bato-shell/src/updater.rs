@@ -119,6 +119,18 @@ impl Updater {
         self
     }
 
+    /// Where `bato install` puts this app (default
+    /// `~/.local/share/bato/apps/<slug>`); [`relaunch`](Self::relaunch)
+    /// starts `<dir>/<slug>` from here unless this process runs from it.
+    pub fn with_install_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.install_dir = dir.into();
+        self
+    }
+
+    pub fn install_dir(&self) -> &Path {
+        &self.install_dir
+    }
+
     pub fn registry(&self) -> &str {
         &self.registry
     }
@@ -714,6 +726,48 @@ mod tests {
         );
         assert!(up.relaunch().is_err());
         assert_eq!(up.install_command(), "bato install batoshellfixture");
+    }
+
+    /// Wait up to 5 s for a file a child process writes.
+    fn wait_for(path: &Path) -> String {
+        for _ in 0..100 {
+            if let Ok(s) = std::fs::read_to_string(path)
+                && s.ends_with('\n')
+            {
+                return s;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("{} never appeared", path.display());
+    }
+
+    #[test]
+    fn relaunch_starts_the_installed_binary_in_its_own_group() {
+        let dir = tmp("relaunch");
+        let install = dir.join("apps").join(APP.slug);
+        std::fs::create_dir_all(&install).unwrap();
+        let marker = dir.join("started");
+        let bin = install.join(APP.slug);
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\necho \"$$ $(ps -o pgid= -p $$ | tr -d ' ')\" > '{m}.tmp'\nmv '{m}.tmp' '{m}'\n",
+                m = marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let up = Updater::new(&APP, DEFAULT_REGISTRY).with_install_dir(&install);
+        assert!(up.relaunch().is_err(), "a dev build never relaunches");
+        let up = up.with_packaged(true);
+        // The test binary is not inside the install dir: `<dir>/<slug>`.
+        assert_eq!(up.installed_binary(), bin);
+        up.relaunch().unwrap();
+        let line = wait_for(&marker);
+        let (pid, pgid) = line.trim().split_once(' ').unwrap();
+        assert_eq!(pid, pgid, "the new process leads its own group: {line}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// GET only, against the real registry: an old version of a real

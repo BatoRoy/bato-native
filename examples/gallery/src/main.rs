@@ -6,19 +6,23 @@ mod home;
 
 use std::time::{Duration, Instant};
 
-use bato_kit::frame::{self, Action, Brand, Dialog, Frame, NavItem, Start};
+use bato_kit::frame::{self, Action, Brand, Dialog, Frame, NavItem, Start, UpdateStatus};
 use bato_kit::iced::{self, Subscription, Task};
 use bato_kit::{El, Ico, Tone, fonts};
 use bato_shell::hooks::{self, BootView, Smoke};
 use bato_shell::http::Http;
 use bato_shell::notify::{Notification, Notifier};
+use bato_shell::updater::{self, UpdatePhase, Updater};
 use bato_shell::{AppIdentity, iced_ext};
+use gallery::interaction::gaps::{self, SelfTest};
 use gallery::showcase::{self, Effect, Tab};
 
 /// The platform identity. The slug is the default Wayland app_id, so the
 /// gallery is `batopoc-gallery` (routed off-screen in automated tests);
 /// `BATO_APP_ID` overrides it.
-const APP: AppIdentity = AppIdentity::new("App", "batopoc-gallery", "0.4.1");
+/// The icon is the template's (256 px from `BatoApps/bato/icons`), for X11.
+const APP: AppIdentity = AppIdentity::new("App", "batopoc-gallery", "0.4.1")
+    .with_icon(include_bytes!("../../../assets/appicon.png"));
 
 /// What the frame shows: the template's look, as in the Electron references.
 const BRAND: Brand = Brand {
@@ -57,6 +61,12 @@ pub enum Msg {
     Version(Option<String>),
     Notify,
     NotifyResult(bool),
+    Update(UpdatePhase),
+    /// A check from About: like [`Msg::Update`], and installs what it finds.
+    Checked(UpdatePhase),
+    RestartFailed(String),
+    /// `BATO_SELFTEST=dialog-parent`.
+    ParentProbed(String),
     /// `BATO_SMOKE`: a frame event.
     SmokeFrame,
 }
@@ -66,6 +76,8 @@ struct App {
     showcase: showcase::State,
     interaction: gallery::interaction::State,
     notifier: Notifier,
+    updater: Updater,
+    selftest: Option<SelfTest>,
     name: String,
     auto_update: bool,
     status: Status,
@@ -123,11 +135,13 @@ impl App {
             frame.toast("Hello, Ada!", Tone::Success);
             frame.toast("Something went wrong", Tone::Error);
         }
-        let app = App {
+        let mut app = App {
             frame,
             showcase: showcase::State::new(tab),
             interaction: Default::default(),
             notifier: Notifier::new(&APP),
+            updater: Updater::new(&APP, updater::DEFAULT_REGISTRY),
+            selftest: gaps::selftest(),
             name: String::new(),
             auto_update: true,
             status: Status::Checking,
@@ -135,6 +149,15 @@ impl App {
             smoke: Smoke::default(),
         };
         let mut task = app.ping();
+        match app.selftest.clone() {
+            Some(SelfTest::Update(s)) => app.frame.set_update_status(s),
+            Some(SelfTest::DialogParent) => {
+                let probe =
+                    iced_ext::latest_dialog_parent().map(|p| Msg::ParentProbed(p.portal_string()));
+                task = Task::batch([task, probe]);
+            }
+            _ => {}
+        }
         if view.demo.as_deref() == Some("sidebar") {
             let toggle = iced_ext::blocking(|| std::thread::sleep(Duration::from_millis(600)))
                 .map(|_| Msg::Frame(frame::Msg::ToggleSidebar));
@@ -168,11 +191,56 @@ impl App {
                     self.save_settings();
                     return self.update(Msg::Ping);
                 }
-                Action::CheckUpdates => self
-                    .frame
-                    .set_update_note(Some("Updates apply to packaged builds only.".into())),
+                Action::CheckUpdates => {
+                    if !self.updater.is_supported() {
+                        self.frame
+                            .set_update_note(Some(updater::NOT_PACKAGED.into()));
+                    } else {
+                        return iced_ext::check_update(&self.updater).map(Msg::Checked);
+                    }
+                }
+                Action::RestartToUpdate => {
+                    return iced_ext::restart_to_update(&self.updater, Msg::RestartFailed);
+                }
             },
+            Msg::Update(phase) => {
+                let downloaded = matches!(phase, UpdatePhase::Downloaded { .. });
+                self.frame.set_update_status(update_status(phase));
+                if downloaded && self.selftest == Some(SelfTest::Restart) {
+                    // Leave the state up for a screenshot, then press Restart.
+                    let press = iced_ext::blocking(|| std::thread::sleep(Duration::from_secs(3)))
+                        .map(|_| Msg::Frame(frame::Msg::RestartToUpdate));
+                    return press;
+                }
+            }
+            Msg::Checked(phase) => {
+                // A manual check installs what it finds, unless the background
+                // loop is already on it.
+                let apply = matches!(phase, UpdatePhase::Available { .. })
+                    && !matches!(
+                        self.frame.update_status(),
+                        UpdateStatus::Downloading { .. } | UpdateStatus::Downloaded { .. }
+                    );
+                let t = self.update(Msg::Update(phase));
+                if apply {
+                    return Task::batch([
+                        t,
+                        iced_ext::apply_update(&self.updater).map(Msg::Update),
+                    ]);
+                }
+                return t;
+            }
+            Msg::RestartFailed(e) => self
+                .frame
+                .toast(format!("Restart failed: {e}"), Tone::Error),
+            Msg::ParentProbed(p) => {
+                println!("dialog parent: {}", if p.is_empty() { "none" } else { &p });
+                return iced::exit();
+            }
             Msg::Interaction(m) => {
+                if let Some(s) = m.gaps_status() {
+                    self.frame.set_update_status(s.clone());
+                }
                 return gallery::interaction::update(&mut self.interaction, m)
                     .map(Msg::Interaction);
             }
@@ -224,6 +292,9 @@ impl App {
     fn subscription(&self) -> Subscription<Msg> {
         Subscription::batch([
             self.frame.subscription().map(Msg::Frame),
+            // Check on launch and every 30 min, install in the background.
+            // Nothing for a dev build.
+            iced_ext::update_status(&self.updater, true).map(Msg::Update),
             iced_ext::smoke_frames().map(|_| Msg::SmokeFrame),
         ])
     }
@@ -251,6 +322,18 @@ impl App {
             }
         };
         self.frame.view(page, Msg::Frame)
+    }
+}
+
+/// bato-shell's phase as the frame shows it.
+fn update_status(phase: UpdatePhase) -> UpdateStatus {
+    match phase {
+        UpdatePhase::Checking => UpdateStatus::Checking,
+        UpdatePhase::Available { version } => UpdateStatus::Available { version },
+        UpdatePhase::None => UpdateStatus::UpToDate,
+        UpdatePhase::Downloading { percent } => UpdateStatus::Downloading { percent },
+        UpdatePhase::Downloaded { version } => UpdateStatus::Downloaded { version },
+        UpdatePhase::Error { message } => UpdateStatus::Error { message },
     }
 }
 
@@ -291,5 +374,12 @@ mod tests {
             Page::ScrollLab
         );
         assert_eq!(route(&BootView::parse("")).0, Page::Home);
+    }
+
+    #[test]
+    fn x11_icon_decodes() {
+        let icon = APP.icon_png.expect("the gallery has an icon");
+        assert!(iced_ext::icon_from_png(icon).is_some());
+        assert!(iced_ext::window_settings(&APP).icon.is_some());
     }
 }
