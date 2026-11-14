@@ -275,6 +275,9 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
         "editor" => Some(map(inputs::code_editor::selftest(), |m| {
             Msg::Inputs(inputs::Msg::CodeEditor(m))
         })),
+        "dnd" => Some(data::sortable::selftest()),
+        "dnd-tabs" => Some(layout::editor_tabs::selftest()),
+        n if n.starts_with("data:") => data::table::b6_selftest(&n[5..]).map(|v| map(v, Msg::Data)),
         _ => None,
     }
 }

@@ -16,6 +16,7 @@
 //! | `rounded-lg overflow-hidden` around content with its own fills | [`rounded_clip()`] |
 //! | `AppShell` (header, sidebar, footer, scrolling main) | [`app_shell()`] |
 //! | `PanelGroup` / `ResizablePanels` (draggable splits) | [`panel_group()`], [`resizable_panels()`] |
+//! | `EditorTabs` (sortable, closable tab strip) | [`editor_tabs()`] |
 //!
 //! Every cell is stretched like CSS's default `align-items: stretch`.
 
@@ -24,6 +25,7 @@ mod app_shell;
 mod aspect;
 mod clip;
 mod collapse;
+mod editor_tabs;
 mod grid;
 mod lines;
 mod masonry;
@@ -41,6 +43,7 @@ pub use stretch::{StretchColumn, stretch_column};
 pub use app_shell::{AppShell, app_shell};
 pub use clip::{RoundedClip, rounded_clip};
 pub use collapse::{COLLAPSE, Collapse, collapse};
+pub use editor_tabs::{EditorTab, EditorTabs, editor_tabs};
 pub use panels::{
     Direction, PanelGroup, bar_size, drag_sizes, initial_sizes, panel_group, resizable_panels,
 };
