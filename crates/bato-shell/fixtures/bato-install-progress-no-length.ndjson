@@ -1,0 +1,6 @@
+{"event":"plan","name":"batoshellfixture","version":"1.2.3","type":"desktop"}
+{"event":"progress","received":262144}
+{"event":"progress","received":524288}
+{"event":"progress","received":786432}
+{"event":"progress","received":1048576}
+{"event":"done","ok":true,"name":"batoshellfixture","version":"1.2.3","type":"desktop"}

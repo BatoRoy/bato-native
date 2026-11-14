@@ -1,0 +1,296 @@
+{
+  "name": "batoai",
+  "type": "desktop",
+  "description": "Local GPU broker \u2014 one process decides which models hold VRAM. Ships the daemon, the batoai CLI and the QML dashboard.",
+  "versions": [
+    {
+      "version": "0.4.4",
+      "publishedAt": "2026-09-27T16:36:08.635Z",
+      "notes": "",
+      "files": [
+        {
+          "name": "batoai-0.4.4.tar.gz",
+          "key": "desktop/batoai/0.4.4/batoai-0.4.4.tar.gz",
+          "size": 6249830,
+          "sha256": "eee405f400e121cf5e00c5806fa085f703053dc9572572dab1ede7d97c11d5e8"
+        }
+      ],
+      "artifacts": [
+        "batoai",
+        "batoai-server",
+        "qml"
+      ],
+      "bin": [
+        {
+          "name": "batoai",
+          "target": "batoai"
+        },
+        {
+          "name": "batoai-server",
+          "target": "batoai-server"
+        }
+      ],
+      "desktop": [
+        {
+          "name": "BatoAI",
+          "genericName": "Local GPU broker",
+          "comment": "Which models hold VRAM, who is using them, and how much is left",
+          "exec": "batoai ui",
+          "categories": "System;Monitor;",
+          "keywords": "ai;llm;gpu;vram;models;",
+          "startupNotify": true,
+          "startupWMClass": "org.qt-project.qml"
+        }
+      ],
+      "service": {
+        "exec": "batoai-server",
+        "port": 42116,
+        "dirs": [
+          "~/.local/share/bato-ai"
+        ],
+        "env": {
+          "APP_DATA_DIR": "~/.local/share/bato-ai"
+        }
+      },
+      "requires": [
+        {
+          "name": "llama-server",
+          "command": "llama-server",
+          "required": true,
+          "install": {
+            "arch": "sudo pacman -S llama.cpp ggml-vulkan"
+          },
+          "reason": "BatoAI starts and supervises llama.cpp servers"
+        },
+        {
+          "name": "qml6",
+          "command": "qml6",
+          "required": true,
+          "install": {
+            "arch": "sudo pacman -S qt6-declarative"
+          },
+          "reason": "runs the dashboard \u2014 `batoai ui` and the launcher entry"
+        },
+        {
+          "name": "nvidia-smi",
+          "command": "nvidia-smi",
+          "required": false,
+          "reason": "ships with the NVIDIA driver; without it VRAM cannot be measured, so admission control is disabled and every model is allowed to start"
+        },
+        {
+          "name": "Inter",
+          "font": "Inter",
+          "required": false,
+          "install": {
+            "arch": "sudo pacman -S inter-font"
+          },
+          "reason": "the dashboard's UI font; Qt substitutes a default sans without it"
+        },
+        {
+          "name": "JetBrainsMono Nerd Font",
+          "font": "JetBrainsMono Nerd Font",
+          "required": false,
+          "install": {
+            "arch": "sudo pacman -S ttf-jetbrains-mono-nerd"
+          },
+          "reason": "every figure in the dashboard, so numbers line up in columns"
+        }
+      ],
+      "minCli": "1.3.0"
+    },
+    {
+      "version": "0.4.3",
+      "publishedAt": "2026-09-06T12:00:19.455Z",
+      "notes": "",
+      "files": [
+        {
+          "name": "batoai-0.4.3.tar.gz",
+          "key": "desktop/batoai/0.4.3/batoai-0.4.3.tar.gz",
+          "size": 6244046,
+          "sha256": "d8c279f3d419cce864b981485f6ad12a51514b08216bf05c2a4cf160cffef305"
+        }
+      ],
+      "artifacts": [
+        "batoai",
+        "batoai-server",
+        "qml"
+      ],
+      "bin": [
+        {
+          "name": "batoai",
+          "target": "batoai"
+        },
+        {
+          "name": "batoai-server",
+          "target": "batoai-server"
+        }
+      ],
+      "desktop": [
+        {
+          "name": "BatoAI",
+          "genericName": "Local GPU broker",
+          "comment": "Which models hold VRAM, who is using them, and how much is left",
+          "exec": "batoai ui",
+          "categories": "System;Monitor;",
+          "keywords": "ai;llm;gpu;vram;models;",
+          "startupNotify": true,
+          "startupWMClass": "org.qt-project.qml"
+        }
+      ],
+      "service": {
+        "exec": "batoai-server",
+        "port": 42116,
+        "dirs": [
+          "~/.local/share/bato-ai"
+        ],
+        "env": {
+          "APP_DATA_DIR": "~/.local/share/bato-ai"
+        }
+      },
+      "requires": [
+        {
+          "name": "llama-server",
+          "command": "llama-server",
+          "required": true,
+          "install": {
+            "arch": "sudo pacman -S llama.cpp ggml-vulkan"
+          },
+          "reason": "BatoAI starts and supervises llama.cpp servers"
+        },
+        {
+          "name": "qml6",
+          "command": "qml6",
+          "required": true,
+          "install": {
+            "arch": "sudo pacman -S qt6-declarative"
+          },
+          "reason": "runs the dashboard \u2014 `batoai ui` and the launcher entry"
+        },
+        {
+          "name": "nvidia-smi",
+          "command": "nvidia-smi",
+          "required": false,
+          "reason": "ships with the NVIDIA driver; without it VRAM cannot be measured, so admission control is disabled and every model is allowed to start"
+        },
+        {
+          "name": "Inter",
+          "font": "Inter",
+          "required": false,
+          "install": {
+            "arch": "sudo pacman -S inter-font"
+          },
+          "reason": "the dashboard's UI font; Qt substitutes a default sans without it"
+        },
+        {
+          "name": "JetBrainsMono Nerd Font",
+          "font": "JetBrainsMono Nerd Font",
+          "required": false,
+          "install": {
+            "arch": "sudo pacman -S ttf-jetbrains-mono-nerd"
+          },
+          "reason": "every figure in the dashboard, so numbers line up in columns"
+        }
+      ],
+      "minCli": "1.3.0"
+    },
+    {
+      "version": "0.4.1",
+      "publishedAt": "2026-08-30T16:29:39.176Z",
+      "notes": "",
+      "files": [
+        {
+          "name": "batoai-0.4.1.tar.gz",
+          "key": "desktop/batoai/0.4.1/batoai-0.4.1.tar.gz",
+          "size": 6243868,
+          "sha256": "18d46c8fef52c9b110ba5af85e23bfa4986ce625f17ecc83c349ae18bb5a9ecf"
+        }
+      ],
+      "artifacts": [
+        "batoai",
+        "batoai-server",
+        "qml"
+      ],
+      "bin": [
+        {
+          "name": "batoai",
+          "target": "batoai"
+        },
+        {
+          "name": "batoai-server",
+          "target": "batoai-server"
+        }
+      ],
+      "desktop": [
+        {
+          "name": "BatoAI",
+          "genericName": "Local GPU broker",
+          "comment": "Which models hold VRAM, who is using them, and how much is left",
+          "exec": "batoai ui",
+          "categories": "System;Monitor;",
+          "keywords": "ai;llm;gpu;vram;models;",
+          "startupNotify": true,
+          "startupWMClass": "org.qt-project.qml"
+        }
+      ],
+      "service": {
+        "exec": "batoai-server",
+        "port": 42116,
+        "dirs": [
+          "~/.local/share/bato-ai"
+        ],
+        "env": {
+          "APP_DATA_DIR": "~/.local/share/bato-ai"
+        }
+      },
+      "requires": [
+        {
+          "name": "llama-server",
+          "command": "llama-server",
+          "required": true,
+          "install": {
+            "arch": "sudo pacman -S llama.cpp ggml-vulkan"
+          },
+          "reason": "BatoAI starts and supervises llama.cpp servers"
+        },
+        {
+          "name": "qml6",
+          "command": "qml6",
+          "required": true,
+          "install": {
+            "arch": "sudo pacman -S qt6-declarative"
+          },
+          "reason": "runs the dashboard \u2014 `batoai ui` and the launcher entry"
+        },
+        {
+          "name": "nvidia-smi",
+          "command": "nvidia-smi",
+          "required": false,
+          "reason": "ships with the NVIDIA driver; without it VRAM cannot be measured, so admission control is disabled and every model is allowed to start"
+        },
+        {
+          "name": "Inter",
+          "font": "Inter",
+          "required": false,
+          "install": {
+            "arch": "sudo pacman -S inter-font"
+          },
+          "reason": "the dashboard's UI font; Qt substitutes a default sans without it"
+        },
+        {
+          "name": "JetBrainsMono Nerd Font",
+          "font": "JetBrainsMono Nerd Font",
+          "required": false,
+          "install": {
+            "arch": "sudo pacman -S ttf-jetbrains-mono-nerd"
+          },
+          "reason": "every figure in the dashboard, so numbers line up in columns"
+        }
+      ],
+      "minCli": "1.3.0"
+    }
+  ],
+  "executableName": "BatoAI",
+  "port": 42116,
+  "latest": "0.4.4",
+  "updatedAt": "2026-09-27T16:36:08.635Z"
+}
