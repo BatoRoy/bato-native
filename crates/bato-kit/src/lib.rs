@@ -11,7 +11,8 @@
 //! | [`surface`], [`label`], [`icon`] | The three building blocks: a CSS box, Chromium-placed text, lucide icons |
 //! | [`button`], [`badge`], [`card`], [`kbd`], [`segmented`], [`checkbox`], [`switch`], [`input`], [`spinner`], [`empty`] | Components |
 //! | [`scroller`], [`autoscroll`] | Chromium scrolling (wheel, touchpad, touch, keys, scrollbar) and BatoScroll |
-//! | [`modal`], [`blur`], [`toast`], [`rail_tip`], [`timer`] | Overlays and timed things |
+//! | [`modal`], [`blur`], [`toast`], [`rail_tip`], [`timer`] | The overlay stack (modals, drawers), toasts and timed things |
+//! | [`floating`], [`overlay`], [`menu`], [`hotkeys`] | Anchored overlays (`floating.ts`), menus, keyboard shortcuts |
 //! | [`layout`] | Grid with spans and tracks, AutoGrid, Masonry, AspectRatio, absolute placement, hairlines, page |
 //! | [`anim`] | Easings, tweens, pulse, hold-repeat, group opacity |
 //! | [`cursor`], [`datefmt`], [`kv`], [`fonts`], [`scale`] | Cursors, date formatting, UI-state store, bundled fonts, device pixels |
@@ -34,14 +35,17 @@ pub mod ctx;
 pub mod cursor;
 pub mod datefmt;
 pub mod empty;
+pub mod floating;
 pub mod fonts;
 pub mod frame;
+pub mod hotkeys;
 pub mod icon;
 pub mod input;
 pub mod kbd;
 pub mod kv;
 pub mod label;
 pub mod layout;
+pub mod menu;
 pub mod modal;
 pub mod rail_tip;
 pub mod scale;
@@ -83,6 +87,8 @@ pub mod prelude {
     pub use crate::kbd::{app_mark, kbd};
     pub use crate::label::{Align, Span, label, rich};
     pub use crate::layout::{Grid, gap, grid, hline, page, vgap, vline};
+    pub use crate::menu::{MenuEntry, action, menu_list, separator};
+    pub use crate::overlay::{DismissReason, anchored, context_area};
     pub use crate::segmented::{Segment, segmented, tabs};
     pub use crate::spinner::spinner;
     pub use crate::style::c;

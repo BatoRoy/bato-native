@@ -62,7 +62,7 @@ use crate::badge::Tone;
 use crate::blur::backdrop_blur;
 use crate::ctx::Ctx;
 use crate::icon::Ico;
-use crate::modal::modal;
+use crate::modal::{Kind, Modal, level_id, modal};
 use crate::scale::set_device_scale;
 use crate::scroller::scroller;
 use crate::style::c;
@@ -442,6 +442,21 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     /// The whole window: sidebar, `page` in the scroller, dialogs, toasts.
     /// `wrap` lifts frame messages into the app's message type.
     pub fn view<'a, M: Clone + 'a>(&'a self, page: El<'a, M>, wrap: fn(Msg<P>) -> M) -> El<'a, M> {
+        self.view_with(page, Vec::new(), wrap)
+    }
+
+    /// [`Frame::view`] with the app's own overlay levels (modals, drawers,
+    /// the command palette; [`crate::modal::level`]), bottom first, stacked
+    /// over the frame's dialog. Each level gets its id
+    /// ([`crate::modal::level_id`], counting the frame's dialog), the
+    /// backdrop blur and the frame's animation mode. Dialogs and drawers
+    /// (z-40) sit under the toasts, the palette (z-50) over them.
+    pub fn view_with<'a, M: Clone + 'a>(
+        &'a self,
+        page: El<'a, M>,
+        levels: Vec<Modal<'a, M>>,
+        wrap: fn(Msg<P>) -> M,
+    ) -> El<'a, M> {
         let p = self.cx.p();
         let main = scroller(page, c(p.border), c(p.muted))
             .initial(self.start.scroll)
@@ -453,29 +468,37 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         )
         .into();
         let mut layers: Vec<El<'a, M>> = vec![shell];
+        let animate = !self.start.no_animations;
+        let mut depth = 0;
         if let Some(d) = self.dialog {
             let (panel, w) = match d {
                 Dialog::Options => (self.options_view(wrap), 512.0),
                 Dialog::About => (self.about_view(wrap), 448.0),
             };
-            let animate = !self.start.no_animations;
             let cover = c(bato_theme::blend(Rgb::BLACK, 0.5, p.bg));
             layers.push(
                 modal(panel, w, wrap(Msg::Close), cover)
                     .animate(animate)
+                    .id(level_id(depth))
                     .backdrop(backdrop_blur(self.dialog_opened, animate))
                     .into(),
             );
+            depth += 1;
+        }
+        let mut above: Vec<El<'a, M>> = Vec::new();
+        for l in levels {
+            let top = l.kind() == Kind::Top;
+            let el: El<'a, M> = l.id(level_id(depth)).blur(true).animate(animate).into();
+            depth += 1;
+            if top { above.push(el) } else { layers.push(el) }
         }
         if !self.toasts.is_empty() {
             layers.push(toast_stack(&self.cx, &self.toasts.items, move |id| {
                 wrap(Msg::Dismiss(id))
             }));
         }
-        stack(layers)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        layers.extend(above);
+        crate::hotkeys::probe(stack(layers).width(Length::Fill).height(Length::Fill)).into()
     }
 }
 
