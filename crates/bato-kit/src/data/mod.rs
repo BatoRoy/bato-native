@@ -11,3 +11,14 @@ pub use kanban::{
     drag_over, kanban_board,
 };
 pub use sortable::{GAP, LINE, SortableList, lifted, row_style, sortable_list};
+// B6 data and charts.
+pub mod charts;
+pub mod draw;
+pub mod pagination;
+pub mod table;
+pub mod timeline;
+
+pub use charts::{Bar, Series, XType, area_chart, bar_chart, line_chart, sparkline};
+pub use pagination::pagination;
+pub use table::{ActionTone, RowAction, TableMsg, TableState, Value, column_def, data_table};
+pub use timeline::{TimelineItem, timeline};
