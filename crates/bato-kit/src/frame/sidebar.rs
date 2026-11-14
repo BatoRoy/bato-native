@@ -211,9 +211,11 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             .padding(12),
         ];
 
-        let body = column![header, search, nav, footer]
-            .width(w - 1.0)
-            .height(Length::Fill);
+        let mut body = column![header, search, nav];
+        if let Some(card) = self.sidebar_update_view(collapsed, wrap) {
+            body = body.push(card);
+        }
+        let body = body.push(footer).width(w - 1.0).height(Length::Fill);
         let side = row![body, vline(c(cx.line()))].height(Length::Fill);
         surface(side).width(w).height(Length::Fill).clip().into()
     }
