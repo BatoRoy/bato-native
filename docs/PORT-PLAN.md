@@ -182,6 +182,23 @@ All 32 Showcase cards and 7 tabs are ported.
 
 **Checkpoint 4:** the native template is feature-complete; `new-app.sh` offers it alongside Electron.
 
+#### Phase 4 status (2026-11-14): done, tagged `v1.0.0`
+
+Items 1 and 2 landed with Phase 3 (B10 dashboard in wave 3b; B11 numbers above). Phase 4 was the user's own
+testing on desktop and the touchscreen laptop, and the fixes it turned up:
+
+| Release | Fixes |
+|---|---|
+| v0.3.1 | Keypad digits honour NumLock (winit xkb patch); Tab-accept in SearchInput leaves the caret at the end; editor clipboard in both modes with the user's Neovim keymap (Space leader, `Space yy`, Ctrl+Shift+V, Ctrl+C = Esc); Wayland paste on Hyprland (winit's data device serves the clipboard; iced_winit is the fifth patched crate) |
+| v1.0.0 | Text typed after a `//` comment no longer renders slanted; vim `o` / `O` / Enter keep the indent (Neovim autoindent + smartindent); `tools/nested.sh`, a hidden nested session with real input for what the off-screen output can't test (paste, shortcuts, file drops) |
+
+The template's Examples and Scroll lab pages sit behind an `examples` cargo feature (on by default). Without
+it the release is 22.5 MB instead of 29.9 MB.
+
+**Still not done** (carried from Phase 3): avatar images, CodeMirror search/multi-cursor/folding and IME in the
+editor, the Kanban drag tilt, a few React `title` tooltips. Middle-click paste works in the code editor only, not in
+plain text fields.
+
 ### Phase 5: App migration (separate plan per app, after Phase 4)
 
 1. **Pilot:** one small app without a bundled server, to shake out the migration recipe.
