@@ -10,7 +10,8 @@
 //! | [`style`] | The palette bridge (tokens → iced colours, shadows) |
 //! | [`surface`], [`label`], [`icon`] | The three building blocks: a CSS box, Chromium-placed text, lucide icons |
 //! | [`button`], [`badge`], [`card`], [`kbd`], [`segmented`], [`checkbox`], [`switch`], [`input`], [`spinner`], [`empty`] | Components |
-//! | [`scroller`], [`autoscroll`] | Chromium scrolling (wheel, touchpad, touch, keys, scrollbar) and BatoScroll |
+//! | [`scroller`], [`autoscroll`] | Chromium scrolling (wheel, touchpad, touch, keys, scrollbars, nesting, scroll-into-view, edge fade, virtual lists) and BatoScroll |
+//! | [`field`] | The label/hint/error scaffold and the shared control box (`Field.tsx`, `controlClasses`) |
 //! | [`modal`], [`blur`], [`toast`], [`rail_tip`], [`timer`] | Overlays and timed things |
 //! | [`layout`] | Grid with spans and tracks, AutoGrid, Masonry, AspectRatio, absolute placement, hairlines, page |
 //! | [`anim`] | Easings, tweens, pulse, hold-repeat, group opacity |
@@ -34,6 +35,7 @@ pub mod ctx;
 pub mod cursor;
 pub mod datefmt;
 pub mod empty;
+pub mod field;
 pub mod fonts;
 pub mod frame;
 pub mod icon;
@@ -78,10 +80,12 @@ pub mod prelude {
     pub use crate::checkbox::checkbox;
     pub use crate::ctx::Ctx;
     pub use crate::empty::empty_state;
+    pub use crate::field::{FieldSize, field, text_control};
     pub use crate::icon::{Ico, icon};
     pub use crate::input::input;
     pub use crate::kbd::{app_mark, kbd};
     pub use crate::label::{Align, Span, label, rich};
+    pub use crate::scroller::{Heights, scroll_area, virtual_list};
     pub use crate::layout::{Grid, gap, grid, hline, page, vgap, vline};
     pub use crate::segmented::{Segment, segmented, tabs};
     pub use crate::spinner::spinner;
