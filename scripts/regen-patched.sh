@@ -78,6 +78,10 @@ crate iced_wgpu 0.14.0 ff144a999b0ca0f8a10257934500060240825c42e950ec0ebee9c8ae3
   iced_wgpu-0.14.0-surface-copy-src.patch
 crate iced_winit 0.14.1 7589888c8e951899cc688247a69933bb7a0511f0b4b2e122ac3fcd5dacb37f72 \
   iced_winit-0.14.1-wayland-selection.patch
+# The clipboard thread of iced's window_clipboard: no panic on events of a
+# released wl_pointer (a mouse unplugged, a virtual pointer destroyed).
+crate smithay-clipboard 0.7.3 71704c03f739f7745053bde45fa203a46c58d25bc5c4efba1d9a60e9dba81226 \
+  smithay-clipboard-0.7.3-released-pointer.patch
 
 # iced's winit fork (value120 wheel deltas on Wayland), pinned, with smol_str 0.2,
 # desktop file drops on Wayland (wl_data_device text/uri-list), keypad keys
@@ -85,10 +89,12 @@ crate iced_winit 0.14.1 7589888c8e951899cc688247a69933bb7a0511f0b4b2e122ac3fcd5d
 # clipboard reads through the file-drop data device (Hyprland sends the
 # selection only to a client's first wl_data_device; iced_winit reads it),
 # and OS drags of files from a window (bato_drag: a wl_data_source on that
-# same data device; on X11 an XDND source; bato-kit's dnd::os_drag starts them).
+# same data device; on X11 an XDND source; bato-kit's dnd::os_drag starts them),
+# and pointers that come and go (a mouse unplugged, a virtual pointer destroyed)
+# without a panic on a released wl_pointer or a button left held.
 git clone -q --no-checkout "$WINIT_REPO" "$work/winit"
 git -C "$work/winit" -c advice.detachedHead=false checkout -q "$WINIT_REV"
 finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch winit-wayland-file-drop.patch \
   winit-xkb-keypad-numlock.patch winit-wayland-selection.patch winit-wayland-drag-source.patch \
-  winit-x11-drag-source.patch
+  winit-x11-drag-source.patch winit-wayland-pointer-robust.patch
 rm -rf "$out/winit/.git"

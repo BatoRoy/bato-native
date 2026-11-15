@@ -97,7 +97,7 @@ impl WinitState {
         let surface = window.window.wl_surface().clone();
         // The pointer holding a button on the window: its seat and press serial.
         let grab = window.pointers.iter().filter_map(Weak::upgrade).find_map(|pointer| {
-            let data = pointer.pointer().winit_data();
+            let data = pointer.pointer().winit_data()?;
             let winit = data.data();
             (winit.focused_window() == Some(window_id) && winit.bato_pressed())
                 .then(|| data.latest_button_serial().map(|s| (data.seat().clone(), s)))

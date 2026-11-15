@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sun, 15 Nov 2026 20:00:00 +0100
+Subject: [PATCH] Drop events of a released wl_pointer instead of panicking
+
+The clipboard thread binds its own wl_pointer. When the seat loses the
+pointer capability it releases it, but events already queued for it are
+dispatched on a dead proxy without user data, and the `unwrap()` ended the
+thread: copy and paste stopped working for the rest of the session.
+
+---
+diff --git a/src/state.rs b/src/state.rs
+index 866c51e..5a96d55 100644
+--- a/src/state.rs
++++ b/src/state.rs
+@@ -362,7 +362,14 @@ impl PointerHandler for State {
+         pointer: &WlPointer,
+         events: &[PointerEvent],
+     ) {
+-        let seat = pointer.data::<PointerData>().unwrap().seat();
++        // bato-native: a pointer released in `remove_capability` (a mouse
++        // unplugged, a virtual pointer destroyed) can still have events queued;
++        // they arrive on a dead proxy without user data. Drop them instead of
++        // panicking, which ended the clipboard thread (copy and paste with it).
++        let Some(data) = pointer.data::<PointerData>() else {
++            return;
++        };
++        let seat = data.seat();
+         let seat_id = seat.id();
+         let seat_state = match self.seats.get_mut(&seat_id) {
+             Some(seat_state) => seat_state,

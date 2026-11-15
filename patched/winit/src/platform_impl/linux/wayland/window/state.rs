@@ -226,8 +226,9 @@ impl WindowState {
         mut callback: F,
     ) {
         self.pointers.iter().filter_map(Weak::upgrade).for_each(|pointer| {
-            let data = pointer.pointer().winit_data();
-            callback(pointer.as_ref(), data);
+            if let Some(data) = pointer.pointer().winit_data() {
+                callback(pointer.as_ref(), data);
+            }
         })
     }
 
@@ -619,9 +620,11 @@ impl WindowState {
     /// Pointer has left the top-level.
     pub fn pointer_left(&mut self, removed: Weak<ThemedPointer<WinitPointerData>>) {
         let mut new_pointers = Vec::new();
+        // bato-native: no unwrap, the removed pointer may already be gone.
+        let removed = removed.upgrade();
         for pointer in self.pointers.drain(..) {
             if let Some(pointer) = pointer.upgrade() {
-                if pointer.pointer() != removed.upgrade().unwrap().pointer() {
+                if !matches!(&removed, Some(removed) if pointer.pointer() == removed.pointer()) {
                     new_pointers.push(Arc::downgrade(&pointer));
                 }
             }
@@ -977,7 +980,7 @@ impl WindowState {
         } else {
             for pointer in self.pointers.iter().filter_map(|pointer| pointer.upgrade()) {
                 if let Some(latest_enter_serial) =
-                    pointer.pointer().winit_data().latest_enter_serial()
+                    pointer.pointer().winit_data().and_then(|data| data.latest_enter_serial())
                 {
                     pointer.pointer().set_cursor(latest_enter_serial, None, 0, 0);
                 }
