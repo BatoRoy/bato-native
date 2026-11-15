@@ -17,7 +17,8 @@ scroll-physics = { path = "../scroll-physics" }
 
 # Apps use iced only through `bato_kit::iced`, so the kit picks the features:
 # wgpu (Vulkan; the backdrop blur needs it) with tiny-skia as the software
-# fallback, Wayland and X11, SVG icons, and the advanced widget API.
+# fallback, Wayland and X11, SVG icons, raster images (decoded by the kit
+# off the UI thread, so iced's own codecs stay off), and the advanced widget API.
 iced = { version = "=0.14.0", default-features = false, features = [
     "wgpu",
     "tiny-skia",
@@ -26,8 +27,13 @@ iced = { version = "=0.14.0", default-features = false, features = [
     "x11",
     "thread-pool",
     "svg",
+    "image-without-codecs",
     "advanced",
 ] }
+# Raster decoding for `thumb` (thumbnails, previews, avatars), on worker
+# threads: the formats Chromium shows in an <img> that apps meet in
+# practice. No AVIF/HEIC/TIFF (Chromium has no TIFF either) and no rayon.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "ico"] }
 # The backdrop blur is a wgpu shader primitive.
 wgpu = { version = "27", default-features = false, features = ["wgsl"] }
 

@@ -60,6 +60,7 @@ pub mod spinner;
 pub mod style;
 pub mod surface;
 pub mod switch;
+pub mod thumb;
 pub mod timer;
 pub mod toast;
 
