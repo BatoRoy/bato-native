@@ -18,8 +18,12 @@
 //! ends, even at that scroller's edge; the next gesture chains to the
 //! parent. Shift+wheel scrolls horizontally. Middle-click autoscroll picks
 //! the innermost scroller that can scroll at all. The keys (arrows 40 px,
-//! PageUp/PageDown/Space 87.5 %, Home/End) scroll the scroller of the last
-//! click and bubble to its parents at an edge.
+//! PageUp/PageDown/Space 87.5 %, Home/End) follow Chromium: the scroller
+//! around the focused widget, else the one of the last click, else the
+//! window's main scroller (the page, else the largest), bubbling to the
+//! parents at an edge; an unfocused side scroller never takes them, and a
+//! widget that handles them itself ([`key_owner`]) gets them first. See
+//! [`chain`]'s keyboard section and [`keys`].
 //!
 //! **Look**: the classic Chromium scrollbar of `index.css` per axis (5 px,
 //! `border` thumb, `muted` on hover, takes layout space, no auto-hide), and
@@ -42,6 +46,7 @@
 
 pub mod chain;
 pub mod geom;
+pub mod keys;
 pub mod touch;
 pub mod virtual_grid;
 pub mod virtual_list;
@@ -64,6 +69,7 @@ use crate::scale::device_scale;
 use crate::style::c;
 
 pub use geom::{Align, Axis, BAR, FADE};
+pub use keys::{FocusChain, KeyOwner, ScrollerMark, key_owner, own_keys};
 pub use touch::{Axes, Forward, Phase, TouchRouter};
 pub use virtual_grid::{GridLayout, VirtualGrid, cached_heights, virtual_grid};
 pub use virtual_list::{Heights, VirtualList, virtual_list};
@@ -375,18 +381,21 @@ pub fn reveal(rect: Rectangle, how: Reveal) {
 }
 
 /// Wraps an overlay so its `update` (and its nested overlays') counts as the
-/// UI's ([`chain::in_ui`]); the focus root wraps every overlay with it.
+/// UI's ([`chain::in_ui`]) and runs in the window's `surface`
+/// ([`chain::in_surface`]); the focus root wraps every overlay with it.
 pub(crate) fn ui_overlay<'b, M>(
     inner: overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+    surface: u64,
 ) -> overlay::Element<'b, M, iced::Theme, iced::Renderer>
 where
     M: 'b,
 {
-    overlay::Element::new(Box::new(UiOverlay { inner }))
+    overlay::Element::new(Box::new(UiOverlay { inner, surface }))
 }
 
 struct UiOverlay<'b, M> {
     inner: overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+    surface: u64,
 }
 
 impl<M> overlay::Overlay<M, iced::Theme, iced::Renderer> for UiOverlay<'_, M> {
@@ -401,9 +410,11 @@ impl<M> overlay::Overlay<M, iced::Theme, iced::Renderer> for UiOverlay<'_, M> {
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        self.inner
-            .as_overlay()
-            .draw(renderer, theme, style, layout, cursor);
+        chain::in_surface(self.surface, || {
+            self.inner
+                .as_overlay()
+                .draw(renderer, theme, style, layout, cursor);
+        });
     }
     fn operate(
         &mut self,
@@ -424,10 +435,25 @@ impl<M> overlay::Overlay<M, iced::Theme, iced::Renderer> for UiOverlay<'_, M> {
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, M>,
     ) {
-        chain::in_ui(|| {
-            self.inner
-                .as_overlay_mut()
-                .update(event, layout, cursor, renderer, clipboard, shell);
+        chain::in_surface(self.surface, || {
+            // The overlays get a key before the window's base layer: tell
+            // their scrollers where the focus is if it is up here (the
+            // focus root looks again, everywhere, for the base layer).
+            if keys::scroll_key(event) {
+                let mut op = FocusChain::default();
+                self.inner
+                    .as_overlay_mut()
+                    .operate(layout, renderer, &mut op);
+                chain::set_key_focus(
+                    op.found
+                        .map_or(chain::KeyFocus::Unknown, chain::KeyFocus::In),
+                );
+            }
+            chain::in_ui(|| {
+                self.inner
+                    .as_overlay_mut()
+                    .update(event, layout, cursor, renderer, clipboard, shell);
+            });
         });
     }
     fn mouse_interaction(
@@ -446,7 +472,7 @@ impl<M> overlay::Overlay<M, iced::Theme, iced::Renderer> for UiOverlay<'_, M> {
         renderer: &iced::Renderer,
     ) -> Option<overlay::Element<'c, M, iced::Theme, iced::Renderer>> {
         let nested = self.inner.as_overlay_mut().overlay(layout, renderer)?;
-        Some(ui_overlay(nested))
+        Some(ui_overlay(nested, self.surface))
     }
     fn index(&self) -> f32 {
         self.inner.as_overlay().index()
@@ -1641,7 +1667,9 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
                 // viewport, Home/End; all animated like a wheel notch. The
                 // clicked scroller takes them and bubbles at its edge.
                 use keyboard::key::Named;
-                if !chain::key_eligible(id, root) {
+                if chain::key_bit(*named).is_some_and(chain::key_reserved)
+                    || !chain::key_eligible(id, root)
+                {
                     return;
                 }
                 let page = geom::page_step(state.view.height) * s;
@@ -1718,7 +1746,16 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
     ) {
         let state = tree.state.downcast_ref::<State>();
         let offset = state.offset();
-        chain::drawn(state.id, self.id.as_ref(), (offset.x, offset.y));
+        let depth = chain::draw_enter();
+        let shown = state.clip(layout.bounds()).intersection(viewport);
+        chain::drawn(
+            state.id,
+            self.id.as_ref(),
+            (offset.x, offset.y),
+            depth.root,
+            self.autoscroll.is_some(),
+            shown.map_or(0.0, |r| r.width * r.height),
+        );
         if self.autoscroll.is_some() {
             chain::set_page((offset.x, offset.y));
         }
@@ -1812,7 +1849,11 @@ impl<'a, Message: 'a> Widget<Message, iced::Theme, iced::Renderer> for Scroller<
         // Announce the scroll offset, then traverse: an operation that wants
         // window coordinates (see [`ScrollFrame`]) applies it to everything
         // inside.
-        let offset = tree.state.downcast_ref::<State>().offset();
+        let (id, offset) = {
+            let st = tree.state.downcast_ref::<State>();
+            (st.id, st.offset())
+        };
+        operation.custom(None, layout.bounds(), &mut ScrollerMark(id));
         operation.custom(None, layout.bounds(), &mut ScrollFrame { offset });
         operation.traverse(&mut |operation| {
             self.content.as_widget_mut().operate(

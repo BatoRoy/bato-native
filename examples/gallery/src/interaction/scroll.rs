@@ -3,7 +3,10 @@
 //! - a bounded list nested in the page (wheel/touch chaining, keys after a
 //!   click), a horizontal strip, a two-axis grid, `Scrollable`'s faded list,
 //!   a 10 000-row virtual list with variable heights, and scroll-to buttons;
-//! - the Text fields card rebuilt on `field` + `text_control`, and the sizes.
+//! - the Text fields card rebuilt on `field` + `text_control`, and the sizes;
+//! - Scroll keys: which scroller the arrows go to (focus, else the last
+//!   click, else the page), and a list with its own cursor that takes ↑/↓
+//!   before any scroller (`scroller::key_owner`).
 //!
 //! `BATO_SELFTEST=scroll` wraps the window in [`selftest`]: a script feeds
 //! wheel, touchpad, touch, middle-click, key and scroll-to input through the
@@ -32,6 +35,12 @@ const FADE: &str = "scroll-demo-fade";
 const VLIST: &str = "scroll-demo-virtual";
 const FIELDS: &str = "scroll-demo-fields";
 const EMAIL: &str = "scroll-demo-email";
+const KEYS: &str = "scroll-demo-keys";
+const OWNER: &str = "scroll-demo-owner";
+const KEY_ROWS: usize = 6;
+
+/// The cursor list's position, for the self-test's checks.
+static CURSOR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 const LIST_ROWS: usize = 30;
 const TILES: usize = 24;
@@ -81,6 +90,9 @@ pub struct State {
     amount: String,
     name: String,
     heights: Vec<f32>,
+    /// Scroll keys: the list owns ↑/↓, and its cursor.
+    owner: bool,
+    cursor: usize,
 }
 
 impl Default for State {
@@ -94,6 +106,8 @@ impl Default for State {
             amount: String::new(),
             name: String::new(),
             heights: vheights(),
+            owner: false,
+            cursor: 0,
         }
     }
 }
@@ -109,6 +123,8 @@ pub enum Msg {
     Amount(String),
     Name(String),
     Noop(String),
+    Owner(bool),
+    Cursor(i32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -130,6 +146,11 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Amount(s) => state.amount = s,
         Msg::Name(s) => state.name = s,
         Msg::Noop(_) => {}
+        Msg::Owner(on) => state.owner = on,
+        Msg::Cursor(d) => {
+            state.cursor = (state.cursor as i32 + d).clamp(0, KEY_ROWS as i32 - 1) as usize;
+            CURSOR.store(state.cursor, std::sync::atomic::Ordering::Relaxed);
+        }
     }
     Task::none()
 }
@@ -155,7 +176,78 @@ fn caption<'a>(cx: &Ctx, text: &str) -> El<'a, Msg> {
 }
 
 pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
-    column![scroll_card(state, cx), vgap(24.0), fields_card(state, cx)].into()
+    column![
+        scroll_card(state, cx),
+        vgap(24.0),
+        keys_card(state, cx),
+        vgap(24.0),
+        fields_card(state, cx)
+    ]
+    .into()
+}
+
+/// Scroll keys: where the arrows go, and a list that handles them itself.
+fn keys_card<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
+    use bato_kit::iced::keyboard::key::Named;
+    let on = cx.on_card();
+    let p = on.p().clone();
+    let rows = (0..KEY_ROWS).map(|i| {
+        let here = state.cursor == i;
+        let look = if here {
+            BoxStyle::default().bg(c(on.wash(0.07))).radius(6.0)
+        } else {
+            BoxStyle::default()
+        };
+        El::from(
+            surface(label(WORDS[i], 14.0, 20.0).color(c(if here { p.text } else { p.subtext })))
+                .padding([6, 12])
+                .width(Length::Fill)
+                .fixed(look),
+        )
+    });
+    let list = container(column(rows).spacing(2))
+        .width(240)
+        .padding(4)
+        .style({
+            let line = c(on.line());
+            move |_| {
+                bato_kit::iced::widget::container::Style::default().border(bato_kit::iced::Border {
+                    color: line,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                })
+            }
+        });
+    let list: El<'a, Msg> = if state.owner {
+        scroller::key_owner(list)
+            .keys([Named::ArrowUp, Named::ArrowDown])
+            .on_key(|k, _| match k {
+                Named::ArrowDown => Some(Msg::Cursor(1)),
+                Named::ArrowUp => Some(Msg::Cursor(-1)),
+                _ => None,
+            })
+            .into()
+    } else {
+        list.into()
+    };
+    let toggle = container(
+        switch(&on, state.owner, Msg::Owner).label("The list owns ↑/↓ (wherever the focus is)"),
+    )
+    .id(Id::new(OWNER));
+    let body = card(cx, "Scroll keys").body(
+            column![
+                label(
+                    "Arrows, Page Up/Down, Space and Home/End scroll the area around the focused control, else the one clicked last, else the page; an area you never used doesn't take them. A widget that handles them itself gets them first.",
+                    14.0,
+                    20.0
+                )
+                .color(c(p.subtext))
+                .wrap(),
+                row![list, toggle].spacing(24).align_y(Alignment::Center),
+            ]
+            .spacing(12),
+        );
+    container(body).id(Id::new(KEYS)).into()
 }
 
 fn hover_row(hover: bato_kit::iced::Color) -> impl Fn(Status) -> BoxStyle {
@@ -189,6 +281,7 @@ fn scroll_card<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
         .padding([8, 12])
         .width(Length::Fill)
         .style(hover_row(hover))
+        .id(Id::from(format!("scroll-demo-pick-{i}")))
         .on_press(Msg::Pick(i));
         El::from(container(r).id(row_id(i)))
     });
@@ -312,6 +405,7 @@ fn scroll_card<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
             .secondary()
             .sm()
             .label(t)
+            .id(Id::from(format!("scroll-demo-go-{t}")))
             .on_press(Msg::ScrollTo(g))
     };
     let buttons = row![
@@ -482,6 +576,8 @@ enum Act {
     Mark,
     Check(&'static str, fn(&Probe) -> bool),
     Shot(&'static str),
+    /// Programmatic focus of the widget with this id.
+    Focus(&'static str),
 }
 
 struct Probe {
@@ -665,7 +761,76 @@ fn script() -> Vec<(u64, Act)> {
         (30, Release(mouse::Button::Left)),
         (400, Shot("field-focus")),
     ]);
+    s.extend(key_script());
     s
+}
+
+/// Scroll keys: focus, else the last click, else the page; a key owner
+/// first. Starts with the e-mail field focused.
+fn key_script() -> Vec<(u64, Act)> {
+    use Act::*;
+    use key::Named::{ArrowDown, ArrowUp};
+    vec![
+        // Pressing the list's frame (not a row) blurs the field: no focus,
+        // the list is the last click.
+        (300, Show(LIST)),
+        (800, At(LIST, 0.5, 0.5)),
+        (0, Press(mouse::Button::Left)),
+        (30, Release(mouse::Button::Left)),
+        (100, Key(key::Named::Home)),
+        (450, Mark),
+        // A focused control outside every scroll area: the page takes ↓,
+        // not the list clicked before (Chromium: focus wins).
+        (0, Focus("scroll-demo-go-Row 1")),
+        (100, Key(ArrowDown)),
+        (
+            450,
+            Check(
+                "↓ with a page-level button focused scrolls the page",
+                |p| (p.d("page").1 - 40.0).abs() < 1.0 && p.still(LIST),
+            ),
+        ),
+        // A focused row inside the list: the list takes ↓.
+        (0, Mark),
+        (0, Focus("scroll-demo-pick-3")),
+        (100, Key(ArrowDown)),
+        (
+            450,
+            Check("↓ with a row of the list focused scrolls the list", |p| {
+                (p.d(LIST).1 - 40.0).abs() < 1.0 && p.still("page")
+            }),
+        ),
+        // The cursor list owns ↑/↓ (while it is on screen): they move its
+        // cursor and the page stays, though the focus (the switch, outside
+        // every area) sends the other keys to the page.
+        (300, Show(KEYS)),
+        (800, At(OWNER, 0.05, 0.5)),
+        (0, Press(mouse::Button::Left)),
+        (30, Release(mouse::Button::Left)),
+        (300, Mark),
+        (0, Key(ArrowDown)),
+        (60, Key(ArrowDown)),
+        (60, Key(ArrowUp)),
+        (
+            450,
+            Check("a key owner takes ↓↓↑ before any scroller", |p| {
+                p.still("page") && CURSOR.load(std::sync::atomic::Ordering::Relaxed) == 1
+            }),
+        ),
+        (0, Shot("key-owner")),
+        (0, Mark),
+        (0, Key(key::Named::PageDown)),
+        (
+            450,
+            Check("keys it doesn't own still scroll the page", |p| {
+                p.d("page").1 > 100.0
+            }),
+        ),
+        // Switch it off again.
+        (0, At(OWNER, 0.05, 0.5)),
+        (0, Press(mouse::Button::Left)),
+        (30, Release(mouse::Button::Left)),
+    ]
 }
 
 struct SelfTest<'a, M> {
@@ -704,7 +869,7 @@ impl adv::Operation for Find {
 
 fn container_of(name: &'static str) -> Id {
     match name {
-        FIELDS | EMAIL => Id::new(name),
+        FIELDS | EMAIL | KEYS | OWNER => Id::new(name),
         _ => area(name).1,
     }
 }
@@ -871,6 +1036,9 @@ impl<'a, M: 'a> SelfTest<'a, M> {
                 Act::Shot(name) => {
                     eprintln!("[selftest] shot {name}");
                     hold = 1500;
+                }
+                Act::Focus(id) => {
+                    bato_kit::focus::request(bato_kit::focus::Target::Id(Id::new(id)));
                 }
             }
             let st = tree.state.downcast_mut::<TState>();
