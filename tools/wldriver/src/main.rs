@@ -2,12 +2,15 @@
 //! wl_data_device drag of a file (text/uri-list) onto a point.
 //!
 //!   wldriver click X Y [left|middle]
+//!   wldriver wheel N              (N wheel notches down; negative: up)
 //!   wldriver drag PATH X Y        (source: a 100x100 layer surface, bottom-left)
 //!   wldriver target X Y W H SECS  (a drop target: a W×H layer surface at X,Y that
 //!                                  accepts any drag for SECS seconds and logs
 //!                                  the offered types and the dropped data;
 //!                                  ACTION=move prefers move over copy,
 //!                                  REFUSE=1 accepts nothing)
+//!   wldriver xtarget X Y W H SECS (the same, as an X11 XDND target on $DISPLAY)
+//!   wldriver xkey KEYSYM          (an X11 key press + release through XTEST, hex keysym)
 //!
 //! OUT_W/OUT_H: the output size (default 1280x720).
 
@@ -27,6 +30,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
+
+mod xtarget;
 
 const BTN_LEFT: u32 = 0x110;
 const BTN_MIDDLE: u32 = 0x112;
@@ -243,6 +248,12 @@ fn pump(q: &mut EventQueue<State>, s: &mut State, for_ms: u64) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("xtarget") {
+        return xtarget::run(&args[2..]);
+    }
+    if args.get(1).map(String::as_str) == Some("xkey") {
+        return xtarget::key(&args[2..]);
+    }
     let ow: u32 = std::env::var("OUT_W")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -311,6 +322,21 @@ fn main() {
                 };
                 button(b, args[1] == "press");
                 pump(&mut q, &mut s, 60);
+            }
+            Some("wheel") => {
+                // N notches down (negative: up), one per 40 ms.
+                let n: i32 = args[2].parse().unwrap();
+                for _ in 0..n.abs() {
+                    vp.axis_source(wl_pointer::AxisSource::Wheel);
+                    vp.axis_discrete(
+                        now_ms(t0),
+                        wl_pointer::Axis::VerticalScroll,
+                        15.0 * n.signum() as f64,
+                        n.signum(),
+                    );
+                    vp.frame();
+                    pump(&mut q, &mut s, 40);
+                }
             }
             Some("move") => {
                 let (x, y): (f64, f64) = (args[2].parse().unwrap(), args[3].parse().unwrap());

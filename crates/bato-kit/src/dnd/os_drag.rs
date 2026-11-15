@@ -4,9 +4,9 @@
 //!
 //! The drag offers `text/uri-list` (and the paths as `text/plain`) with the
 //! copy action (and move, if asked), and an icon from RGBA pixels. It runs on
-//! patched winit (`winit::bato_drag`): Wayland now (a `wl_data_source` on the
-//! window's data device); on X11 [`Drag::start`] resolves to
-//! [`Outcome::Failed`] for now.
+//! patched winit (`winit::bato_drag`): on Wayland a `wl_data_source` on the
+//! window's data device, on X11 an XDND source (a pointer grab with a
+//! copy / no-drop cursor, Escape cancels).
 //!
 //! **Start it during a press.** The compositor ties the drag to the held
 //! pointer button, so start it from a press-and-move ([`drag_source`] fires

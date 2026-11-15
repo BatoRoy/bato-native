@@ -58,6 +58,12 @@ impl XConnection {
         }
     }
 
+    /// bato-native: a themed cursor for the OS drag's pointer grab (0 if
+    /// the theme has none); the caller frees it.
+    pub(crate) fn bato_cursor(&self, cursor: CursorIcon) -> ffi::Cursor {
+        self.get_cursor(Some(cursor))
+    }
+
     fn get_cursor(&self, cursor: Option<CursorIcon>) -> ffi::Cursor {
         let cursor = match cursor {
             Some(cursor) => cursor,

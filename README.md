@@ -20,7 +20,7 @@ fix to text, scrolling, theme or a widget is made once and reaches an app when i
 
 | Crate | Why |
 |---|---|
-| `winit` (iced's fork) | Wayland `axis_value120` hi-res wheel deltas, Wayland file drops, keypad keys that honour NumLock (`key_without_modifiers`, X11 and Wayland), clipboard reads through the file-drop `wl_data_device`, OS drags of files to other apps (`bato_drag`, Wayland: a `wl_data_source` offering `text/uri-list` on that same data device; `bato_kit::dnd::os_drag`) |
+| `winit` (iced's fork) | Wayland `axis_value120` hi-res wheel deltas, Wayland file drops, keypad keys that honour NumLock (`key_without_modifiers`, X11 and Wayland), clipboard reads through the file-drop `wl_data_device`, OS drags of files to other apps (`bato_drag`, `bato_kit::dnd::os_drag`; Wayland: a `wl_data_source` offering `text/uri-list` on that same data device; X11: an XDND source with an XI2 pointer grab) |
 | `cosmic-text` 0.15.0 | FreeType light hinting, so text matches Chromium |
 | `cryoglyph` 0.1.0 | Skia's gamma preblend in the glyph shader |
 | `iced_wgpu` 0.14.0 | `COPY_SRC` surface usage, for the dialog backdrop blur |

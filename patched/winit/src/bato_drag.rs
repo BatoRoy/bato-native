@@ -4,7 +4,7 @@
 //!
 //! [`start`] queues a [`Request`] and wakes the event loop, which starts the
 //! drag on its next turn (Wayland: a `wl_data_source` on the window's data
-//! device; X11: an XDND source). The drag offers `text/uri-list`, the paths as
+//! device; X11: an XDND source with a pointer grab). The drag offers `text/uri-list`, the paths as
 //! `text/plain`, and a private marker type that names this process and the
 //! drag, so the file-drop code can report [`incoming_drag`] when the drag is
 //! over one of this process's windows.
@@ -132,6 +132,13 @@ pub(crate) fn take() -> Vec<(u64, Request)> {
 pub(crate) fn set_incoming<'a>(offered: impl IntoIterator<Item = &'a str>) {
     let id = offered.into_iter().find_map(parse_marker).unwrap_or(0);
     INCOMING.store(id, Ordering::Relaxed);
+}
+
+/// The drag that entered one of our windows is our own drag `id` (X11: the
+/// source window is ours), or another app's (`None`).
+#[allow(dead_code)]
+pub(crate) fn set_incoming_id(id: Option<u64>) {
+    INCOMING.store(id.unwrap_or(0), Ordering::Relaxed);
 }
 
 const MARKER: &str = "application/x-bato-drag;pid=";
