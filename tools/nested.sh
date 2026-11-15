@@ -128,10 +128,9 @@ EOF
   [[ -n "$sig" && -S "$R/wayland-1" ]] || { cmd_down; die "Hyprland did not start; see $D/hypr.log"; }
   echo "$sig" > "$D/sig"
 
-  if [[ ! -x "$DRIVER" ]]; then
-    echo "nested: building the driver"
-    nice cargo build --release --quiet --manifest-path "$DRIVER_DIR/Cargo.toml"
-  fi
+  # Always: cargo is a no-op when the driver is current, and a stale binary
+  # silently lacks newer steps (target, right button, ...).
+  nice cargo build --release --quiet --manifest-path "$DRIVER_DIR/Cargo.toml"
   inside hyprctl dismissnotify >/dev/null 2>&1 || true   # the "started without start-hyprland" banner
   echo "nested: up (${NW}x${NH}, state in $D)"
 }
