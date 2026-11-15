@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tracing::warn;
+use tracing::{debug, warn};
 
 use sctk::reexports::client::delegate_dispatch;
 use sctk::reexports::client::protocol::wl_pointer::WlPointer;
@@ -37,7 +37,14 @@ impl PointerHandler for WinitState {
         pointer: &WlPointer,
         events: &[PointerEvent],
     ) {
-        let seat = pointer.winit_data().seat();
+        // bato-native: a `wl_pointer` released while its events were queued
+        // (the seat lost the pointer capability: a mouse unplugged, a virtual
+        // pointer destroyed) reaches us as a dead proxy without user data.
+        let Some(pointer_data) = pointer.winit_data() else {
+            debug!("Dropping events of a released pointer {}", pointer.id());
+            return;
+        };
+        let seat = pointer_data.seat();
         let seat_state = match self.seats.get(&seat.id()) {
             Some(seat_state) => seat_state,
             None => {
@@ -53,6 +60,13 @@ impl PointerHandler for WinitState {
                 return;
             },
         };
+
+        // bato-native: only the seat's current pointer; an older one that is
+        // still alive (released but its events in flight) is ignored.
+        if themed_pointer.pointer() != pointer {
+            debug!("Dropping events of a stale pointer {}", pointer.id());
+            return;
+        }
 
         let device_id = crate::event::DeviceId(crate::platform_impl::DeviceId::Wayland(DeviceId));
 
@@ -125,11 +139,11 @@ impl PointerHandler for WinitState {
                     window.pointer_entered(Arc::downgrade(themed_pointer));
 
                     // Set the currently focused surface.
-                    let mut inner = pointer.winit_data().data().inner.lock().unwrap();
+                    let mut inner = pointer_data.data().inner.lock().unwrap();
                     inner.surface = Some(window_id);
-                    // bato-native: presses are counted from here (a drag
+                    // bato-native: held buttons are tracked from here (a drag
                     // ended elsewhere never sent their releases).
-                    inner.bato_pressed = 0;
+                    inner.bato_held.clear();
                     drop(inner);
 
                     self.events_sink.push_window_event(
@@ -141,7 +155,7 @@ impl PointerHandler for WinitState {
                     window.pointer_left(Arc::downgrade(themed_pointer));
 
                     // Remove the active surface.
-                    pointer.winit_data().data().inner.lock().unwrap().surface = None;
+                    pointer_data.data().inner.lock().unwrap().surface = None;
 
                     self.events_sink
                         .push_window_event(WindowEvent::CursorLeft { device_id }, window_id);
@@ -155,14 +169,10 @@ impl PointerHandler for WinitState {
                 ref kind @ PointerEventKind::Press { button, serial, .. }
                 | ref kind @ PointerEventKind::Release { button, serial, .. } => {
                     // Update the last button serial.
-                    let mut inner = pointer.winit_data().data().inner.lock().unwrap();
+                    let mut inner = pointer_data.data().inner.lock().unwrap();
                     inner.latest_button_serial = serial;
                     // bato-native: buttons held, for OS drags.
-                    if matches!(kind, PointerEventKind::Press { .. }) {
-                        inner.bato_pressed += 1;
-                    } else {
-                        inner.bato_pressed = inner.bato_pressed.saturating_sub(1);
-                    }
+                    inner.bato_held.set(button, matches!(kind, PointerEventKind::Press { .. }));
                     drop(inner);
 
                     let button = wayland_button_to_winit(button);
@@ -178,7 +188,7 @@ impl PointerHandler for WinitState {
                 },
                 PointerEventKind::Axis { horizontal, vertical, .. } => {
                     // Get the current phase.
-                    let mut pointer_data = pointer.winit_data().data().inner.lock().unwrap();
+                    let mut pointer_data = pointer_data.data().inner.lock().unwrap();
 
                     let has_value120_scroll = horizontal.value120 != 0 || vertical.value120 != 0;
                     let has_discrete_scroll = horizontal.discrete != 0 || vertical.discrete != 0;
@@ -305,7 +315,15 @@ impl WinitPointerData {
 
     /// bato-native: a button is held on [`Self::focused_window`].
     pub fn bato_pressed(&self) -> bool {
-        self.inner.lock().unwrap().bato_pressed > 0
+        !self.inner.lock().unwrap().bato_held.is_empty()
+    }
+
+    /// bato-native: forget the focused window and the buttons held on it
+    /// (the pointer is going away), returning both.
+    pub fn bato_take_focus(&self) -> Option<(WindowId, Vec<u32>)> {
+        let mut inner = self.inner.lock().unwrap();
+        let held = inner.bato_held.take();
+        inner.surface.take().map(|window_id| (window_id, held))
     }
 
     pub fn set_locked_cursor_position(&self, surface_x: f64, surface_y: f64) {
@@ -343,7 +361,7 @@ pub struct WinitPointerDataInner {
     surface: Option<WindowId>,
 
     /// bato-native: buttons held on the focused window (OS drags need one).
-    bato_pressed: u32,
+    bato_held: HeldButtons,
 
     /// Current axis phase.
     phase: TouchPhase,
@@ -368,14 +386,45 @@ impl Default for WinitPointerDataInner {
             locked_pointer: None,
             confined_pointer: None,
             latest_button_serial: 0,
-            bato_pressed: 0,
+            bato_held: HeldButtons::default(),
             phase: TouchPhase::Ended,
         }
     }
 }
 
+/// bato-native: the buttons held on a pointer, as a set of evdev codes, so a
+/// repeated press or a release without its press (events lost to a pointer
+/// that came and went) can't leave it unbalanced.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct HeldButtons(Vec<u32>);
+
+impl HeldButtons {
+    pub fn set(&mut self, button: u32, pressed: bool) {
+        let at = self.0.iter().position(|&b| b == button);
+        match (pressed, at) {
+            (true, None) => self.0.push(button),
+            (false, Some(at)) => {
+                self.0.swap_remove(at);
+            },
+            _ => (),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub fn take(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.0)
+    }
+}
+
 /// Convert the Wayland button into winit.
-fn wayland_button_to_winit(button: u32) -> MouseButton {
+pub(crate) fn wayland_button_to_winit(button: u32) -> MouseButton {
     // These values are coming from <linux/input-event-codes.h>.
     const BTN_LEFT: u32 = 0x110;
     const BTN_RIGHT: u32 = 0x111;
@@ -396,12 +445,15 @@ fn wayland_button_to_winit(button: u32) -> MouseButton {
 }
 
 pub trait WinitPointerDataExt {
-    fn winit_data(&self) -> &PointerData<WinitPointerData>;
+    /// bato-native: `None` for a pointer winit didn't create, or one already
+    /// released (a dead proxy rebuilt for an event queued before the release
+    /// has no user data), never a panic.
+    fn winit_data(&self) -> Option<&PointerData<WinitPointerData>>;
 }
 
 impl WinitPointerDataExt for WlPointer {
-    fn winit_data(&self) -> &PointerData<WinitPointerData> {
-        self.data::<PointerData<WinitPointerData>>().expect("failed to get pointer data.")
+    fn winit_data(&self) -> Option<&PointerData<WinitPointerData>> {
+        self.data::<PointerData<WinitPointerData>>()
     }
 }
 
@@ -466,3 +518,25 @@ impl Dispatch<ZwpConfinedPointerV1, GlobalData, WinitState> for PointerConstrain
 delegate_dispatch!(WinitState: [ZwpPointerConstraintsV1: GlobalData] => PointerConstraintsState);
 delegate_dispatch!(WinitState: [ZwpLockedPointerV1: GlobalData] => PointerConstraintsState);
 delegate_dispatch!(WinitState: [ZwpConfinedPointerV1: GlobalData] => PointerConstraintsState);
+
+#[cfg(test)]
+mod tests {
+    use super::HeldButtons;
+
+    #[test]
+    fn held_buttons_stay_balanced() {
+        let mut held = HeldButtons::default();
+        held.set(0x110, false); // a release whose press went to another pointer
+        assert!(held.is_empty());
+        held.set(0x110, true);
+        held.set(0x110, true); // a repeated press counts once
+        held.set(0x111, true);
+        held.set(0x110, false);
+        assert!(!held.is_empty());
+        held.set(0x111, false);
+        assert!(held.is_empty());
+        held.set(0x112, true);
+        assert_eq!(held.take(), vec![0x112]);
+        assert!(held.is_empty());
+    }
+}

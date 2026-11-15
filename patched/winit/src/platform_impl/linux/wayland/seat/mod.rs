@@ -179,15 +179,22 @@ impl SeatHandler for WinitState {
                 }
 
                 if let Some(pointer) = seat_state.pointer.take() {
-                    let pointer_data = pointer.pointer().winit_data();
-
                     // Remove the cursor from the mapping.
                     let surface_id = pointer.surface().id();
                     let _ = self.pointer_surfaces.remove(&surface_id);
 
-                    // Remove the inner locks/confines before dropping the pointer.
-                    pointer_data.data().unlock_pointer();
-                    pointer_data.data().unconfine_pointer();
+                    if let Some(pointer_data) = pointer.pointer().winit_data() {
+                        // Remove the inner locks/confines before dropping the pointer.
+                        pointer_data.data().unlock_pointer();
+                        pointer_data.data().unconfine_pointer();
+
+                        // bato-native: no leave or release will come for this
+                        // pointer; end its presses and hover on the window it
+                        // was over, so no button stays held there.
+                        if let Some((window_id, held)) = pointer_data.data().bato_take_focus() {
+                            self.bato_pointer_gone(&pointer, window_id, held);
+                        }
+                    }
 
                     if pointer.pointer().version() >= 3 {
                         pointer.pointer().release();
@@ -229,6 +236,33 @@ impl SeatHandler for WinitState {
 }
 
 impl WinitState {
+    /// bato-native: the seat's pointer went away while over `window_id` with
+    /// `held` buttons down: send their releases and `CursorLeft`.
+    fn bato_pointer_gone(
+        &mut self,
+        pointer: &Arc<ThemedPointer<WinitPointerData>>,
+        window_id: crate::platform_impl::wayland::WindowId,
+        held: Vec<u32>,
+    ) {
+        let device_id = crate::event::DeviceId(crate::platform_impl::DeviceId::Wayland(
+            crate::platform_impl::wayland::DeviceId,
+        ));
+        if let Some(window) = self.windows.get_mut().get(&window_id) {
+            window.lock().unwrap().pointer_left(Arc::downgrade(pointer));
+        }
+        for button in held {
+            self.events_sink.push_window_event(
+                WindowEvent::MouseInput {
+                    device_id,
+                    state: crate::event::ElementState::Released,
+                    button: pointer::wayland_button_to_winit(button),
+                },
+                window_id,
+            );
+        }
+        self.events_sink.push_window_event(WindowEvent::CursorLeft { device_id }, window_id);
+    }
+
     fn on_keyboard_destroy(&mut self, seat: &ObjectId) {
         for (window_id, window) in self.windows.get_mut() {
             let mut window = window.lock().unwrap();

@@ -298,7 +298,10 @@ impl<T: 'static> EventLoop<T> {
             //
             // Checking for flush error is essential to perform an exit with error, since
             // once we have a protocol error, we could get stuck retrying...
-            if self.connection.flush().is_err() {
+            if let Err(error) = self.connection.flush() {
+                // bato-native: bato apps install no tracing subscriber, so say
+                // why the loop ends (a protocol error) instead of exiting silently.
+                eprintln!("winit: wayland connection lost: {error}");
                 self.set_exit_code(1);
                 return;
             }
@@ -601,6 +604,8 @@ impl<T: 'static> EventLoop<T> {
 
         self.event_loop.dispatch(timeout, state).map_err(|error| {
             tracing::error!("Error dispatching event loop: {}", error);
+            // bato-native: visible without a tracing subscriber (see above).
+            eprintln!("winit: error dispatching the wayland event loop: {error}");
             error.into()
         })
     }
