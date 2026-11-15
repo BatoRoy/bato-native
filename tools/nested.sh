@@ -112,7 +112,7 @@ EOF
     exec dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket wl-host --width "$2" --height "$3"' \
     _ "$D" "$NW" "$NH" > "$D/host.log" 2>&1 < /dev/null &
   echo $! > "$D/host.pid"
-  for _ in $(seq 100); do [[ -S "$R/wl-host" ]] && break; sleep 0.1; done
+  for _ in $(seq 300); do [[ -S "$R/wl-host" ]] && break; sleep 0.1; done
   [[ -S "$R/wl-host" ]] || { cmd_down; die "kwin_wayland did not start; see $D/host.log"; }
 
   # Hyprland, nested in it.
@@ -120,7 +120,7 @@ EOF
     exec Hyprland --config "$1/hyprland.lua"' _ "$D" > "$D/hypr.log" 2>&1 < /dev/null &
   echo $! > "$D/hypr.pid"
   local sig=""
-  for _ in $(seq 150); do
+  for _ in $(seq 300); do
     sig="$(find "$R/hypr" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | head -1 || true)"
     [[ -n "$sig" && -S "$R/hypr/$sig/.socket.sock" && -S "$R/wayland-1" ]] && break
     sleep 0.1
