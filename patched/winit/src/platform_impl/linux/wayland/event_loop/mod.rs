@@ -152,6 +152,23 @@ impl<T: 'static> EventLoop<T> {
             .map_err(|error| error.error);
         map_err!(result, WaylandError::Calloop)?;
 
+        // bato-native: OS drags (`crate::bato_drag::start`) wake the loop
+        // through this ping and start on its next turn.
+        let (drag_ping, drag_ping_source) = map_err!(
+            calloop::ping::make_ping()
+                .map_err(|error| CalloopError::OtherError(Box::new(error).into())),
+            WaylandError::Calloop
+        )?;
+        let drag_queue_handle = queue_handle.clone();
+        let result = event_loop
+            .handle()
+            .insert_source(drag_ping_source, move |_, _, winit_state: &mut WinitState| {
+                winit_state.bato_drag_requests(&drag_queue_handle);
+            })
+            .map_err(|error| error.error);
+        map_err!(result, WaylandError::Calloop)?;
+        crate::bato_drag::set_waker(Box::new(move || drag_ping.ping()));
+
         let window_target = ActiveEventLoop {
             connection: connection.clone(),
             wayland_dispatcher: wayland_dispatcher.clone(),

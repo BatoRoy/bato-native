@@ -11,6 +11,7 @@
 //! | [`edge_speed`], [`crate::scroller::edge_scroll`] | `autoScroll` | scroll the innermost scroller whose 20 % edge band holds the pointer |
 //! | [`sortable`] | `SortableContext` | a sortable list widget (SortableList, EditorTabs) |
 //! | [`handle`], [`no_drag`] | handle `listeners`, `stopPropagation` | where a press may start a drag |
+//! | [`os_drag`] | Electron's `webContents.startDrag` | drag files out to other apps (and know our own drag when it comes back) |
 //!
 //! The drag state lives in widget state; the app sees only the result
 //! (`on_reorder(from, to)`, or the KanbanBoard's `on_change`). There is no
@@ -26,6 +27,7 @@
 
 mod engine;
 mod list;
+pub mod os_drag;
 mod sort;
 
 pub use engine::{
