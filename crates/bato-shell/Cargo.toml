@@ -63,6 +63,8 @@ x11rb = { version = "0.13", default-features = false, optional = true }
 [dev-dependencies]
 futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
 zbus = { version = "5", default-features = false, features = ["async-io", "p2p"] }
+# Runs iced Tasks in the iced_ext tests (already in the tree through iced).
+iced_runtime = "0.14"
 
 [[example]]
 name = "fileclip"

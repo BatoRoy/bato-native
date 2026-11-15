@@ -58,11 +58,36 @@ pub unsafe fn activate_raw(
     }
 }
 
+/// A fresh activation token for `window`, to hand to a process it starts
+/// ([`crate::desktop::Detached::activation_token`]) so that process's window
+/// may take focus. `None` off Wayland or without xdg-activation.
+///
+/// Call it where the window is borrowed (iced: `window::run`), right after
+/// the user's click or key press: compositors grant focus to tokens from the
+/// focused window.
+pub fn request_token<W>(window: &W) -> Option<String>
+where
+    W: HasWindowHandle + HasDisplayHandle + ?Sized,
+{
+    let (Ok(w), Ok(d)) = (window.window_handle(), window.display_handle()) else {
+        return None;
+    };
+    match (w.as_raw(), d.as_raw()) {
+        (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
+            // SAFETY: both handles are borrowed from `window` for this call.
+            unsafe { wayland::token(w.surface.as_ptr(), d.display.as_ptr()) }
+                .inspect_err(|e| eprintln!("[bato-shell] activation token: {e}"))
+                .ok()
+        }
+        _ => None,
+    }
+}
+
 mod wayland {
     use wayland_backend::sys::client::{Backend, ObjectId};
     use wayland_client::globals::{GlobalListContents, registry_queue_init};
     use wayland_client::protocol::{wl_registry, wl_surface::WlSurface};
-    use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+    use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
     use wayland_protocols::xdg::activation::v1::client::{
         xdg_activation_token_v1::{self, XdgActivationTokenV1},
         xdg_activation_v1::XdgActivationV1,
@@ -112,13 +137,19 @@ mod wayland {
         }
     }
 
+    struct Ctx {
+        conn: Connection,
+        surface: WlSurface,
+        queue: EventQueue<State>,
+        activation: XdgActivationV1,
+    }
+
     /// # Safety
     /// Live `wl_surface` and `wl_display` pointers.
-    pub(super) unsafe fn activate(
+    unsafe fn ctx(
         surface: *mut std::ffi::c_void,
         display: *mut std::ffi::c_void,
-        token: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<Ctx, String> {
         // SAFETY: the caller guarantees a live display; the backend only
         // borrows it (winit keeps owning it).
         let backend = unsafe { Backend::from_foreign_display(display.cast()) };
@@ -127,34 +158,75 @@ mod wayland {
         let id = unsafe { ObjectId::from_ptr(WlSurface::interface(), surface.cast()) }
             .map_err(|e| e.to_string())?;
         let surface = WlSurface::from_id(&conn, id).map_err(|e| e.to_string())?;
-        let (globals, mut queue) =
-            registry_queue_init::<State>(&conn).map_err(|e| e.to_string())?;
-        let qh = queue.handle();
+        let (globals, queue) = registry_queue_init::<State>(&conn).map_err(|e| e.to_string())?;
         let activation: XdgActivationV1 = globals
-            .bind(&qh, 1..=1, ())
+            .bind(&queue.handle(), 1..=1, ())
             .map_err(|_| "the compositor has no xdg_activation_v1".to_string())?;
-        let mut state = State::default();
+        Ok(Ctx {
+            conn,
+            surface,
+            queue,
+            activation,
+        })
+    }
+
+    impl Ctx {
+        /// A token for our own surface.
+        fn token(&mut self) -> Result<String, String> {
+            let mut state = State::default();
+            let req = self
+                .activation
+                .get_activation_token(&self.queue.handle(), ());
+            req.set_surface(&self.surface);
+            req.commit();
+            for _ in 0..4 {
+                self.queue
+                    .roundtrip(&mut state)
+                    .map_err(|e| e.to_string())?;
+                if state.token.is_some() {
+                    break;
+                }
+            }
+            req.destroy();
+            state
+                .token
+                .take()
+                .ok_or_else(|| "the compositor sent no activation token".to_string())
+        }
+
+        fn done(self) -> Result<(), String> {
+            self.activation.destroy();
+            self.conn.flush().map_err(|e| e.to_string())
+        }
+    }
+
+    /// # Safety
+    /// Live `wl_surface` and `wl_display` pointers.
+    pub(super) unsafe fn activate(
+        surface: *mut std::ffi::c_void,
+        display: *mut std::ffi::c_void,
+        token: Option<&str>,
+    ) -> Result<(), String> {
+        // SAFETY: forwarded from the caller.
+        let mut c = unsafe { ctx(surface, display) }?;
         let token = match token.filter(|t| !t.is_empty()) {
             Some(t) => t.to_string(),
-            None => {
-                let req = activation.get_activation_token(&qh, ());
-                req.set_surface(&surface);
-                req.commit();
-                for _ in 0..4 {
-                    queue.roundtrip(&mut state).map_err(|e| e.to_string())?;
-                    if state.token.is_some() {
-                        break;
-                    }
-                }
-                req.destroy();
-                state
-                    .token
-                    .take()
-                    .ok_or("the compositor sent no activation token")?
-            }
+            None => c.token()?,
         };
-        activation.activate(token, &surface);
-        activation.destroy();
-        conn.flush().map_err(|e| e.to_string())
+        c.activation.activate(token, &c.surface);
+        c.done()
+    }
+
+    /// # Safety
+    /// Live `wl_surface` and `wl_display` pointers.
+    pub(super) unsafe fn token(
+        surface: *mut std::ffi::c_void,
+        display: *mut std::ffi::c_void,
+    ) -> Result<String, String> {
+        // SAFETY: forwarded from the caller.
+        let mut c = unsafe { ctx(surface, display) }?;
+        let t = c.token();
+        c.done()?;
+        t
     }
 }

@@ -385,6 +385,13 @@ pub fn activate(id: window::Id, token: Option<String>) -> Task<bool> {
     })
 }
 
+/// A fresh activation token for window `id`, for a process it is about to
+/// start ([`crate::activation::request_token`]); `None` off Wayland.
+#[cfg(feature = "activation")]
+pub fn activation_token(id: window::Id) -> Task<Option<String>> {
+    window::run(id, |w| crate::activation::request_token(w))
+}
+
 /// [`crate::clipboard::copy_files`] on a worker.
 #[cfg(feature = "clipboard")]
 pub fn copy_files(
@@ -422,6 +429,87 @@ mod tests {
         0xcf, 0xc0, 0xc0, 0xf0, 0x9f, 0x01, 0x00, 0x07, 0xff, 0x01, 0xff, 0x01, 0x7f, 0x89, 0xa7,
         0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
+
+    /// Every output of a task, run to the end.
+    fn outputs<T: Send + 'static>(task: Task<T>) -> Vec<T> {
+        use iced_runtime::Action;
+        let Some(stream) = iced_runtime::task::into_stream(task) else {
+            return Vec::new();
+        };
+        futures::executor::block_on(
+            stream
+                .filter_map(|a| async move {
+                    match a {
+                        Action::Output(t) => Some(t),
+                        _ => None,
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn progress_then_result() {
+        let got = outputs(with_progress(|report| {
+            for i in 0..3 {
+                report(i);
+            }
+            "done"
+        }));
+        assert_eq!(
+            got,
+            [
+                Progressed::Progress(0),
+                Progressed::Progress(1),
+                Progressed::Progress(2),
+                Progressed::Done("done")
+            ]
+        );
+    }
+
+    #[test]
+    fn relay_task_reports_and_finishes() {
+        use crate::http::test_server::{Reply, serve};
+        use crate::http::{Cancel, Http, Method, Progress};
+        let data = vec![7u8; 300_000];
+        let (src, _) = serve(vec![Reply::new(200, &data)]);
+        let (dst, rx) = serve(vec![Reply::new(200, r#"{"ok":true}"#)]);
+        let got = outputs(relay(
+            Http::new(&src).call(Method::Get, "/a"),
+            Http::new(&dst).call(Method::Put, "/b"),
+            Cancel::new(),
+        ));
+        assert_eq!(
+            got.first(),
+            Some(&Progressed::Progress(Progress {
+                done: 0,
+                total: Some(300_000)
+            }))
+        );
+        match got.last() {
+            Some(Progressed::Done(Ok(r))) => assert_eq!(r.bytes, 300_000),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(rx.recv().unwrap().body.len(), 300_000);
+    }
+
+    #[test]
+    fn sse_task_streams_events_then_end() {
+        use crate::http::test_server::{Reply, serve};
+        use crate::http::{Http, Method};
+        let (base, _) = serve(vec![Reply::new(
+            200,
+            "data: {\"path\":\"/a\"}\n\nevent: done\ndata: {\"count\":1}\n\n",
+        )]);
+        let got = outputs(sse(Http::new(&base).call(Method::Get, "/api/fs/search")));
+        assert_eq!(got.len(), 3, "{got:?}");
+        assert!(matches!(&got[0], SseItem::Event(e) if e.data == r#"{"path":"/a"}"#));
+        assert!(matches!(&got[1], SseItem::Event(e) if e.event == "done"));
+        assert_eq!(got[2], SseItem::End);
+        let (base, _) = serve(vec![Reply::new(500, r#"{"error":"boom"}"#)]);
+        let got = outputs(sse(Http::new(&base).call(Method::Get, "/x")));
+        assert_eq!(got, [SseItem::Error("boom".into())]);
+    }
 
     #[test]
     fn window_settings_follow_the_identity() {

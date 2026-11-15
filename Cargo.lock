@@ -303,6 +303,7 @@ dependencies = [
  "bato-theme",
  "futures",
  "iced",
+ "iced_runtime",
  "libc",
  "png",
  "raw-window-handle",
