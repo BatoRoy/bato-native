@@ -89,6 +89,12 @@ atom_manager! {
     XdndSelection,
     XdndFinished,
     XdndTypeList,
+    // bato-native: the OS drag source (drag_source.rs).
+    XdndActionCopy,
+    XdndActionMove,
+    TARGETS,
+    TextPlainUtf8: b"text/plain;charset=utf-8",
+    TextPlain: b"text/plain",
     TextUriList: b"text/uri-list",
     None: b"None",
 

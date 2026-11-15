@@ -17,6 +17,7 @@ pub use window::Window;
 pub(crate) use dnd::read_selection_text;
 
 mod dnd;
+mod drag_source;
 mod event_loop;
 mod output;
 mod seat;

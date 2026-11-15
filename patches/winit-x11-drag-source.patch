@@ -1,0 +1,830 @@
+From 16d4e61c72186382f2a4e9ec9561ed55fffffac0 Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sun, 15 Nov 2026 18:00:00 +0100
+Subject: [PATCH] X11: OS drags of files from a window (an XDND source behind
+ bato_drag)
+
+---
+ Cargo.toml                                    |   1 +
+ src/bato_drag.rs                              |   9 +-
+ src/platform_impl/linux/x11/atoms.rs          |   6 +
+ src/platform_impl/linux/x11/drag_source.rs    | 640 ++++++++++++++++++
+ .../linux/x11/event_processor.rs              |  18 +
+ src/platform_impl/linux/x11/mod.rs            |   9 +
+ src/platform_impl/linux/x11/util/cursor.rs    |   6 +
+ 7 files changed, 688 insertions(+), 1 deletion(-)
+ create mode 100644 src/platform_impl/linux/x11/drag_source.rs
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 3255028..0731104 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -286,6 +286,7 @@ x11rb = { version = "0.13.0", default-features = false, features = [
+     "dl-libxcb",
+     "randr",
+     "resource_manager",
++    "shape",
+     "xinput",
+     "xkb",
+ ], optional = true }
+diff --git a/src/bato_drag.rs b/src/bato_drag.rs
+index 3a5a63e..e8e888e 100644
+--- a/src/bato_drag.rs
++++ b/src/bato_drag.rs
+@@ -4,7 +4,7 @@
+ //!
+ //! [`start`] queues a [`Request`] and wakes the event loop, which starts the
+ //! drag on its next turn (Wayland: a `wl_data_source` on the window's data
+-//! device; X11: an XDND source). The drag offers `text/uri-list`, the paths as
++//! device; X11: an XDND source with a pointer grab). The drag offers `text/uri-list`, the paths as
+ //! `text/plain`, and a private marker type that names this process and the
+ //! drag, so the file-drop code can report [`incoming_drag`] when the drag is
+ //! over one of this process's windows.
+@@ -134,6 +134,13 @@ pub(crate) fn set_incoming<'a>(offered: impl IntoIterator<Item = &'a str>) {
+     INCOMING.store(id, Ordering::Relaxed);
+ }
+ 
++/// The drag that entered one of our windows is our own drag `id` (X11: the
++/// source window is ours), or another app's (`None`).
++#[allow(dead_code)]
++pub(crate) fn set_incoming_id(id: Option<u64>) {
++    INCOMING.store(id.unwrap_or(0), Ordering::Relaxed);
++}
++
+ const MARKER: &str = "application/x-bato-drag;pid=";
+ 
+ /// The private type that marks drag `id` of this process.
+diff --git a/src/platform_impl/linux/x11/atoms.rs b/src/platform_impl/linux/x11/atoms.rs
+index c6d96c8..5274a26 100644
+--- a/src/platform_impl/linux/x11/atoms.rs
++++ b/src/platform_impl/linux/x11/atoms.rs
+@@ -89,6 +89,12 @@ atom_manager! {
+     XdndSelection,
+     XdndFinished,
+     XdndTypeList,
++    // bato-native: the OS drag source (drag_source.rs).
++    XdndActionCopy,
++    XdndActionMove,
++    TARGETS,
++    TextPlainUtf8: b"text/plain;charset=utf-8",
++    TextPlain: b"text/plain",
+     TextUriList: b"text/uri-list",
+     None: b"None",
+ 
+diff --git a/src/platform_impl/linux/x11/drag_source.rs b/src/platform_impl/linux/x11/drag_source.rs
+new file mode 100644
+index 0000000..6698d39
+--- /dev/null
++++ b/src/platform_impl/linux/x11/drag_source.rs
+@@ -0,0 +1,640 @@
++//! bato-native: OS drags of files from a window on X11 ([`crate::bato_drag`]):
++//! an XDND (version 5) source.
++//!
++//! The drag takes over the pointer button that is held on the window: an
++//! active XInput2 grab of the client pointer (with a "copy" / "no-drop"
++//! feedback cursor; a core grab would fail against the implicit XI2 grab of
++//! the press) reports the motion and the release. Under the pointer, the innermost window with
++//! `XdndAware` is the target:
++//!
++//! | step | here |
++//! |---|---|
++//! | start | own `XdndSelection`, `XdndTypeList` on the window, grab the pointer |
++//! | motion | `XdndLeave` / `XdndEnter` on a target change, `XdndPosition` (one in flight, the latest kept) |
++//! | `XdndStatus` | accepted? set the cursor; send the kept position |
++//! | release | accepted: `XdndDrop`; else `XdndLeave`, [`Outcome::Cancelled`] |
++//! | Escape (the keyboard is grabbed too) | `XdndLeave`, [`Outcome::Cancelled`] |
++//! | `XdndFinished` | [`Outcome::Dropped`] (the target's action), or cancelled if it refused |
++//! | `SelectionRequest` | `TARGETS`, `text/uri-list`, the paths as text, the marker type |
++//!
++//! The icon is an override-redirect ARGB window with an empty input shape,
++//! so target lookups see through it.
++
++use x11_dl::xinput2;
++use x11_dl::xlib;
++use x11rb::connection::Connection as _;
++use x11rb::protocol::shape::{self, ConnectionExt as _};
++use x11rb::protocol::xinput::{self, ConnectionExt as _};
++use x11rb::protocol::xproto::{self, ConnectionExt as _};
++use x11rb::wrapper::ConnectionExt as _;
++
++use super::atoms::*;
++use super::event_processor::EventProcessor;
++use super::XConnection;
++use crate::bato_drag::{self, Action, Done, Icon, Outcome, Request};
++use crate::window::CursorIcon;
++
++const XDND_VERSION: u32 = 5;
++const XK_ESCAPE: u64 = 0xff1b;
++
++/// The drag this process is the source of, and the data it serves.
++#[derive(Default)]
++pub struct XdndSource {
++    active: Option<Active>,
++    /// What `SelectionRequest`s are answered with (kept after the drag: a
++    /// target may read on `XdndDrop`, after the release ended the grab).
++    data: Option<Data>,
++}
++
++impl std::fmt::Debug for XdndSource {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("XdndSource").field("active", &self.active.is_some()).finish()
++    }
++}
++
++struct Data {
++    window: xproto::Window,
++    types: Vec<xproto::Atom>,
++    marker: xproto::Atom,
++    uri_list: Vec<u8>,
++    text: Vec<u8>,
++}
++
++struct Active {
++    id: u64,
++    window: xproto::Window,
++    done: Done,
++    allow_move: bool,
++    /// The pointer grab is held (until the release or Escape).
++    grabbed: bool,
++    /// The grabbed (master) pointer.
++    device: xinput::DeviceId,
++    cursor_copy: xproto::Cursor,
++    cursor_no: xproto::Cursor,
++    escape: u8,
++    icon: Option<(xproto::Window, (i16, i16))>,
++    target: Option<Target>,
++    /// Dropped: waiting for `XdndFinished`.
++    dropped: bool,
++}
++
++struct Target {
++    window: xproto::Window,
++    version: u32,
++    /// An `XdndPosition` awaits its `XdndStatus`.
++    waiting: bool,
++    /// The latest position while waiting.
++    next: Option<(i16, i16, u32)>,
++    accepted: bool,
++    action: xproto::Atom,
++    /// Released while waiting: drop (or cancel) on the status.
++    release: Option<u32>,
++}
++
++type X11Result<T> = Result<T, Box<dyn std::error::Error>>;
++
++impl EventProcessor {
++    fn bato_xconn(&self) -> std::sync::Arc<XConnection> {
++        Self::window_target(&self.target).xconn.clone()
++    }
++
++    /// Start the drags queued by [`bato_drag::start`].
++    pub(crate) fn bato_drag_requests(&mut self) {
++        let requests = bato_drag::take();
++        if requests.is_empty() {
++            return;
++        }
++        for (id, request) in requests {
++            // A drop still waiting for `XdndFinished` makes way for a new drag.
++            if self.bato_drag.active.as_ref().is_some_and(|a| a.dropped) {
++                let action = self.bato_drag_action();
++                self.bato_drag_end(Outcome::Dropped(action));
++            }
++            if self.bato_drag.active.is_some() {
++                (request.done)(Outcome::Failed("another drag is in progress".into()));
++                continue;
++            }
++            let Request { window, paths, icon, allow_move, done } = request;
++            if let Err(e) = self.bato_drag_start(id, window as xproto::Window, &paths, icon) {
++                tracing::warn!("cannot start the OS drag: {e}");
++                done(Outcome::Failed(e.to_string()));
++                continue;
++            }
++            let active = self.bato_drag.active.as_mut().unwrap();
++            active.done = done;
++            active.allow_move = allow_move;
++            let (x, y) = self.bato_pointer().unwrap_or((0, 0));
++            self.bato_drag_motion(x, y, x11rb::CURRENT_TIME);
++        }
++        let _ = self.bato_xconn().xcb_connection().flush();
++    }
++
++    fn bato_pointer(&self) -> Option<(i16, i16)> {
++        let xconn = self.bato_xconn();
++        let root = Self::window_target(&self.target).root;
++        let reply = xconn.xcb_connection().query_pointer(root).ok()?.reply().ok()?;
++        Some((reply.root_x, reply.root_y))
++    }
++
++    fn bato_drag_start(
++        &mut self,
++        id: u64,
++        window: xproto::Window,
++        paths: &[std::path::PathBuf],
++        icon: Option<Icon>,
++    ) -> X11Result<()> {
++        if self.with_window(window, |_| ()).is_none() {
++            return Err(format!("no window {window:#x}").into());
++        }
++        let xconn = self.bato_xconn();
++        let conn = xconn.xcb_connection();
++        let atoms = xconn.atoms();
++        let root = Self::window_target(&self.target).root;
++
++        let pointer = conn.query_pointer(window)?.reply()?;
++        let held = xproto::KeyButMask::BUTTON1
++            | xproto::KeyButMask::BUTTON2
++            | xproto::KeyButMask::BUTTON3
++            | xproto::KeyButMask::BUTTON4
++            | xproto::KeyButMask::BUTTON5;
++        if !pointer.same_screen || u16::from(pointer.mask & held) == 0 {
++            return Err("no pointer button is held on the window".into());
++        }
++
++        let cursor_copy = xconn.bato_cursor(CursorIcon::Copy) as xproto::Cursor;
++        let cursor_no = xconn.bato_cursor(CursorIcon::NoDrop) as xproto::Cursor;
++        let device = conn.xinput_xi_get_client_pointer(x11rb::NONE)?.reply()?.deviceid;
++        let grab = bato_grab(&xconn, window, device, cursor_no)?;
++        if grab != xproto::GrabStatus::SUCCESS {
++            for c in [cursor_copy, cursor_no] {
++                if c != 0 {
++                    let _ = conn.free_cursor(c);
++                }
++            }
++            return Err(format!("the pointer grab failed: {grab:?}").into());
++        }
++
++        let marker = conn.intern_atom(false, bato_drag::marker(id).as_bytes())?.reply()?.atom;
++        let types = vec![
++            atoms[TextUriList],
++            atoms[TextPlainUtf8],
++            atoms[TextPlain],
++            atoms[UTF8_STRING],
++            marker,
++        ];
++        conn.change_property32(
++            xproto::PropMode::REPLACE,
++            window,
++            atoms[XdndTypeList],
++            xproto::AtomEnum::ATOM,
++            &types,
++        )?;
++        conn.set_selection_owner(window, atoms[XdndSelection], x11rb::CURRENT_TIME)?;
++        // Escape must reach us, not the window under the pointer.
++        let _ = conn.grab_keyboard(
++            false,
++            window,
++            x11rb::CURRENT_TIME,
++            xproto::GrabMode::ASYNC,
++            xproto::GrabMode::ASYNC,
++        );
++        // SAFETY: a plain Xlib query on the open display.
++        let escape = unsafe { (xconn.xlib.XKeysymToKeycode)(xconn.display, XK_ESCAPE as _) };
++        let icon = icon.and_then(|icon| match bato_icon_window(&xconn, root, &icon) {
++            Ok(w) => Some(w),
++            Err(e) => {
++                tracing::warn!("no drag icon: {e}");
++                None
++            },
++        });
++
++        self.bato_drag.data = Some(Data {
++            window,
++            types,
++            marker,
++            uri_list: bato_drag::uri_list(paths).into_bytes(),
++            text: bato_drag::plain_text(paths).into_bytes(),
++        });
++        self.bato_drag.active = Some(Active {
++            id,
++            window,
++            done: Box::new(|_| {}),
++            allow_move: false,
++            grabbed: true,
++            device,
++            cursor_copy,
++            cursor_no,
++            escape,
++            icon,
++            target: None,
++            dropped: false,
++        });
++        Ok(())
++    }
++
++    /// The id of our own drag, if `source` is its window (the file-drop
++    /// target asks on `XdndEnter`).
++    pub(crate) fn bato_own_drag(&self, source: xproto::Window) -> Option<u64> {
++        self.bato_drag.active.as_ref().filter(|a| a.window == source).map(|a| a.id)
++    }
++
++    /// Handle `xev` if it belongs to the drag; `true` if it did.
++    pub(crate) fn bato_drag_event(&mut self, xev: &xlib::XEvent) -> bool {
++        let ty = xev.get_type();
++        if ty == xlib::SelectionRequest {
++            return self.bato_selection_request(xev.as_ref());
++        }
++        let Some(active) = self.bato_drag.active.as_ref() else { return false };
++        let grabbed = active.grabbed;
++        match ty {
++            xlib::KeyPress if grabbed => {
++                let e: &xlib::XKeyEvent = xev.as_ref();
++                if e.keycode as u8 != active.escape {
++                    return false;
++                }
++                self.bato_drag_leave();
++                self.bato_drag_end(Outcome::Cancelled);
++            },
++            xlib::ClientMessage => {
++                let e: &xlib::XClientMessageEvent = xev.as_ref();
++                let xconn = self.bato_xconn();
++                let atoms = xconn.atoms();
++                let from = e.data.get_long(0) as xproto::Window;
++                let target = active.target.as_ref().map(|t| t.window);
++                if e.message_type == atoms[XdndStatus] as _ {
++                    if target == Some(from) {
++                        self.bato_drag_status(&e.data);
++                    }
++                } else if e.message_type == atoms[XdndFinished] as _ {
++                    if target == Some(from) && active.dropped {
++                        self.bato_drag_finished(&e.data);
++                    }
++                } else {
++                    return false;
++                }
++            },
++            _ => return false,
++        }
++        let _ = self.bato_xconn().xcb_connection().flush();
++        true
++    }
++
++    /// Handle an XInput2 pointer event while the drag holds the grab; `true`
++    /// if it did (the app does not see it).
++    pub(crate) fn bato_drag_xi(&mut self, evtype: i32, e: &xinput2::XIDeviceEvent) -> bool {
++        if !self.bato_drag.active.as_ref().is_some_and(|a| a.grabbed) {
++            return false;
++        }
++        match evtype {
++            xinput2::XI_Motion => {
++                self.bato_drag_motion(e.root_x as i16, e.root_y as i16, e.time as u32);
++                let _ = self.bato_xconn().xcb_connection().flush();
++                // Over our own window the app follows the pointer (as the
++                // Wayland drop target reports it), so a drop zone there
++                // knows it is under the drop.
++                let active = self.bato_drag.active.as_ref();
++                return active
++                    .is_some_and(|a| a.target.as_ref().is_none_or(|t| t.window != a.window));
++            },
++            // Wheel "buttons" are not the drag's.
++            xinput2::XI_ButtonRelease if !(4..=7).contains(&e.detail) => {
++                self.bato_drag_release(e.time as u32)
++            },
++            xinput2::XI_ButtonPress | xinput2::XI_ButtonRelease => {},
++            _ => return false,
++        }
++        let _ = self.bato_xconn().xcb_connection().flush();
++        true
++    }
++
++    fn bato_send(&self, to: xproto::Window, message: AtomName, data: [u32; 5]) {
++        let xconn = self.bato_xconn();
++        let _ = xconn.send_client_msg(to, to, xconn.atoms()[message], None, data);
++    }
++
++    fn bato_drag_motion(&mut self, x: i16, y: i16, time: u32) {
++        let xconn = self.bato_xconn();
++        let conn = xconn.xcb_connection();
++        let Some(active) = self.bato_drag.active.as_ref() else { return };
++        if let Some((icon, (hx, hy))) = active.icon {
++            let aux = xproto::ConfigureWindowAux::new()
++                .x(i32::from(x) - i32::from(hx))
++                .y(i32::from(y) - i32::from(hy))
++                .stack_mode(xproto::StackMode::ABOVE);
++            let _ = conn.configure_window(icon, &aux);
++        }
++        let source = active.window;
++        let current = active.target.as_ref().map(|t| t.window);
++        let found = self.bato_find_target(x, y);
++        if found.map(|f| f.0) != current {
++            self.bato_drag_leave();
++            if let Some((window, version)) = found {
++                let data = self.bato_drag.data.as_ref().unwrap();
++                let more = u32::from(data.types.len() > 3);
++                let t = |i: usize| data.types.get(i).copied().unwrap_or(0);
++                self.bato_send(window, XdndEnter, [source, version << 24 | more, t(0), t(1), t(2)]);
++                self.bato_drag.active.as_mut().unwrap().target = Some(Target {
++                    window,
++                    version,
++                    waiting: false,
++                    next: None,
++                    accepted: false,
++                    action: 0,
++                    release: None,
++                });
++            }
++            self.bato_drag_cursor();
++        }
++        let action = self.bato_drag_offered_action();
++        let Some(target) = self.bato_drag.active.as_mut().and_then(|a| a.target.as_mut()) else {
++            return;
++        };
++        if target.waiting {
++            target.next = Some((x, y, time));
++            return;
++        }
++        target.waiting = true;
++        let window = target.window;
++        let at = (x as u16 as u32) << 16 | y as u16 as u32;
++        self.bato_send(window, XdndPosition, [source, 0, at, time, action]);
++    }
++
++    /// The action offered in `XdndPosition`: copy (the source may allow move,
++    /// but asks for copy, so a file manager never deletes the originals by
++    /// default).
++    fn bato_drag_offered_action(&self) -> u32 {
++        self.bato_xconn().atoms()[XdndActionCopy]
++    }
++
++    fn bato_drag_action(&self) -> Action {
++        let xconn = self.bato_xconn();
++        let action =
++            self.bato_drag.active.as_ref().and_then(|a| a.target.as_ref()).map(|t| t.action);
++        if action == Some(xconn.atoms()[XdndActionMove])
++            && self.bato_drag.active.as_ref().is_some_and(|a| a.allow_move)
++        {
++            Action::Move
++        } else {
++            Action::Copy
++        }
++    }
++
++    fn bato_drag_cursor(&self) {
++        let Some(active) = self.bato_drag.active.as_ref().filter(|a| a.grabbed) else { return };
++        let ok = active.target.as_ref().is_some_and(|t| t.accepted);
++        let cursor = if ok { active.cursor_copy } else { active.cursor_no };
++        // Grabbing again changes the grab's cursor.
++        let _ = bato_grab(&self.bato_xconn(), active.window, active.device, cursor);
++    }
++
++    /// The innermost window under the root point that is `XdndAware`, with
++    /// the protocol version to speak.
++    fn bato_find_target(&self, x: i16, y: i16) -> Option<(xproto::Window, u32)> {
++        let xconn = self.bato_xconn();
++        let conn = xconn.xcb_connection();
++        let atoms = xconn.atoms();
++        let root = Self::window_target(&self.target).root;
++        let mut parent = root;
++        for _ in 0..32 {
++            let child = conn.translate_coordinates(root, parent, x, y).ok()?.reply().ok()?.child;
++            if child == x11rb::NONE {
++                return None;
++            }
++            let aware = conn
++                .get_property(false, child, atoms[XdndAware], xproto::AtomEnum::ATOM, 0, 1)
++                .ok()?
++                .reply()
++                .ok()?;
++            if let Some(version) = aware.value32().and_then(|mut v| v.next()) {
++                return (version >= 3).then_some((child, version.min(XDND_VERSION)));
++            }
++            parent = child;
++        }
++        None
++    }
++
++    fn bato_drag_status(&mut self, data: &xlib::ClientMessageData) {
++        let Some(target) = self.bato_drag.active.as_mut().and_then(|a| a.target.as_mut()) else {
++            return;
++        };
++        target.waiting = false;
++        target.accepted = data.get_long(1) & 1 == 1;
++        target.action = data.get_long(4) as xproto::Atom;
++        let release = target.release.take();
++        let next = target.next.take();
++        self.bato_drag_cursor();
++        if let Some(time) = release {
++            self.bato_drag_release(time);
++        } else if let Some((x, y, time)) = next {
++            self.bato_drag_motion(x, y, time);
++        }
++    }
++
++    fn bato_drag_ungrab(&mut self) {
++        let xconn = self.bato_xconn();
++        let conn = xconn.xcb_connection();
++        let Some(active) = self.bato_drag.active.as_mut().filter(|a| a.grabbed) else { return };
++        active.grabbed = false;
++        let _ = conn.xinput_xi_ungrab_device(x11rb::CURRENT_TIME, active.device);
++        let _ = conn.ungrab_keyboard(x11rb::CURRENT_TIME);
++        if let Some((icon, _)) = active.icon.take() {
++            let _ = conn.destroy_window(icon);
++        }
++    }
++
++    fn bato_drag_release(&mut self, time: u32) {
++        self.bato_drag_ungrab();
++        let Some(active) = self.bato_drag.active.as_mut() else { return };
++        let source = active.window;
++        match active.target.as_mut() {
++            Some(target) if target.waiting => {
++                // Decide when the status for the last position arrives.
++                target.release = Some(time);
++            },
++            Some(target) if target.accepted => {
++                let window = target.window;
++                active.dropped = true;
++                self.bato_send(window, XdndDrop, [source, 0, time, 0, 0]);
++            },
++            _ => {
++                self.bato_drag_leave();
++                self.bato_drag_end(Outcome::Cancelled);
++            },
++        }
++    }
++
++    /// Leave the current target, if any.
++    fn bato_drag_leave(&mut self) {
++        let Some(active) = self.bato_drag.active.as_mut() else { return };
++        let source = active.window;
++        if let Some(target) = active.target.take() {
++            self.bato_send(target.window, XdndLeave, [source, 0, 0, 0, 0]);
++        }
++    }
++
++    fn bato_drag_finished(&mut self, data: &xlib::ClientMessageData) {
++        let Some(target) = self.bato_drag.active.as_mut().and_then(|a| a.target.as_mut()) else {
++            return;
++        };
++        let accepted = target.version < 5 || data.get_long(1) & 1 == 1;
++        if target.version >= 5 {
++            target.action = data.get_long(2) as xproto::Atom;
++        }
++        let outcome =
++            if accepted { Outcome::Dropped(self.bato_drag_action()) } else { Outcome::Cancelled };
++        self.bato_drag_end(outcome);
++    }
++
++    fn bato_drag_end(&mut self, outcome: Outcome) {
++        self.bato_drag_ungrab();
++        let Some(active) = self.bato_drag.active.take() else { return };
++        let xconn = self.bato_xconn();
++        let conn = xconn.xcb_connection();
++        for cursor in [active.cursor_copy, active.cursor_no] {
++            if cursor != 0 {
++                let _ = conn.free_cursor(cursor);
++            }
++        }
++        let _ = conn.flush();
++        (active.done)(outcome);
++    }
++
++    fn bato_selection_request(&self, e: &xlib::XSelectionRequestEvent) -> bool {
++        let xconn = self.bato_xconn();
++        let conn = xconn.xcb_connection();
++        let atoms = xconn.atoms();
++        let Some(data) = self.bato_drag.data.as_ref() else { return false };
++        if e.selection != atoms[XdndSelection] as _ || e.owner != data.window as _ {
++            return false;
++        }
++        let requestor = e.requestor as xproto::Window;
++        let target = e.target as xproto::Atom;
++        // Obsolete clients send no property: use the target.
++        let mut property = if e.property == 0 { target } else { e.property as xproto::Atom };
++        let bytes = if target == atoms[TextUriList] {
++            Some(&data.uri_list[..])
++        } else if [atoms[TextPlainUtf8], atoms[TextPlain], atoms[UTF8_STRING]].contains(&target) {
++            Some(&data.text[..])
++        } else if target == data.marker {
++            Some(&[][..])
++        } else {
++            None
++        };
++        let written = if target == atoms[TARGETS] {
++            let mut list = vec![atoms[TARGETS]];
++            list.extend(&data.types);
++            conn.change_property32(
++                xproto::PropMode::REPLACE,
++                requestor,
++                property,
++                xproto::AtomEnum::ATOM,
++                &list,
++            )
++            .is_ok()
++        } else if let Some(bytes) = bytes {
++            conn.change_property8(xproto::PropMode::REPLACE, requestor, property, target, bytes)
++                .is_ok()
++        } else {
++            false
++        };
++        if !written {
++            property = x11rb::NONE;
++        }
++        let notify = xproto::SelectionNotifyEvent {
++            response_type: xproto::SELECTION_NOTIFY_EVENT,
++            sequence: 0,
++            time: e.time as _,
++            requestor,
++            selection: e.selection as _,
++            target,
++            property,
++        };
++        let _ = conn.send_event(false, requestor, xproto::EventMask::NO_EVENT, &notify);
++        let _ = conn.flush();
++        true
++    }
++}
++
++/// Grab the pointer `device` for `window` (motion and buttons), with `cursor`.
++fn bato_grab(
++    xconn: &XConnection,
++    window: xproto::Window,
++    device: xinput::DeviceId,
++    cursor: xproto::Cursor,
++) -> X11Result<xproto::GrabStatus> {
++    let mask = xinput::XIEventMask::MOTION
++        | xinput::XIEventMask::BUTTON_PRESS
++        | xinput::XIEventMask::BUTTON_RELEASE;
++    let reply = xconn
++        .xcb_connection()
++        .xinput_xi_grab_device(
++            window,
++            x11rb::CURRENT_TIME,
++            cursor,
++            device,
++            xproto::GrabMode::ASYNC,
++            xproto::GrabMode::ASYNC,
++            xinput::GrabOwner::NO_OWNER,
++            &[u32::from(mask)],
++        )?
++        .reply()?;
++    Ok(reply.status)
++}
++
++/// An override-redirect ARGB window showing `icon`, input-transparent, and
++/// its hotspot in pixels.
++fn bato_icon_window(
++    xconn: &XConnection,
++    root: xproto::Window,
++    icon: &Icon,
++) -> X11Result<(xproto::Window, (i16, i16))> {
++    let conn = xconn.xcb_connection();
++    let (w, h) = (icon.width as u16, icon.height as u16);
++    if w == 0 || h == 0 || icon.rgba.len() != usize::from(w) * usize::from(h) * 4 {
++        return Err("bad icon".into());
++    }
++    let screen = &conn.setup().roots[xconn.default_screen_index()];
++    let visual = screen
++        .allowed_depths
++        .iter()
++        .filter(|d| d.depth == 32)
++        .flat_map(|d| &d.visuals)
++        .find(|v| v.class == xproto::VisualClass::TRUE_COLOR)
++        .ok_or("no 32-bit visual")?
++        .visual_id;
++    // The image is the window's background, so the server repaints it.
++    let pixmap = conn.generate_id()?;
++    conn.create_pixmap(32, pixmap, root, w, h)?;
++    let gc = conn.generate_id()?;
++    conn.create_gc(gc, pixmap, &xproto::CreateGCAux::new())?;
++    let mut pixels = vec![0u8; icon.rgba.len()];
++    bato_drag::premultiplied_argb(&icon.rgba, &mut pixels);
++    conn.put_image(xproto::ImageFormat::Z_PIXMAP, pixmap, gc, w, h, 0, 0, 0, 32, &pixels)?;
++    let _ = conn.free_gc(gc);
++    let colormap = conn.generate_id()?;
++    conn.create_colormap(xproto::ColormapAlloc::NONE, colormap, root, visual)?;
++    let window = conn.generate_id()?;
++    let aux = xproto::CreateWindowAux::new()
++        .background_pixmap(pixmap)
++        .border_pixel(0)
++        .override_redirect(1)
++        .colormap(colormap);
++    let class = xproto::WindowClass::INPUT_OUTPUT;
++    conn.create_window(32, window, root, -1000, -1000, w, h, 0, class, visual, &aux)?;
++    let _ = conn.free_colormap(colormap);
++    let _ = conn.free_pixmap(pixmap);
++    // No input region: the pointer (and target lookups) go through it.
++    conn.shape_rectangles(
++        shape::SO::SET,
++        shape::SK::INPUT,
++        xproto::ClipOrdering::UNSORTED,
++        window,
++        0,
++        0,
++        &[],
++    )?;
++    conn.map_window(window)?;
++    let scale = icon.scale.max(1) as i32;
++    let hotspot = ((icon.hotspot.0 * scale) as i16, (icon.hotspot.1 * scale) as i16);
++    Ok((window, hotspot))
++}
+diff --git a/src/platform_impl/linux/x11/event_processor.rs b/src/platform_impl/linux/x11/event_processor.rs
+index 3e22865..2e3dea7 100644
+--- a/src/platform_impl/linux/x11/event_processor.rs
++++ b/src/platform_impl/linux/x11/event_processor.rs
+@@ -46,6 +46,8 @@ const KEYCODE_OFFSET: u8 = 8;
+ 
+ pub struct EventProcessor {
+     pub dnd: Dnd,
++    /// bato-native: the OS drag this process is the source of.
++    pub bato_drag: super::drag_source::XdndSource,
+     pub ime_receiver: ImeReceiver,
+     pub ime_event_receiver: ImeEventReceiver,
+     pub randr_event_offset: u8,
+@@ -149,6 +151,11 @@ impl EventProcessor {
+     {
+         let event_type = xev.get_type();
+ 
++        // bato-native: the OS drag source's grab, XDND replies and selection.
++        if self.bato_drag_event(xev) {
++            return;
++        }
++
+         // If we have IME disabled, don't try to `filter_event`, since only IME can consume them
+         // and forward back. This is not desired for e.g. games since some IMEs may delay the input
+         // and game can toggle IME back when e.g. typing into some field where latency won't really
+@@ -214,6 +221,15 @@ impl EventProcessor {
+ 
+                 let evtype = xev.evtype();
+ 
++                // bato-native: the OS drag's pointer grab (drag_source.rs).
++                if matches!(
++                    evtype,
++                    xinput2::XI_Motion | xinput2::XI_ButtonPress | xinput2::XI_ButtonRelease
++                ) && self.bato_drag_xi(evtype, unsafe { xev.as_event() })
++                {
++                    return;
++                }
++
+                 match evtype {
+                     ty @ xinput2::XI_ButtonPress | ty @ xinput2::XI_ButtonRelease => {
+                         let state = if ty == xinput2::XI_ButtonPress {
+@@ -453,6 +469,8 @@ impl EventProcessor {
+ 
+         if xev.message_type == atoms[XdndEnter] as c_ulong {
+             let source_window = xev.data.get_long(0) as xproto::Window;
++            // bato-native: is this our own OS drag (drag_source.rs)?
++            crate::bato_drag::set_incoming_id(self.bato_own_drag(source_window));
+             let flags = xev.data.get_long(1);
+             let version = flags >> 24;
+             self.dnd.version = Some(version);
+diff --git a/src/platform_impl/linux/x11/mod.rs b/src/platform_impl/linux/x11/mod.rs
+index f29b314..44bb9ff 100644
+--- a/src/platform_impl/linux/x11/mod.rs
++++ b/src/platform_impl/linux/x11/mod.rs
+@@ -39,6 +39,7 @@ use crate::window::{CustomCursor as RootCustomCursor, CustomCursorSource, Window
+ mod activation;
+ mod atoms;
+ mod dnd;
++mod drag_source;
+ mod event_processor;
+ pub mod ffi;
+ mod ime;
+@@ -268,6 +269,9 @@ impl<T: 'static> EventLoop<T> {
+                 // No extra handling is required, we just need to wake-up.
+             })
+             .expect("Failed to register the event loop waker source");
++        // bato-native: OS drags (`crate::bato_drag::start`) wake the loop.
++        let drag_waker = waker.clone();
++        crate::bato_drag::set_waker(Box::new(move || drag_waker.ping()));
+ 
+         // Create a channel for handling redraw requests.
+         let (redraw_sender, redraw_channel) = mpsc::channel();
+@@ -314,6 +318,7 @@ impl<T: 'static> EventLoop<T> {
+         let event_processor = EventProcessor {
+             target: root_window_target,
+             dnd,
++            bato_drag: Default::default(),
+             devices: Default::default(),
+             randr_event_offset,
+             ime_receiver,
+@@ -473,6 +478,10 @@ impl<T: 'static> EventLoop<T> {
+             return;
+         }
+ 
++        // bato-native: start the OS drags queued by `bato_drag::start`
++        // (drag_source.rs); its waker is the ping above.
++        self.event_processor.bato_drag_requests();
++
+         // NB: `StartCause::Init` is handled as a special case and doesn't need
+         // to be considered here
+         let cause = match self.control_flow() {
+diff --git a/src/platform_impl/linux/x11/util/cursor.rs b/src/platform_impl/linux/x11/util/cursor.rs
+index 169748d..13a2529 100644
+--- a/src/platform_impl/linux/x11/util/cursor.rs
++++ b/src/platform_impl/linux/x11/util/cursor.rs
+@@ -58,6 +58,12 @@ impl XConnection {
+         }
+     }
+ 
++    /// bato-native: a themed cursor for the OS drag's pointer grab (0 if
++    /// the theme has none); the caller frees it.
++    pub(crate) fn bato_cursor(&self, cursor: CursorIcon) -> ffi::Cursor {
++        self.get_cursor(Some(cursor))
++    }
++
+     fn get_cursor(&self, cursor: Option<CursorIcon>) -> ffi::Cursor {
+         let cursor = match cursor {
+             Some(cursor) => cursor,
+-- 
+2.56.1
+

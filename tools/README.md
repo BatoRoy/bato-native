@@ -162,6 +162,7 @@ and file drops need focus. `nested.sh` starts a separate session that never show
 a windowless `kwin_wayland --virtual` with Hyprland nested in it. It has its own runtime dir, HOME,
 config and D-Bus, so `hyprctl`, `wl-copy` and `grim` reach only the nested sockets.
 `tools/wldriver` (built on first `up`) drives a virtual pointer and does real `text/uri-list` drags.
+It is also a drop target that logs what it receives, for testing drags out of an app.
 
 ```sh
 tools/nested.sh up
@@ -174,6 +175,31 @@ tools/nested.sh drive "drag some.png 900 890"       # a real file drop
 tools/nested.sh shot out.png 486 260 860 100        # region in output pixels
 tools/nested.sh down
 ```
+
+Drags out of the app (`bato_kit::dnd::os_drag`) need a drop target. Start one with `run`; it logs
+the offered types and the dropped data to its `app-N.log`:
+
+```sh
+W=tools/wldriver/target/release/wldriver
+WAIT=1 tools/nested.sh run $W target 1300 80 260 200 120     # Wayland: a layer surface, 120 s
+tools/nested.sh drive "move 642 498" "press" "move 650 490" "move 1430 180" "sleep 300" "release"
+# REFUSE=1 refuses the drop; ACTION=move prefers move.  Other steps: "wheel N" (notches).
+```
+
+X11 runs on a rootful Xwayland inside the session (`xwayland`, display `:87` unless
+`BATO_NESTED_XDISPLAY` is set). Its root covers the output, so coordinates are the same.
+There is no window manager, so X11 windows open at 0,0:
+
+```sh
+tools/nested.sh xwayland                                          # prints DISPLAY=:87
+tools/nested.sh run WAYLAND_DISPLAY= DISPLAY=:87 target/release/gallery   # an empty WAYLAND_DISPLAY picks X11
+WAIT=1 tools/nested.sh run DISPLAY=:87 $W xtarget 1300 80 260 200 120   # an XDND target
+tools/nested.sh drive "exec env DISPLAY=:87 $PWD/$W xkey ff1b"            # Escape through XTEST
+```
+
+- **Keys on X11:** `key` (Hyprland's sendshortcut) doesn't reach the X clients, so use `xkey`.
+- **Presses on X11:** a press right after the pointer has rested is sometimes lost. Move just before pressing,
+  for example `"move 640 496" "sleep 300" "move 642 498" "press"`.
 
 - **Coordinates** are output pixels: 1600×1000 at scale 1 (`NESTED_W`/`NESTED_H`).
 - **Pointer moves:** move the pointer once before the first click, so the window gets `wl_pointer.enter`.

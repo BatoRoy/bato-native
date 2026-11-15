@@ -125,7 +125,12 @@ impl PointerHandler for WinitState {
                     window.pointer_entered(Arc::downgrade(themed_pointer));
 
                     // Set the currently focused surface.
-                    pointer.winit_data().data().inner.lock().unwrap().surface = Some(window_id);
+                    let mut inner = pointer.winit_data().data().inner.lock().unwrap();
+                    inner.surface = Some(window_id);
+                    // bato-native: presses are counted from here (a drag
+                    // ended elsewhere never sent their releases).
+                    inner.bato_pressed = 0;
+                    drop(inner);
 
                     self.events_sink.push_window_event(
                         WindowEvent::CursorMoved { device_id, position },
@@ -150,7 +155,15 @@ impl PointerHandler for WinitState {
                 ref kind @ PointerEventKind::Press { button, serial, .. }
                 | ref kind @ PointerEventKind::Release { button, serial, .. } => {
                     // Update the last button serial.
-                    pointer.winit_data().data().inner.lock().unwrap().latest_button_serial = serial;
+                    let mut inner = pointer.winit_data().data().inner.lock().unwrap();
+                    inner.latest_button_serial = serial;
+                    // bato-native: buttons held, for OS drags.
+                    if matches!(kind, PointerEventKind::Press { .. }) {
+                        inner.bato_pressed += 1;
+                    } else {
+                        inner.bato_pressed = inner.bato_pressed.saturating_sub(1);
+                    }
+                    drop(inner);
 
                     let button = wayland_button_to_winit(button);
                     let state = if matches!(kind, PointerEventKind::Press { .. }) {
@@ -290,6 +303,11 @@ impl WinitPointerData {
         self.inner.lock().unwrap().surface
     }
 
+    /// bato-native: a button is held on [`Self::focused_window`].
+    pub fn bato_pressed(&self) -> bool {
+        self.inner.lock().unwrap().bato_pressed > 0
+    }
+
     pub fn set_locked_cursor_position(&self, surface_x: f64, surface_y: f64) {
         let inner = self.inner.lock().unwrap();
         if let Some(locked_pointer) = inner.locked_pointer.as_ref() {
@@ -324,6 +342,9 @@ pub struct WinitPointerDataInner {
     /// Currently focused window.
     surface: Option<WindowId>,
 
+    /// bato-native: buttons held on the focused window (OS drags need one).
+    bato_pressed: u32,
+
     /// Current axis phase.
     phase: TouchPhase,
 }
@@ -347,6 +368,7 @@ impl Default for WinitPointerDataInner {
             locked_pointer: None,
             confined_pointer: None,
             latest_button_serial: 0,
+            bato_pressed: 0,
             phase: TouchPhase::Ended,
         }
     }

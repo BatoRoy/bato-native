@@ -39,6 +39,7 @@ use crate::window::{CustomCursor as RootCustomCursor, CustomCursorSource, Window
 mod activation;
 mod atoms;
 mod dnd;
+mod drag_source;
 mod event_processor;
 pub mod ffi;
 mod ime;
@@ -268,6 +269,9 @@ impl<T: 'static> EventLoop<T> {
                 // No extra handling is required, we just need to wake-up.
             })
             .expect("Failed to register the event loop waker source");
+        // bato-native: OS drags (`crate::bato_drag::start`) wake the loop.
+        let drag_waker = waker.clone();
+        crate::bato_drag::set_waker(Box::new(move || drag_waker.ping()));
 
         // Create a channel for handling redraw requests.
         let (redraw_sender, redraw_channel) = mpsc::channel();
@@ -314,6 +318,7 @@ impl<T: 'static> EventLoop<T> {
         let event_processor = EventProcessor {
             target: root_window_target,
             dnd,
+            bato_drag: Default::default(),
             devices: Default::default(),
             randr_event_offset,
             ime_receiver,
@@ -472,6 +477,10 @@ impl<T: 'static> EventLoop<T> {
             self.set_exit_code(exit_code);
             return;
         }
+
+        // bato-native: start the OS drags queued by `bato_drag::start`
+        // (drag_source.rs); its waker is the ping above.
+        self.event_processor.bato_drag_requests();
 
         // NB: `StartCause::Init` is handled as a special case and doesn't need
         // to be considered here

@@ -2,7 +2,15 @@
 //! wl_data_device drag of a file (text/uri-list) onto a point.
 //!
 //!   wldriver click X Y [left|middle]
+//!   wldriver wheel N              (N wheel notches down; negative: up)
 //!   wldriver drag PATH X Y        (source: a 100x100 layer surface, bottom-left)
+//!   wldriver target X Y W H SECS  (a drop target: a W×H layer surface at X,Y that
+//!                                  accepts any drag for SECS seconds and logs
+//!                                  the offered types and the dropped data;
+//!                                  ACTION=move prefers move over copy,
+//!                                  REFUSE=1 accepts nothing)
+//!   wldriver xtarget X Y W H SECS (the same, as an X11 XDND target on $DISPLAY)
+//!   wldriver xkey KEYSYM          (an X11 key press + release through XTEST, hex keysym)
 //!
 //! OUT_W/OUT_H: the output size (default 1280x720).
 
@@ -23,6 +31,8 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
 
+mod xtarget;
+
 const BTN_LEFT: u32 = 0x110;
 const BTN_MIDDLE: u32 = 0x112;
 
@@ -33,6 +43,12 @@ struct State {
     press_serial: Option<u32>,
     uri: String,
     done: Option<&'static str>,
+    /// Drop target mode: the target surface, the types of each offer, the
+    /// offer over the target, and whether it was dropped.
+    target: Option<wl_surface::WlSurface>,
+    offered: std::collections::HashMap<u32, Vec<String>>,
+    over: Option<wl_data_offer::WlDataOffer>,
+    dropped: bool,
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
@@ -53,22 +69,95 @@ delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
 delegate_noop!(State: ignore wl_surface::WlSurface);
 delegate_noop!(State: ignore wl_data_device_manager::WlDataDeviceManager);
-delegate_noop!(State: ignore wl_data_offer::WlDataOffer);
+
+impl Dispatch<wl_data_offer::WlDataOffer, ()> for State {
+    fn event(
+        s: &mut Self,
+        offer: &wl_data_offer::WlDataOffer,
+        e: wl_data_offer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use wayland_client::Proxy;
+        match e {
+            wl_data_offer::Event::Offer { mime_type } => s
+                .offered
+                .entry(offer.id().protocol_id())
+                .or_default()
+                .push(mime_type),
+            wl_data_offer::Event::SourceActions { source_actions } if s.target.is_some() => {
+                eprintln!("target: source actions {source_actions:?}")
+            }
+            wl_data_offer::Event::Action { dnd_action } if s.target.is_some() => {
+                eprintln!("target: action {dnd_action:?}")
+            }
+            _ => {}
+        }
+    }
+}
 delegate_noop!(State: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(State: ignore zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1);
 delegate_noop!(State: ignore zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 
 impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
     fn event(
-        _: &mut Self,
+        s: &mut Self,
         _: &wl_data_device::WlDataDevice,
         e: wl_data_device::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_data_device::Event::Enter { .. } | wl_data_device::Event::Leave = e {
-            eprintln!("driver: own data device {e:?}");
+        use wayland_client::Proxy;
+        match e {
+            wl_data_device::Event::Enter {
+                serial,
+                surface,
+                id: Some(offer),
+                ..
+            } if s.target.as_ref() == Some(&surface) => {
+                let types = s
+                    .offered
+                    .get(&offer.id().protocol_id())
+                    .cloned()
+                    .unwrap_or_default();
+                eprintln!("target: enter, offered {types:?}");
+                let refuse = std::env::var_os("REFUSE").is_some();
+                let pick = ["text/uri-list", "text/plain;charset=utf-8", "text/plain"]
+                    .into_iter()
+                    .find(|t| !refuse && types.iter().any(|o| o == t));
+                offer.accept(serial, pick.map(str::to_owned));
+                let preferred = if std::env::var("ACTION").as_deref() == Ok("move") {
+                    wl_data_device_manager::DndAction::Move
+                } else {
+                    wl_data_device_manager::DndAction::Copy
+                };
+                if refuse {
+                    offer.set_actions(
+                        wl_data_device_manager::DndAction::empty(),
+                        wl_data_device_manager::DndAction::empty(),
+                    );
+                } else {
+                    offer.set_actions(
+                        wl_data_device_manager::DndAction::Copy
+                            | wl_data_device_manager::DndAction::Move,
+                        preferred,
+                    );
+                }
+                s.over = Some(offer);
+            }
+            wl_data_device::Event::Leave if s.target.is_some() => {
+                if !s.dropped {
+                    eprintln!("target: leave");
+                    s.over = None;
+                }
+            }
+            wl_data_device::Event::Drop if s.over.is_some() => s.dropped = true,
+            wl_data_device::Event::Enter { .. } | wl_data_device::Event::Leave => {
+                eprintln!("driver: own data device {e:?}");
+            }
+            _ => {}
         }
     }
     event_created_child!(State, wl_data_device::WlDataDevice, [
@@ -159,6 +248,12 @@ fn pump(q: &mut EventQueue<State>, s: &mut State, for_ms: u64) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("xtarget") {
+        return xtarget::run(&args[2..]);
+    }
+    if args.get(1).map(String::as_str) == Some("xkey") {
+        return xtarget::key(&args[2..]);
+    }
     let ow: u32 = std::env::var("OUT_W")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -227,6 +322,21 @@ fn main() {
                 };
                 button(b, args[1] == "press");
                 pump(&mut q, &mut s, 60);
+            }
+            Some("wheel") => {
+                // N notches down (negative: up), one per 40 ms.
+                let n: i32 = args[2].parse().unwrap();
+                for _ in 0..n.abs() {
+                    vp.axis_source(wl_pointer::AxisSource::Wheel);
+                    vp.axis_discrete(
+                        now_ms(t0),
+                        wl_pointer::Axis::VerticalScroll,
+                        15.0 * n.signum() as f64,
+                        n.signum(),
+                    );
+                    vp.frame();
+                    pump(&mut q, &mut s, 40);
+                }
             }
             Some("move") => {
                 let (x, y): (f64, f64) = (args[2].parse().unwrap(), args[3].parse().unwrap());
@@ -341,7 +451,105 @@ fn main() {
                 surface.destroy();
                 q.roundtrip(&mut s).unwrap();
             }
-            _ => eprintln!("usage: wldriver click X Y [middle] | move X Y | drag PATH X Y"),
+            Some("target") => {
+                let n = |i: usize| -> i32 { args[i].parse().unwrap() };
+                let (x, y, w, h, secs) = (n(2), n(3), n(4), n(5), n(6));
+                run_target(&conn, &globals, &mut q, &mut s, &seat, (x, y, w, h), secs as u64);
+            }
+            _ => eprintln!(
+                "usage: wldriver click X Y [middle] | move X Y | drag PATH X Y | target X Y W H SECS"
+            ),
         }
     }
+}
+
+/// A drop target: a `w × h` layer surface at `x, y` (top-left anchored) that
+/// accepts any drag, logs the offered types, and on a drop reads and logs
+/// `text/uri-list` and `text/plain;charset=utf-8`, then finishes the offer.
+fn run_target(
+    conn: &Connection,
+    globals: &wayland_client::globals::GlobalList,
+    q: &mut EventQueue<State>,
+    s: &mut State,
+    seat: &wl_seat::WlSeat,
+    (x, y, w, h): (i32, i32, i32, i32),
+    secs: u64,
+) {
+    use std::io::Read;
+    let qh = q.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let layer: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).unwrap();
+    let ddm: wl_data_device_manager::WlDataDeviceManager = globals.bind(&qh, 3..=3, ()).unwrap();
+    let _dd = ddm.get_data_device(seat, &qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let ls = layer.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "wldriver-target".into(),
+        &qh,
+        (),
+    );
+    ls.set_size(w as u32, h as u32);
+    ls.set_anchor(zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Left);
+    ls.set_margin(y, 0, 0, x);
+    ls.set_exclusive_zone(-1);
+    surface.commit();
+    while s.configured.is_none() {
+        q.blocking_dispatch(s).unwrap();
+    }
+    let path_buf = std::env::var("XDG_RUNTIME_DIR").unwrap() + "/wldriver-target-shm";
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path_buf)
+        .unwrap();
+    std::fs::remove_file(&path_buf).unwrap();
+    // A magenta-ish panel: easy to spot in screenshots.
+    file.write_all(&[0xa0u8, 0x30, 0xc0, 0xff].repeat((w * h) as usize))
+        .unwrap();
+    let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+    let buf = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+    surface.attach(Some(&buf), 0, 0);
+    surface.damage(0, 0, w, h);
+    surface.commit();
+    s.target = Some(surface.clone());
+    eprintln!("target: ready at {x},{y} {w}x{h}");
+    let end = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < end {
+        pump(q, s, 30);
+        if !s.dropped {
+            continue;
+        }
+        s.dropped = false;
+        let Some(offer) = s.over.take() else { continue };
+        use wayland_client::Proxy;
+        let types = s
+            .offered
+            .get(&offer.id().protocol_id())
+            .cloned()
+            .unwrap_or_default();
+        for mime in ["text/uri-list", "text/plain;charset=utf-8"] {
+            if !types.iter().any(|t| t == mime) {
+                continue;
+            }
+            let (mut reader, writer) = std::io::pipe().unwrap();
+            offer.receive(mime.into(), writer.as_fd());
+            drop(writer);
+            conn.flush().unwrap();
+            let mut data = String::new();
+            let _ = reader.read_to_string(&mut data);
+            eprintln!("target: dropped {mime}: {data:?}");
+        }
+        offer.finish();
+        offer.destroy();
+        conn.flush().unwrap();
+        eprintln!("target: finished");
+    }
+    ls.destroy();
+    surface.destroy();
+    let _ = q.roundtrip(s);
 }

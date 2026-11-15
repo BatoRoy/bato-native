@@ -83,9 +83,12 @@ crate iced_winit 0.14.1 7589888c8e951899cc688247a69933bb7a0511f0b4b2e122ac3fcd5d
 # desktop file drops on Wayland (wl_data_device text/uri-list), keypad keys
 # that honour NumLock in key_without_modifiers (X11 and Wayland, xkb), and
 # clipboard reads through the file-drop data device (Hyprland sends the
-# selection only to a client's first wl_data_device; iced_winit reads it).
+# selection only to a client's first wl_data_device; iced_winit reads it),
+# and OS drags of files from a window (bato_drag: a wl_data_source on that
+# same data device; on X11 an XDND source; bato-kit's dnd::os_drag starts them).
 git clone -q --no-checkout "$WINIT_REPO" "$work/winit"
 git -C "$work/winit" -c advice.detachedHead=false checkout -q "$WINIT_REV"
 finish "$work/winit" winit iced-winit-fork-smol-str-0.2.patch winit-wayland-file-drop.patch \
-  winit-xkb-keypad-numlock.patch winit-wayland-selection.patch
+  winit-xkb-keypad-numlock.patch winit-wayland-selection.patch winit-wayland-drag-source.patch \
+  winit-x11-drag-source.patch
 rm -rf "$out/winit/.git"

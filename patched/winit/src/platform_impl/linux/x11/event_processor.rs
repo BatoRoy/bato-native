@@ -46,6 +46,8 @@ const KEYCODE_OFFSET: u8 = 8;
 
 pub struct EventProcessor {
     pub dnd: Dnd,
+    /// bato-native: the OS drag this process is the source of.
+    pub bato_drag: super::drag_source::XdndSource,
     pub ime_receiver: ImeReceiver,
     pub ime_event_receiver: ImeEventReceiver,
     pub randr_event_offset: u8,
@@ -149,6 +151,11 @@ impl EventProcessor {
     {
         let event_type = xev.get_type();
 
+        // bato-native: the OS drag source's grab, XDND replies and selection.
+        if self.bato_drag_event(xev) {
+            return;
+        }
+
         // If we have IME disabled, don't try to `filter_event`, since only IME can consume them
         // and forward back. This is not desired for e.g. games since some IMEs may delay the input
         // and game can toggle IME back when e.g. typing into some field where latency won't really
@@ -213,6 +220,15 @@ impl EventProcessor {
                     };
 
                 let evtype = xev.evtype();
+
+                // bato-native: the OS drag's pointer grab (drag_source.rs).
+                if matches!(
+                    evtype,
+                    xinput2::XI_Motion | xinput2::XI_ButtonPress | xinput2::XI_ButtonRelease
+                ) && self.bato_drag_xi(evtype, unsafe { xev.as_event() })
+                {
+                    return;
+                }
 
                 match evtype {
                     ty @ xinput2::XI_ButtonPress | ty @ xinput2::XI_ButtonRelease => {
@@ -453,6 +469,8 @@ impl EventProcessor {
 
         if xev.message_type == atoms[XdndEnter] as c_ulong {
             let source_window = xev.data.get_long(0) as xproto::Window;
+            // bato-native: is this our own OS drag (drag_source.rs)?
+            crate::bato_drag::set_incoming_id(self.bato_own_drag(source_window));
             let flags = xev.data.get_long(1);
             let version = flags >> 24;
             self.dnd.version = Some(version);

@@ -21,6 +21,8 @@
 #   tools/nested.sh focus [WINDOW]             focus a window
 #   tools/nested.sh shot OUT.png [X Y W H]     screenshot the output, or a region of it
 #   tools/nested.sh exec CMD…                  run any command inside the session (wl-copy, wl-paste, hyprctl …)
+#   tools/nested.sh xwayland                   start a rootful, fullscreen Xwayland in it on
+#                                              :$BATO_NESTED_XDISPLAY (default 87); prints DISPLAY
 #   tools/nested.sh down                       stop everything and delete the session
 #
 # WINDOW is a Hyprland window selector; default class:batopoc-nested, the
@@ -28,9 +30,18 @@
 # ($NESTED_W×$NESTED_H, default 1600×1000, scale 1).
 #
 # drive steps (one argument each):
-#   "move X Y" · "click X Y [middle]" · "press [middle]" · "release [middle]"
+#   "move X Y" · "click X Y [middle]" · "press [middle]" · "release [middle]" · "wheel N"
 #   "sleep MS" · "drag PATH X Y" (a real text/uri-list drag from a source in the
 #   bottom-left corner; once per call) · "shot OUT.png [X Y W H]" · "exec CMD …"
+#
+# Drop targets that log what they receive (start them with `run`, WAIT=1):
+#   run tools/wldriver/target/release/wldriver target X Y W H SECS    Wayland (layer surface)
+#   run DISPLAY=:87 tools/wldriver/target/release/wldriver xtarget X Y W H SECS   X11 (XDND)
+#   REFUSE=1 refuses the drop, ACTION=move prefers move.
+#
+# X11 apps: `xwayland`, then `run WAYLAND_DISPLAY= DISPLAY=:87 BIN` (an empty
+# WAYLAND_DISPLAY makes winit pick X11). Its root covers the output, so
+# coordinates are the same.
 #
 # Example: paste into a text field
 #   tools/nested.sh up
@@ -191,8 +202,25 @@ cmd_shot() {
   echo "$out"
 }
 
+cmd_xwayland() {
+  cmd_check >/dev/null || die "not up (tools/nested.sh up)"
+  local n="${BATO_NESTED_XDISPLAY:-87}"
+  if alive xwayland; then echo "DISPLAY=:$n"; return; fi
+  [[ ! -e "/tmp/.X11-unix/X$n" ]] || die "display :$n is taken; set BATO_NESTED_XDISPLAY"
+  command -v Xwayland >/dev/null || die "missing Xwayland"
+  setsid env -i bash -c 'source "$1/env.sh"
+    export WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE="$(cat "$1/sig")"
+    exec Xwayland ":$2" -fullscreen -geometry "$3" -noreset -nolisten tcp' _ "$D" "$n" "${NW}x${NH}" > "$D/xwayland.log" 2>&1 < /dev/null &
+  echo $! > "$D/xwayland.pid"
+  for _ in $(seq 50); do [[ -S "/tmp/.X11-unix/X$n" ]] && break; sleep 0.1; done
+  [[ -S "/tmp/.X11-unix/X$n" ]] || die "Xwayland did not start; see $D/xwayland.log"
+  sleep 0.5
+  echo "DISPLAY=:$n"
+}
+
 cmd_down() {
   cmd_stop
+  if alive xwayland; then kill "$(cat "$D/xwayland.pid")" 2>/dev/null || true; fi
   local p
   for p in hypr host; do
     if alive "$p"; then
@@ -216,6 +244,7 @@ case "${1:-}" in
   focus) shift; cmd_focus "$@" ;;
   shot) shift; cmd_shot "$@" ;;
   exec) shift; inside "$@" ;;
+  xwayland) cmd_xwayland ;;
   down) cmd_down ;;
-  *) sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

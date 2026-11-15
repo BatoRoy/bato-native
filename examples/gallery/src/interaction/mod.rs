@@ -5,6 +5,7 @@
 pub mod focus;
 pub mod gaps;
 pub mod modals;
+pub mod os_drag;
 pub mod overlay;
 pub mod scroll;
 
@@ -19,6 +20,7 @@ pub struct State {
     pub scroll: scroll::State,
     pub gaps: gaps::State,
     pub modals: modals::State,
+    pub os_drag: os_drag::State,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +30,7 @@ pub enum Msg {
     Scroll(scroll::Msg),
     Gaps(gaps::Msg),
     Modals(modals::Msg),
+    OsDrag(os_drag::Msg),
 }
 
 impl Msg {
@@ -55,6 +58,7 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Scroll(m) => scroll::update(&mut state.scroll, m).map(Msg::Scroll),
         Msg::Gaps(m) => gaps::update(&mut state.gaps, m).map(Msg::Gaps),
         Msg::Modals(m) => modals::update(&mut state.modals, m).map(Msg::Modals),
+        Msg::OsDrag(m) => os_drag::update(&mut state.os_drag, m).map(Msg::OsDrag),
     }
 }
 
@@ -125,6 +129,8 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
             scroll::view(&state.scroll, cx).map(Msg::Scroll),
             vgap(24.0),
             gaps::view(&state.gaps, cx).map(Msg::Gaps),
+            vgap(24.0),
+            os_drag::view(&state.os_drag, cx).map(Msg::OsDrag),
         ],
         wide,
         [48.0, 32.0],

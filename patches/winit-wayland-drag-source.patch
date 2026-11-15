@@ -1,0 +1,688 @@
+From 9cecc8a9d6a8b03d30d545716afe4c48a61edd89 Mon Sep 17 00:00:00 2001
+From: bato <bato@local>
+Date: Sun, 15 Nov 2026 12:00:00 +0100
+Subject: [PATCH] Wayland: OS drags of files from a window (wl_data_source
+ offering text/uri-list, bato_drag)
+
+---
+ src/bato_drag.rs                              | 228 +++++++++++++++
+ src/lib.rs                                    |   3 +
+ src/platform_impl/linux/wayland/dnd.rs        |   6 +-
+ .../linux/wayland/drag_source.rs              | 268 ++++++++++++++++++
+ .../linux/wayland/event_loop/mod.rs           |  17 ++
+ src/platform_impl/linux/wayland/mod.rs        |   1 +
+ .../linux/wayland/seat/pointer/mod.rs         |  26 +-
+ src/platform_impl/linux/wayland/state.rs      |   4 +
+ 8 files changed, 550 insertions(+), 3 deletions(-)
+ create mode 100644 src/bato_drag.rs
+ create mode 100644 src/platform_impl/linux/wayland/drag_source.rs
+
+diff --git a/src/bato_drag.rs b/src/bato_drag.rs
+new file mode 100644
+index 0000000..3a5a63e
+--- /dev/null
++++ b/src/bato_drag.rs
+@@ -0,0 +1,228 @@
++//! bato-native: start an OS drag of files from a window, like Electron's
++//! `webContents.startDrag`, and tell this process's own drag apart when it
++//! comes back as a file drop.
++//!
++//! [`start`] queues a [`Request`] and wakes the event loop, which starts the
++//! drag on its next turn (Wayland: a `wl_data_source` on the window's data
++//! device; X11: an XDND source). The drag offers `text/uri-list`, the paths as
++//! `text/plain`, and a private marker type that names this process and the
++//! drag, so the file-drop code can report [`incoming_drag`] when the drag is
++//! over one of this process's windows.
++//!
++//! The drag must start while a pointer button is held on the window (the
++//! compositor or X server ties it to that press); otherwise it fails at once
++//! with [`Outcome::Failed`].
++
++use std::path::PathBuf;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Mutex, MutexGuard, PoisonError};
++
++/// The drag image: straight-alpha RGBA8, `width × height` pixels.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct Icon {
++    pub rgba: Vec<u8>,
++    pub width: u32,
++    pub height: u32,
++    /// Pixels per logical pixel (the buffer scale on Wayland).
++    pub scale: u32,
++    /// Where the pointer is on the icon, in logical pixels from its top-left.
++    pub hotspot: (i32, i32),
++}
++
++/// What the drop target did with the files.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Action {
++    Copy,
++    Move,
++}
++
++/// How a drag ended.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum Outcome {
++    /// A target took the files.
++    Dropped(Action),
++    /// Dropped nowhere, refused, or cancelled (Esc).
++    Cancelled,
++    /// The drag did not start (no pointer button held, no backend, ...).
++    Failed(String),
++}
++
++/// Called once, on the event loop thread, when the drag ends.
++pub type Done = Box<dyn FnOnce(Outcome) + Send>;
++
++/// A drag to start.
++pub struct Request {
++    /// The window the drag starts from: winit's `WindowId` as `u64` (iced's
++    /// `window::raw_id`).
++    pub window: u64,
++    pub paths: Vec<PathBuf>,
++    pub icon: Option<Icon>,
++    /// Offer "move" besides "copy" (a file manager may then delete the
++    /// originals).
++    pub allow_move: bool,
++    pub done: Done,
++}
++
++impl std::fmt::Debug for Request {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("Request")
++            .field("window", &self.window)
++            .field("paths", &self.paths)
++            .field("icon", &self.icon.as_ref().map(|i| (i.width, i.height, i.scale)))
++            .field("allow_move", &self.allow_move)
++            .finish_non_exhaustive()
++    }
++}
++
++type Waker = Box<dyn Fn() + Send + Sync>;
++
++static QUEUE: Mutex<Vec<(u64, Request)>> = Mutex::new(Vec::new());
++static WAKER: Mutex<Option<Waker>> = Mutex::new(None);
++static NEXT_ID: AtomicU64 = AtomicU64::new(1);
++/// The own drag the latest file hover or drop came from (0: another app's).
++static INCOMING: AtomicU64 = AtomicU64::new(0);
++
++fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
++    m.lock().unwrap_or_else(PoisonError::into_inner)
++}
++
++/// Queue a drag; returns its id (what [`incoming_drag`] reports). Any thread.
++/// Without a running event loop that supports it, `done` gets
++/// [`Outcome::Failed`] right away.
++pub fn start(request: Request) -> u64 {
++    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
++    let waker = lock(&WAKER);
++    match waker.as_ref() {
++        Some(wake) => {
++            lock(&QUEUE).push((id, request));
++            wake();
++        },
++        None => {
++            drop(waker);
++            (request.done)(Outcome::Failed("OS drags are not supported here".into()));
++        },
++    }
++    id
++}
++
++/// The id of this process's own drag (from [`start`]) that the latest
++/// `HoveredFile` / `DroppedFile` came from, or `None` when another app's drag
++/// brought them. Valid from the hover until the next drag enters a window.
++pub fn incoming_drag() -> Option<u64> {
++    match INCOMING.load(Ordering::Relaxed) {
++        0 => None,
++        id => Some(id),
++    }
++}
++
++/// The event loop can start drags: `wake` makes it call [`take`] soon.
++#[allow(dead_code)]
++pub(crate) fn set_waker(wake: Waker) {
++    *lock(&WAKER) = Some(wake);
++}
++
++/// The queued drags.
++#[allow(dead_code)]
++pub(crate) fn take() -> Vec<(u64, Request)> {
++    std::mem::take(&mut *lock(&QUEUE))
++}
++
++/// A drag entered one of our windows; `offered` are its types.
++#[allow(dead_code)]
++pub(crate) fn set_incoming<'a>(offered: impl IntoIterator<Item = &'a str>) {
++    let id = offered.into_iter().find_map(parse_marker).unwrap_or(0);
++    INCOMING.store(id, Ordering::Relaxed);
++}
++
++const MARKER: &str = "application/x-bato-drag;pid=";
++
++/// The private type that marks drag `id` of this process.
++#[allow(dead_code)]
++pub(crate) fn marker(id: u64) -> String {
++    format!("{MARKER}{};id={id}", std::process::id())
++}
++
++/// The drag id of a [`marker`] from this process.
++fn parse_marker(mime: &str) -> Option<u64> {
++    let (pid, id) = mime.strip_prefix(MARKER)?.split_once(";id=")?;
++    (pid.parse::<u32>().ok()? == std::process::id()).then_some(())?;
++    id.parse().ok().filter(|&id| id != 0)
++}
++
++/// `text/uri-list` (RFC 2483) for local paths: `file://` URIs, CRLF after
++/// each, every byte outside RFC 3986 unreserved and `/` percent-encoded.
++pub fn uri_list(paths: &[PathBuf]) -> String {
++    let mut out = String::new();
++    for path in paths {
++        out.push_str("file://");
++        for &b in path_bytes(path).iter() {
++            if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
++                out.push(b as char);
++            } else {
++                out.push_str(&format!("%{b:02X}"));
++            }
++        }
++        out.push_str("\r\n");
++    }
++    out
++}
++
++/// The paths as text, one per line (`text/plain`).
++pub fn plain_text(paths: &[PathBuf]) -> String {
++    paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\n")
++}
++
++#[cfg(unix)]
++fn path_bytes(path: &std::path::Path) -> std::borrow::Cow<'_, [u8]> {
++    use std::os::unix::ffi::OsStrExt;
++    path.as_os_str().as_bytes().into()
++}
++
++#[cfg(not(unix))]
++fn path_bytes(path: &std::path::Path) -> std::borrow::Cow<'_, [u8]> {
++    path.to_string_lossy().into_owned().into_bytes().into()
++}
++
++/// The icon as premultiplied ARGB8888 in native byte order (Wayland `wl_shm`
++/// and X11 32-bit visuals).
++#[allow(dead_code)]
++pub(crate) fn premultiplied_argb(rgba: &[u8], out: &mut [u8]) {
++    for (src, dst) in rgba.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
++        let a = src[3] as u32;
++        let pm = |c: u8| ((c as u32 * a + 127) / 255) as u8;
++        let px = u32::from_be_bytes([src[3], pm(src[0]), pm(src[1]), pm(src[2])]);
++        dst.copy_from_slice(&px.to_ne_bytes());
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn uri_list_round_trips_through_the_drop_parser() {
++        let paths = vec![PathBuf::from("/tmp/a b/ü%#.png"), PathBuf::from("/x")];
++        let list = uri_list(&paths);
++        assert_eq!(list, "file:///tmp/a%20b/%C3%BC%25%23.png\r\nfile:///x\r\n");
++        assert_eq!(crate::bato_uri_list::parse(list.as_bytes(), None), paths);
++    }
++
++    #[test]
++    fn marker_names_this_process_only() {
++        assert_eq!(parse_marker(&marker(7)), Some(7));
++        assert_eq!(parse_marker("application/x-bato-drag;pid=1;id=7"), None);
++        assert_eq!(parse_marker("text/uri-list"), None);
++        set_incoming(["text/uri-list", marker(9).as_str()]);
++        assert_eq!(incoming_drag(), Some(9));
++        set_incoming(["text/uri-list"]);
++        assert_eq!(incoming_drag(), None);
++    }
++
++    #[test]
++    fn premultiplies() {
++        let mut out = [0u8; 8];
++        premultiplied_argb(&[255, 0, 0, 128, 10, 20, 30, 255], &mut out);
++        assert_eq!(u32::from_ne_bytes(out[..4].try_into().unwrap()), 0x8080_0000);
++        assert_eq!(u32::from_ne_bytes(out[4..].try_into().unwrap()), 0xff0a_141e);
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index deeeeea..b701076 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -219,6 +219,9 @@ pub mod bato_uri_list;
+ /// bato-native: NumLock-aware `key_without_modifiers` for keypad keys.
+ #[doc(hidden)]
+ pub mod bato_keypad;
++/// bato-native: OS drags of files from a window (Wayland, X11).
++#[doc(hidden)]
++pub mod bato_drag;
+ pub mod window;
+ 
+ pub mod platform;
+diff --git a/src/platform_impl/linux/wayland/dnd.rs b/src/platform_impl/linux/wayland/dnd.rs
+index c1e83fd..97f53ed 100644
+--- a/src/platform_impl/linux/wayland/dnd.rs
++++ b/src/platform_impl/linux/wayland/dnd.rs
+@@ -189,7 +189,11 @@ impl DataDeviceHandler for WinitState {
+             .and_then(|d| d.parent_surface())
+             .unwrap_or(surface);
+         let window_id = wayland::make_wid(parent);
+-        let files = offer.with_mime_types(|m| m.iter().any(|t| t == URI_LIST));
++        let files = offer.with_mime_types(|m| {
++            // bato-native: whether this is our own OS drag (drag_source.rs).
++            crate::bato_drag::set_incoming(m.iter().map(String::as_str));
++            m.iter().any(|t| t == URI_LIST)
++        });
+         if !files || !self.windows.get_mut().contains_key(&window_id) {
+             offer.accept_mime_type(offer.serial, None);
+             offer.set_actions(DndAction::empty(), DndAction::empty());
+diff --git a/src/platform_impl/linux/wayland/drag_source.rs b/src/platform_impl/linux/wayland/drag_source.rs
+new file mode 100644
+index 0000000..25312fe
+--- /dev/null
++++ b/src/platform_impl/linux/wayland/drag_source.rs
+@@ -0,0 +1,268 @@
++//! bato-native: OS drags of files from a window on Wayland
++//! ([`crate::bato_drag`]).
++//!
++//! A `wl_data_source` offering `text/uri-list`, the paths as `text/plain` and
++//! the bato marker type, started with `wl_data_device.start_drag` on the seat's
++//! one data device (the one file drops and paste use: Hyprland talks only to a
++//! client's first `wl_data_device`), from the window's surface, with the serial
++//! of the button press that holds the implicit grab. The icon is a `wl_shm`
++//! buffer on its own surface.
++//!
++//! | wl_data_source | here |
++//! |---|---|
++//! | `send` | write the data from a thread (never blocks the loop) |
++//! | `action` | remember the chosen action |
++//! | `dnd_drop_performed` | wait for `dnd_finished` (or `cancelled`) |
++//! | `dnd_finished` | [`Outcome::Dropped`] with the last action |
++//! | `cancelled` | [`Outcome::Cancelled`] |
++
++use std::io::Write;
++use std::sync::Weak;
++
++use sctk::compositor::Surface;
++use sctk::data_device_manager::data_source::{DataSourceHandler, DragSource};
++use sctk::data_device_manager::WritePipe;
++use sctk::reexports::client::protocol::wl_data_device_manager::DndAction;
++use sctk::reexports::client::protocol::wl_data_source::WlDataSource;
++use sctk::reexports::client::protocol::wl_shm;
++use sctk::reexports::client::{Connection, Proxy, QueueHandle};
++use sctk::shell::WaylandSurface;
++use sctk::shm::slot::{Buffer, SlotPool};
++use tracing::warn;
++
++use crate::bato_drag::{self, Action, Done, Icon, Outcome, Request};
++use crate::platform_impl::wayland::seat::WinitPointerDataExt;
++use crate::platform_impl::wayland::state::WinitState;
++use crate::platform_impl::wayland::WindowId;
++
++const URI_LIST: &str = "text/uri-list";
++const TEXT: [&str; 3] = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING"];
++
++/// The drag this process is the source of, if any.
++#[derive(Default)]
++pub struct DragSourceState {
++    active: Option<Active>,
++}
++
++impl std::fmt::Debug for DragSourceState {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("DragSourceState").field("active", &self.active.is_some()).finish()
++    }
++}
++
++struct Active {
++    source: DragSource,
++    /// The icon surface, and the pool and buffer behind it.
++    icon: Option<(Surface, SlotPool, Buffer)>,
++    marker: String,
++    uri_list: Vec<u8>,
++    text: Vec<u8>,
++    action: DndAction,
++    done: Done,
++}
++
++impl WinitState {
++    /// Start the drags queued by [`bato_drag::start`].
++    pub fn bato_drag_requests(&mut self, queue_handle: &QueueHandle<Self>) {
++        for (id, request) in bato_drag::take() {
++            if self.drag_source.active.is_some() {
++                (request.done)(Outcome::Failed("another drag is in progress".into()));
++                continue;
++            }
++            if let Err((done, why)) = self.bato_drag_start(queue_handle, id, request) {
++                warn!("cannot start the OS drag: {why}");
++                done(Outcome::Failed(why));
++            }
++        }
++    }
++
++    fn bato_drag_start(
++        &mut self,
++        queue_handle: &QueueHandle<Self>,
++        id: u64,
++        request: Request,
++    ) -> Result<(), (Done, String)> {
++        let Request { window, paths, icon, allow_move, done } = request;
++        macro_rules! fail {
++            ($($why:tt)*) => { return Err((done, format!($($why)*))) };
++        }
++        let Some(manager) = self.data_device_manager.as_ref() else {
++            fail!("no wl_data_device_manager");
++        };
++        let window_id = WindowId::from(window);
++        let Some(window) = self.windows.borrow().get(&window_id).cloned() else {
++            fail!("no window {window:#x}");
++        };
++        let window = window.lock().unwrap();
++        let surface = window.window.wl_surface().clone();
++        // The pointer holding a button on the window: its seat and press serial.
++        let grab = window.pointers.iter().filter_map(Weak::upgrade).find_map(|pointer| {
++            let data = pointer.pointer().winit_data();
++            let winit = data.data();
++            (winit.focused_window() == Some(window_id) && winit.bato_pressed())
++                .then(|| data.latest_button_serial().map(|s| (data.seat().clone(), s)))
++                .flatten()
++        });
++        drop(window);
++        let Some((seat, serial)) = grab else {
++            fail!("no pointer button is held on the window");
++        };
++        let Some(device) = self.seats.get(&seat.id()).and_then(|s| s.data_device.as_ref()) else {
++            fail!("the seat has no data device");
++        };
++
++        let marker = bato_drag::marker(id);
++        let mut mimes = vec![URI_LIST.to_owned()];
++        mimes.extend(TEXT.iter().map(|t| t.to_string()));
++        mimes.push(marker.clone());
++        let actions = if allow_move { DndAction::Copy | DndAction::Move } else { DndAction::Copy };
++        let source = manager.create_drag_and_drop_source(queue_handle, mimes, actions);
++
++        let icon = icon.and_then(|icon| match self.bato_drag_icon(queue_handle, &icon) {
++            Ok(icon) => Some(icon),
++            Err(e) => {
++                warn!("no drag icon: {e}");
++                None
++            },
++        });
++        source.start_drag(device, &surface, icon.as_ref().map(|i| i.0.wl_surface()), serial);
++        if let Some((icon_surface, _, _)) = &icon {
++            // After start_drag gave it the dnd-icon role.
++            icon_surface.wl_surface().commit();
++        }
++        flush(&surface);
++        self.drag_source.active = Some(Active {
++            source,
++            icon,
++            marker,
++            uri_list: bato_drag::uri_list(&paths).into_bytes(),
++            text: bato_drag::plain_text(&paths).into_bytes(),
++            action: DndAction::empty(),
++            done,
++        });
++        Ok(())
++    }
++
++    /// The icon surface (not yet committed), its pool and buffer.
++    fn bato_drag_icon(
++        &self,
++        queue_handle: &QueueHandle<Self>,
++        icon: &Icon,
++    ) -> Result<(Surface, SlotPool, Buffer), String> {
++        let (w, h) = (icon.width as i32, icon.height as i32);
++        if w <= 0 || h <= 0 || icon.rgba.len() != (w * h * 4) as usize {
++            return Err(format!("bad icon: {w}x{h}, {} bytes", icon.rgba.len()));
++        }
++        let mut pool = SlotPool::new((w * h * 4) as usize, &self.shm).map_err(|e| e.to_string())?;
++        let (buffer, canvas) =
++            pool.create_buffer(w, h, w * 4, wl_shm::Format::Argb8888).map_err(|e| e.to_string())?;
++        bato_drag::premultiplied_argb(&icon.rgba, canvas);
++        let surface =
++            Surface::new(&*self.compositor_state, queue_handle).map_err(|e| e.to_string())?;
++        let wl_surface = surface.wl_surface();
++        let scale = icon.scale.max(1) as i32;
++        if wl_surface.version() >= 3 {
++            wl_surface.set_buffer_scale(scale);
++        }
++        buffer.attach_to(wl_surface).map_err(|e| e.to_string())?;
++        // The icon's top-left starts at the pointer; move the hotspot under it.
++        let (hx, hy) = icon.hotspot;
++        if wl_surface.version() >= 5 {
++            wl_surface.offset(-hx, -hy);
++        }
++        if wl_surface.version() >= 4 {
++            wl_surface.damage_buffer(0, 0, w, h);
++        } else {
++            wl_surface.damage(0, 0, w / scale, h / scale);
++        }
++        Ok((surface, pool, buffer))
++    }
++
++    fn bato_drag_end(&mut self, source: &WlDataSource, outcome: impl FnOnce(DndAction) -> Outcome) {
++        let Some(active) = self.drag_source.active.take_if(|a| a.source.inner() == source) else {
++            return;
++        };
++        let outcome = outcome(active.action);
++        // Dropping the DragSource destroys the source; the icon surface goes too.
++        drop(active.source);
++        if let Some((surface, _, _)) = &active.icon {
++            surface.wl_surface().attach(None, 0, 0);
++        }
++        drop(active.icon);
++        (active.done)(outcome);
++    }
++}
++
++fn flush(proxy: &impl Proxy) {
++    if let Some(backend) = proxy.backend().upgrade() {
++        let _ = Connection::from_backend(backend).flush();
++    }
++}
++
++impl DataSourceHandler for WinitState {
++    fn accept_mime(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        _: &WlDataSource,
++        _: Option<String>,
++    ) {
++    }
++
++    fn send_request(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        source: &WlDataSource,
++        mime: String,
++        pipe: WritePipe,
++    ) {
++        let Some(active) = self.drag_source.active.as_ref().filter(|a| a.source.inner() == source)
++        else {
++            return;
++        };
++        let data = if mime == URI_LIST {
++            active.uri_list.clone()
++        } else if TEXT.contains(&mime.as_str()) {
++            active.text.clone()
++        } else if mime == active.marker {
++            Vec::new()
++        } else {
++            return;
++        };
++        // A pipe holds 64 KiB; a reader that is slow (or this very process,
++        // reading its own drop through the loop) must not stall the loop.
++        let _ = std::thread::Builder::new().name("bato-drag-send".into()).spawn(move || {
++            let mut pipe = pipe;
++            if let Err(e) = pipe.write_all(&data) {
++                warn!("sending the dragged {mime} failed: {e}");
++            }
++        });
++    }
++
++    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource) {
++        self.bato_drag_end(source, |_| Outcome::Cancelled);
++    }
++
++    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
++
++    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource) {
++        self.bato_drag_end(source, |action| {
++            Outcome::Dropped(if action == DndAction::Move { Action::Move } else { Action::Copy })
++        });
++    }
++
++    fn action(
++        &mut self,
++        _: &Connection,
++        _: &QueueHandle<Self>,
++        source: &WlDataSource,
++        action: DndAction,
++    ) {
++        if let Some(active) =
++            self.drag_source.active.as_mut().filter(|a| a.source.inner() == source)
++        {
++            active.action = action;
++        }
++    }
++}
+diff --git a/src/platform_impl/linux/wayland/event_loop/mod.rs b/src/platform_impl/linux/wayland/event_loop/mod.rs
+index ba6e51d..92da190 100644
+--- a/src/platform_impl/linux/wayland/event_loop/mod.rs
++++ b/src/platform_impl/linux/wayland/event_loop/mod.rs
+@@ -152,6 +152,23 @@ impl<T: 'static> EventLoop<T> {
+             .map_err(|error| error.error);
+         map_err!(result, WaylandError::Calloop)?;
+ 
++        // bato-native: OS drags (`crate::bato_drag::start`) wake the loop
++        // through this ping and start on its next turn.
++        let (drag_ping, drag_ping_source) = map_err!(
++            calloop::ping::make_ping()
++                .map_err(|error| CalloopError::OtherError(Box::new(error).into())),
++            WaylandError::Calloop
++        )?;
++        let drag_queue_handle = queue_handle.clone();
++        let result = event_loop
++            .handle()
++            .insert_source(drag_ping_source, move |_, _, winit_state: &mut WinitState| {
++                winit_state.bato_drag_requests(&drag_queue_handle);
++            })
++            .map_err(|error| error.error);
++        map_err!(result, WaylandError::Calloop)?;
++        crate::bato_drag::set_waker(Box::new(move || drag_ping.ping()));
++
+         let window_target = ActiveEventLoop {
+             connection: connection.clone(),
+             wayland_dispatcher: wayland_dispatcher.clone(),
+diff --git a/src/platform_impl/linux/wayland/mod.rs b/src/platform_impl/linux/wayland/mod.rs
+index e578f1e..17aba66 100644
+--- a/src/platform_impl/linux/wayland/mod.rs
++++ b/src/platform_impl/linux/wayland/mod.rs
+@@ -17,6 +17,7 @@ pub use window::Window;
+ pub(crate) use dnd::read_selection_text;
+ 
+ mod dnd;
++mod drag_source;
+ mod event_loop;
+ mod output;
+ mod seat;
+diff --git a/src/platform_impl/linux/wayland/seat/pointer/mod.rs b/src/platform_impl/linux/wayland/seat/pointer/mod.rs
+index 0efafcb..1708e94 100644
+--- a/src/platform_impl/linux/wayland/seat/pointer/mod.rs
++++ b/src/platform_impl/linux/wayland/seat/pointer/mod.rs
+@@ -125,7 +125,12 @@ impl PointerHandler for WinitState {
+                     window.pointer_entered(Arc::downgrade(themed_pointer));
+ 
+                     // Set the currently focused surface.
+-                    pointer.winit_data().data().inner.lock().unwrap().surface = Some(window_id);
++                    let mut inner = pointer.winit_data().data().inner.lock().unwrap();
++                    inner.surface = Some(window_id);
++                    // bato-native: presses are counted from here (a drag
++                    // ended elsewhere never sent their releases).
++                    inner.bato_pressed = 0;
++                    drop(inner);
+ 
+                     self.events_sink.push_window_event(
+                         WindowEvent::CursorMoved { device_id, position },
+@@ -150,7 +155,15 @@ impl PointerHandler for WinitState {
+                 ref kind @ PointerEventKind::Press { button, serial, .. }
+                 | ref kind @ PointerEventKind::Release { button, serial, .. } => {
+                     // Update the last button serial.
+-                    pointer.winit_data().data().inner.lock().unwrap().latest_button_serial = serial;
++                    let mut inner = pointer.winit_data().data().inner.lock().unwrap();
++                    inner.latest_button_serial = serial;
++                    // bato-native: buttons held, for OS drags.
++                    if matches!(kind, PointerEventKind::Press { .. }) {
++                        inner.bato_pressed += 1;
++                    } else {
++                        inner.bato_pressed = inner.bato_pressed.saturating_sub(1);
++                    }
++                    drop(inner);
+ 
+                     let button = wayland_button_to_winit(button);
+                     let state = if matches!(kind, PointerEventKind::Press { .. }) {
+@@ -290,6 +303,11 @@ impl WinitPointerData {
+         self.inner.lock().unwrap().surface
+     }
+ 
++    /// bato-native: a button is held on [`Self::focused_window`].
++    pub fn bato_pressed(&self) -> bool {
++        self.inner.lock().unwrap().bato_pressed > 0
++    }
++
+     pub fn set_locked_cursor_position(&self, surface_x: f64, surface_y: f64) {
+         let inner = self.inner.lock().unwrap();
+         if let Some(locked_pointer) = inner.locked_pointer.as_ref() {
+@@ -324,6 +342,9 @@ pub struct WinitPointerDataInner {
+     /// Currently focused window.
+     surface: Option<WindowId>,
+ 
++    /// bato-native: buttons held on the focused window (OS drags need one).
++    bato_pressed: u32,
++
+     /// Current axis phase.
+     phase: TouchPhase,
+ }
+@@ -347,6 +368,7 @@ impl Default for WinitPointerDataInner {
+             locked_pointer: None,
+             confined_pointer: None,
+             latest_button_serial: 0,
++            bato_pressed: 0,
+             phase: TouchPhase::Ended,
+         }
+     }
+diff --git a/src/platform_impl/linux/wayland/state.rs b/src/platform_impl/linux/wayland/state.rs
+index 8267375..baafed7 100644
+--- a/src/platform_impl/linux/wayland/state.rs
++++ b/src/platform_impl/linux/wayland/state.rs
+@@ -122,6 +122,9 @@ pub struct WinitState {
+ 
+     /// bato-native: the file drag in progress.
+     pub dnd: crate::platform_impl::wayland::dnd::DndState,
++
++    /// bato-native: the OS drag this process is the source of.
++    pub drag_source: crate::platform_impl::wayland::drag_source::DragSourceState,
+ }
+ 
+ impl WinitState {
+@@ -206,6 +209,7 @@ impl WinitState {
+             dispatched_events: true,
+             data_device_manager,
+             dnd: Default::default(),
++            drag_source: Default::default(),
+         })
+     }
+ 
+-- 
+2.56.1
+

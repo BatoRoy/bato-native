@@ -189,7 +189,11 @@ impl DataDeviceHandler for WinitState {
             .and_then(|d| d.parent_surface())
             .unwrap_or(surface);
         let window_id = wayland::make_wid(parent);
-        let files = offer.with_mime_types(|m| m.iter().any(|t| t == URI_LIST));
+        let files = offer.with_mime_types(|m| {
+            // bato-native: whether this is our own OS drag (drag_source.rs).
+            crate::bato_drag::set_incoming(m.iter().map(String::as_str));
+            m.iter().any(|t| t == URI_LIST)
+        });
         if !files || !self.windows.get_mut().contains_key(&window_id) {
             offer.accept_mime_type(offer.serial, None);
             offer.set_actions(DndAction::empty(), DndAction::empty());

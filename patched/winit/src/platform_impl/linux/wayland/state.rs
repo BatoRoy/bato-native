@@ -122,6 +122,9 @@ pub struct WinitState {
 
     /// bato-native: the file drag in progress.
     pub dnd: crate::platform_impl::wayland::dnd::DndState,
+
+    /// bato-native: the OS drag this process is the source of.
+    pub drag_source: crate::platform_impl::wayland::drag_source::DragSourceState,
 }
 
 impl WinitState {
@@ -206,6 +209,7 @@ impl WinitState {
             dispatched_events: true,
             data_device_manager,
             dnd: Default::default(),
+            drag_source: Default::default(),
         })
     }
 
