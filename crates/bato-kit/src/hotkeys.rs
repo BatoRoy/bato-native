@@ -28,6 +28,23 @@
 //! // update
 //! Msg::Key(press) => if let Some(m) = self.keys.resolve(&press) { return self.update(m) }
 //! ```
+//!
+//! **Several windows** (`iced::daemon`): every [`KeyPress`] carries the
+//! [`KeyPress::window`] it was typed in (keys only ever go to the focused
+//! window). Give each window its own registry with [`Hotkeys::for_window`]
+//! (it then ignores presses from the others), or check `press.window` in
+//! `update`:
+//!
+//! ```ignore
+//! // the picker window, opened with `let (id, task) = window::open(..)`:
+//! picker_keys: Hotkeys<Msg> = Hotkeys::new().for_window(id).bind("escape", Msg::Cancel),
+//! Subscription::batch([self.keys.subscription(), self.picker_keys.subscription()]).map(Msg::Key)
+//! Msg::Key(press) => self.picker_keys.resolve(&press).or_else(|| self.keys.resolve(&press)),
+//! ```
+//!
+//! [`typing`] is the state of the window that got the last key press (the
+//! [`probe`] of each window updates it before its widgets see the key). The
+//! scroll keys' routing is per window too ([`crate::scroller::keys`]).
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -146,6 +163,8 @@ pub struct KeyPress {
     pub typing: bool,
     /// A widget consumed the press.
     pub captured: bool,
+    /// The window it was typed in (`None`: made up, e.g. [`KeyPress::of`]).
+    pub window: Option<window::Id>,
 }
 
 impl KeyPress {
@@ -156,7 +175,14 @@ impl KeyPress {
             combo,
             typing: false,
             captured: false,
+            window: None,
         })
+    }
+
+    /// The same press, typed in `window`.
+    pub fn in_window(mut self, window: window::Id) -> Self {
+        self.window = Some(window);
+        self
     }
 }
 
@@ -167,7 +193,7 @@ pub fn typing() -> bool {
     TYPING.load(Ordering::Relaxed)
 }
 
-fn on_event(event: Event, status: event::Status, _: window::Id) -> Option<KeyPress> {
+fn on_event(event: Event, status: event::Status, window: window::Id) -> Option<KeyPress> {
     match event {
         Event::Keyboard(keyboard::Event::KeyPressed {
             modified_key,
@@ -177,13 +203,14 @@ fn on_event(event: Event, status: event::Status, _: window::Id) -> Option<KeyPre
             combo,
             typing: typing(),
             captured: status == event::Status::Captured,
+            window: Some(window),
         }),
         _ => None,
     }
 }
 
-/// Every key press in the window (prefer [`Hotkeys::subscription`], which
-/// only reports bound combos).
+/// Every key press in every window, with its [`KeyPress::window`] (prefer
+/// [`Hotkeys::subscription`], which only reports bound combos).
 pub fn listen() -> Subscription<KeyPress> {
     iced::event::listen_with(on_event)
 }
@@ -201,6 +228,7 @@ struct Binding<M> {
 pub struct Hotkeys<M> {
     bindings: Vec<Binding<M>>,
     scopes: Vec<&'static str>,
+    window: Option<window::Id>,
 }
 
 impl<M> Default for Hotkeys<M> {
@@ -208,6 +236,7 @@ impl<M> Default for Hotkeys<M> {
         Self {
             bindings: Vec::new(),
             scopes: Vec::new(),
+            window: None,
         }
     }
 }
@@ -236,6 +265,21 @@ impl<M: Clone> Hotkeys<M> {
             in_inputs: false,
         });
         self
+    }
+
+    /// Only presses typed in `window` resolve (and reach the subscription);
+    /// presses without a window ([`KeyPress::of`]) still do.
+    pub fn for_window(mut self, window: window::Id) -> Self {
+        self.window = Some(window);
+        self
+    }
+
+    /// Does a press typed in `window` concern this registry?
+    pub fn accepts(&self, window: Option<window::Id>) -> bool {
+        match (self.window, window) {
+            (Some(mine), Some(w)) => mine == w,
+            _ => true,
+        }
     }
 
     /// The last binding also fires while typing in a field (and when a
@@ -274,6 +318,9 @@ impl<M: Clone> Hotkeys<M> {
 
     /// The message for `press`, if a live binding matches.
     pub fn resolve(&self, press: &KeyPress) -> Option<M> {
+        if !self.accepts(press.window) {
+            return None;
+        }
         let usable = |b: &&Binding<M>| {
             b.combo == press.combo && (b.in_inputs || (!press.typing && !press.captured))
         };
@@ -301,8 +348,14 @@ impl<M: Clone> Hotkeys<M> {
             return Subscription::none();
         }
         listen()
-            .with(self.combos())
-            .filter_map(|(combos, press)| combos.contains(&press.combo).then_some(press))
+            .with((self.combos(), self.window))
+            .filter_map(|((combos, only), press)| {
+                let here = match (only, press.window) {
+                    (Some(mine), Some(w)) => mine == w,
+                    _ => true,
+                };
+                (here && combos.contains(&press.combo)).then_some(press)
+            })
     }
 }
 
@@ -510,6 +563,20 @@ mod tests {
 
     fn press(s: &str) -> KeyPress {
         KeyPress::of(s).unwrap()
+    }
+
+    #[test]
+    fn a_window_registry_ignores_the_other_windows() {
+        let (browser, picker) = (window::Id::unique(), window::Id::unique());
+        let keys: Hotkeys<u8> = Hotkeys::new().for_window(picker).bind("escape", 1);
+        let global: Hotkeys<u8> = Hotkeys::new().bind("escape", 2);
+        assert_eq!(keys.resolve(&press("escape").in_window(picker)), Some(1));
+        assert_eq!(keys.resolve(&press("escape").in_window(browser)), None);
+        // A made-up press (tests, scripts) has no window: it resolves.
+        assert_eq!(keys.resolve(&press("escape")), Some(1));
+        // An unscoped registry takes every window's presses.
+        assert_eq!(global.resolve(&press("escape").in_window(browser)), Some(2));
+        assert!(keys.accepts(Some(picker)) && !keys.accepts(Some(browser)));
     }
 
     #[test]
