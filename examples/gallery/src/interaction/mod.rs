@@ -104,6 +104,9 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
                 .map(|s| s.map(Msg::Modals))
                 .collect(),
         ),
+        n if n.starts_with("kit11") => {
+            ports::selftest(n).map(|v| v.into_iter().map(|s| s.map(Msg::Ports)).collect())
+        }
         "modals" => Some(
             modals::selftest()
                 .into_iter()

@@ -827,8 +827,23 @@ impl Operation for SelectRange {
         _bounds: Rectangle,
         state: &mut dyn widget::operation::TextInput,
     ) {
-        if id == Some(&self.id) {
+        // iced's text_input reports `text_input` before `focusable`, and
+        // focusing moves the cursor to the end: the focusing pass selects in
+        // a second pass ([`Operation::finish`]).
+        if !self.focus && id == Some(&self.id) {
             state.select_range(self.start, self.end);
+        }
+    }
+    fn finish(&self) -> Outcome<()> {
+        if self.focus {
+            Outcome::Chain(Box::new(SelectRange {
+                id: self.id.clone(),
+                start: self.start,
+                end: self.end,
+                focus: false,
+            }))
+        } else {
+            Outcome::None
         }
     }
 }

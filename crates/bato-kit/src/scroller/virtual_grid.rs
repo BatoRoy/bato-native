@@ -186,7 +186,9 @@ type MeasureKey = (usize, u32, u64);
 struct State {
     measured: Option<(MeasureKey, GridLayout, Rc<Vec<f32>>)>,
     reported: Option<GridLayout>,
-    revealed: Option<usize>,
+    /// The cursor last scrolled to (`None` until the first update: the
+    /// cursor a grid mounts with is not scrolled to).
+    revealed: Option<Option<usize>>,
     inner: Option<Tree>,
 }
 
@@ -275,8 +277,11 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for VirtualGrid<'a, M> {
                 shell.publish(f(grid));
             }
         }
-        if self.cursor != state.revealed {
-            state.revealed = self.cursor;
+        if state.revealed.is_none() {
+            state.revealed = Some(self.cursor);
+        }
+        if Some(self.cursor) != state.revealed {
+            state.revealed = Some(self.cursor);
             if let Some(i) = self.cursor.filter(|i| *i < self.count) {
                 let b = layout.bounds();
                 let r = grid.tile_rect(i, &heights);

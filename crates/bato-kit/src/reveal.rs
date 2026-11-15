@@ -184,11 +184,13 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for RevealGroup<'_, M> {
             viewport,
         );
         let now = Instant::now();
-        // Focus-within: ask the content again only when focus moved.
+        // Focus-within: ask the content again only when focus may have
+        // moved (the focus system's revision: Tab, programmatic focus; any
+        // press: a click focuses or blurs).
         let rev = crate::focus::revision();
         let st = tree.state.downcast_mut::<RevealState>();
         let mut reasons = st.reasons;
-        if st.seen != rev {
+        if st.seen != rev || crate::focus::is_pointer_press(event) {
             st.seen = rev;
             let mut op = crate::focus::FocusedBounds::default();
             self.content

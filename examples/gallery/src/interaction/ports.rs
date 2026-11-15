@@ -9,10 +9,11 @@ use std::time::{Duration, Instant};
 
 use bato_kit::focus::{self, stem_range};
 use bato_kit::iced::widget::{column, row};
-use bato_kit::iced::{ContentFit, Point, Subscription, Task};
+use bato_kit::iced::{ContentFit, Point, Subscription, Task, mouse};
 use bato_kit::icon::Icon;
 use bato_kit::menu::MenuEntry;
 use bato_kit::modal::{Kind, Modal, level, modal_panel};
+use bato_kit::overlay::script::{Step, Target};
 use bato_kit::overlay::{context_menu, dropdown};
 use bato_kit::reveal::{reveal_group, revealed};
 use bato_kit::scroller::{GridLayout, cached_heights, virtual_grid};
@@ -592,6 +593,95 @@ fn grid<'a>(state: &'a State, on: &Ctx, p: &bato_kit::theme::Palette) -> El<'a, 
     ]
     .spacing(12)
     .into()
+}
+
+/// `BATO_SELFTEST=kit11` with `BATO_VIEW=view=interaction&scroll=3430`
+/// (window points at that scroll, 1558×958): thumbnails, the submenu by
+/// pointer and keys, the flip at the right edge, the rename prompt, Select
+/// stem. `kit11-grid` (`scroll=99999`): reveal and the grid cursor.
+pub fn selftest(name: &str) -> Option<Vec<Step<Msg>>> {
+    use bato_kit::iced::keyboard::{Modifiers, key::Named};
+    let at = |x: f32, y: f32| Target::At(Point::new(x, y));
+    let left = mouse::Button::Left;
+    let ms = |n: u64| Step::Wait(Duration::from_millis(n));
+    let key = |k: Named| Step::Key(k, Modifiers::empty());
+    match name {
+        "kit11" => Some(vec![
+            ms(600),
+            Step::Click(at(572.0, 103.0), left),
+            ms(150),
+            Step::Shot("kit11-thumbs-loading"),
+            ms(600),
+            Step::Shot("kit11-thumbs"),
+            // The File dropdown; hover "Open with" past the intent delay.
+            Step::Click(at(528.0, 471.0), left),
+            ms(300),
+            Step::Move(at(600.0, 547.0)),
+            ms(60),
+            Step::Shot("kit11-sub-intent"),
+            ms(300),
+            Step::Shot("kit11-sub-open"),
+            // Keys: into it, down to More, open the nested one.
+            key(Named::ArrowRight),
+            key(Named::ArrowDown),
+            key(Named::ArrowDown),
+            key(Named::ArrowRight),
+            ms(300),
+            Step::Shot("kit11-sub-nested"),
+            key(Named::ArrowLeft),
+            ms(200),
+            Step::Shot("kit11-sub-back"),
+            key(Named::Enter),
+            ms(200),
+            Step::Shot("kit11-sub-picked"),
+            // Right-click near the right edge: the fly-out flips left.
+            Step::Click(at(1270.0, 540.0), mouse::Button::Right),
+            ms(300),
+            Step::Move(at(1330.0, 625.0)),
+            ms(400),
+            Step::Shot("kit11-flip"),
+            key(Named::Escape),
+            ms(200),
+            // Rename: opens on the field, stem selected; typing replaces it.
+            Step::Click(at(551.0, 702.0), left),
+            ms(500),
+            Step::Shot("kit11-rename"),
+            Step::Char('x', Modifiers::empty()),
+            ms(200),
+            Step::Shot("kit11-rename-typed"),
+            key(Named::Escape),
+            ms(400),
+            // Select stem on a field that is already on screen.
+            Step::Click(at(1229.0, 755.0), left),
+            ms(200),
+            Step::Char('y', Modifiers::empty()),
+            ms(200),
+            Step::Shot("kit11-stem"),
+        ]),
+        "kit11-grid" => Some(vec![
+            ms(600),
+            // Reveal: hover a row, then focus its (hidden) edit button and
+            // leave: focus-within keeps the actions shown.
+            Step::Move(at(879.0, 356.0)),
+            ms(300),
+            Step::Shot("kit11-reveal-hover"),
+            Step::Click(at(1234.0, 356.0), left),
+            Step::Move(at(600.0, 0.0)),
+            ms(300),
+            Step::Shot("kit11-reveal-focus"),
+            Step::Click(at(300.0, 600.0), left),
+            ms(300),
+            Step::Shot("kit11-grid-top"),
+            Step::Message(Msg::Jump(1200)),
+            ms(400),
+            Step::Shot("kit11-grid-jump"),
+            Step::Message(Msg::Move(0, 1)),
+            Step::Message(Msg::Move(0, 1)),
+            ms(300),
+            Step::Shot("kit11-grid-down"),
+        ]),
+        _ => None,
+    }
 }
 
 /// BatoBrowse's `nameSegments` break points (after `-_+,~`, after a `.`
