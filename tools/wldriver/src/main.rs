@@ -1,7 +1,8 @@
 //! Test driver for a nested compositor: virtual pointer clicks and a real
 //! wl_data_device drag of a file (text/uri-list) onto a point.
 //!
-//!   wldriver click X Y [left|middle]
+//!   wldriver click X Y [left|middle|right]
+//!   wldriver press|release [left|middle|right]  (at the pointer)
 //!   wldriver wheel N              (N wheel notches down; negative: up)
 //!   wldriver drag PATH X Y        (source: a 100x100 layer surface, bottom-left)
 //!   wldriver target X Y W H SECS  (a drop target: a W×H layer surface at X,Y that
@@ -34,7 +35,17 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 mod xtarget;
 
 const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
+
+/// `left` (default), `middle` or `right`.
+fn button_of(arg: Option<&String>) -> u32 {
+    match arg.map(String::as_str) {
+        Some("middle") => BTN_MIDDLE,
+        Some("right") => BTN_RIGHT,
+        _ => BTN_LEFT,
+    }
+}
 
 #[derive(Default)]
 struct State {
@@ -315,11 +326,7 @@ fn main() {
                 pump(&mut q, &mut s, 50);
             }
             Some("press") | Some("release") => {
-                let b = if args.get(2).map(String::as_str) == Some("middle") {
-                    BTN_MIDDLE
-                } else {
-                    BTN_LEFT
-                };
+                let b = button_of(args.get(2));
                 button(b, args[1] == "press");
                 pump(&mut q, &mut s, 60);
             }
@@ -345,11 +352,7 @@ fn main() {
             }
             Some("click") => {
                 let (x, y): (f64, f64) = (args[2].parse().unwrap(), args[3].parse().unwrap());
-                let b = if args.get(4).map(String::as_str) == Some("middle") {
-                    BTN_MIDDLE
-                } else {
-                    BTN_LEFT
-                };
+                let b = button_of(args.get(4));
                 motion(x, y);
                 pump(&mut q, &mut s, 80);
                 button(b, true);

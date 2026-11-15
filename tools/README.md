@@ -183,7 +183,8 @@ the offered types and the dropped data to its `app-N.log`:
 W=tools/wldriver/target/release/wldriver
 WAIT=1 tools/nested.sh run $W target 1300 80 260 200 120     # Wayland: a layer surface, 120 s
 tools/nested.sh drive "move 642 498" "press" "move 650 490" "move 1430 180" "sleep 300" "release"
-# REFUSE=1 refuses the drop; ACTION=move prefers move.  Other steps: "wheel N" (notches).
+# REFUSE=1 refuses the drop; ACTION=move prefers move.  Other steps: "wheel N" (notches),
+# "click X Y right" (also middle), "press right" / "release right".
 ```
 
 X11 runs on a rootful Xwayland inside the session (`xwayland`, display `:87` unless
