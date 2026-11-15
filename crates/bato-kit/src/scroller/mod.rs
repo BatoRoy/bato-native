@@ -43,6 +43,7 @@
 pub mod chain;
 pub mod geom;
 pub mod touch;
+pub mod virtual_grid;
 pub mod virtual_list;
 
 use std::time::Instant;
@@ -64,6 +65,7 @@ use crate::style::c;
 
 pub use geom::{Align, Axis, BAR, FADE};
 pub use touch::{Axes, Forward, Phase, TouchRouter};
+pub use virtual_grid::{GridLayout, VirtualGrid, cached_heights, virtual_grid};
 pub use virtual_list::{Heights, VirtualList, virtual_list};
 
 use chain::{Kind, Request, Target};
