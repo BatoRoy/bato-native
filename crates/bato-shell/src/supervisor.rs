@@ -30,9 +30,41 @@
 //! exactly what a session-bound child is. An app whose bundled server really
 //! must verify bato-auth identities sets [`Config::strip_env`] to keep it and
 //! sends a Bearer token from the UI.
+//!
+//! **Session secret.** Loopback is not a boundary: any local process (and a
+//! web page that finds the port) can call a server that trusts 127.0.0.1.
+//! So each start makes a random secret, passes it to the server as
+//! `BATO_SESSION_SECRET` ([`ENV_SESSION_SECRET`]) and registers it with
+//! [`crate::http`], which sends it as `X-Bato-Session` with every request
+//! to the bundled URL. A server that knows the convention refuses requests
+//! without it; one that does not ignores both. [`Config::session_secret`]
+//! turns it off.
+//!
+//! **Apps like BatoFetch and BatoBrowse** need more than `--port N`:
+//!
+//! ```no_run
+//! # use bato_shell::{AppIdentity, Settings, backend::SavedUrl, supervisor::*};
+//! # const APP: AppIdentity = AppIdentity::new("BatoBrowse", "batobrowse", "1.0.0");
+//! # let settings = Settings::default();
+//! let cfg = Config {
+//!     // Staged as `app-server` (the template switch), seen as this in `ps`
+//!     // and `/proc/<pid>/comm`.
+//!     process_name: Some("batobrowse-server".into()),
+//!     args: vec!["--data-dir".into(), "/home/me/.config/batobrowse".into()],
+//!     env: vec![("APP_MODE".into(), "bundled".into())],
+//!     // Bundled tools first on the server's PATH.
+//!     path_prepend: vec!["/opt/batofetch/bin".into()],
+//!     health_timeout: std::time::Duration::from_secs(15),
+//!     restart: Restart::OnCrash { max: 3, backoff: std::time::Duration::from_millis(500) },
+//!     // No Server address card: a saved backendUrl must not stop the spawn.
+//!     saved_backend: SavedUrl::Ignore,
+//!     ..Config::default()
+//! };
+//! let server = Supervisor::start_bundled(&APP, &settings, cfg);
+//! ```
 
 use std::io;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -51,6 +83,8 @@ pub const ENV_SERVER_BIN: &str = "APP_SERVER_BIN";
 /// `1`: spawn in a dev build too.
 pub const ENV_SPAWN_SERVER: &str = "APP_SPAWN_SERVER";
 pub const STRIPPED_ENV: [&str; 2] = ["BATO_AUTH_URL", "BATO_AUTH_PUBLIC_URL"];
+/// The per-session secret, in the server's environment.
+pub const ENV_SESSION_SECRET: &str = "BATO_SESSION_SECRET";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Restart {
@@ -77,6 +111,18 @@ pub struct Config {
     pub health_interval: Duration,
     pub stop_grace: Duration,
     pub restart: Restart,
+    /// Run the binary under this name (`argv[0]` and `/proc/<pid>/comm`,
+    /// through a symlink in `$XDG_RUNTIME_DIR`), e.g. `batobrowse-server`
+    /// for a binary staged as `app-server`. `None`: its own name.
+    pub process_name: Option<String>,
+    /// Directories put before the inherited `PATH` (or before a `PATH` in
+    /// [`env`](Self::env)): bundled tools the server shells out to.
+    pub path_prepend: Vec<PathBuf>,
+    /// Pass a random per-session secret and send it with every request to
+    /// the server (see the module docs). On by default.
+    pub session_secret: bool,
+    /// Whether a saved `backendUrl` stops the spawn ([`wanted`]).
+    pub saved_backend: crate::backend::SavedUrl,
 }
 
 impl Default for Config {
@@ -91,6 +137,10 @@ impl Default for Config {
             health_interval: Duration::from_millis(100),
             stop_grace: Duration::from_secs(2),
             restart: Restart::Never,
+            process_name: None,
+            path_prepend: Vec::new(),
+            session_secret: true,
+            saved_backend: crate::backend::SavedUrl::Honor,
         }
     }
 }
@@ -116,7 +166,17 @@ pub enum Event {
 
 /// Should this launch spawn the bundled server?
 pub fn wanted(app: &AppIdentity, settings: &Settings) -> bool {
-    crate::backend::may_spawn_bundled_for(settings)
+    wanted_with(app, settings, crate::backend::SavedUrl::Honor)
+}
+
+/// [`wanted`], with a saved `backendUrl` honoured or ignored
+/// ([`Config::saved_backend`]).
+pub fn wanted_with(
+    app: &AppIdentity,
+    settings: &Settings,
+    saved: crate::backend::SavedUrl,
+) -> bool {
+    crate::backend::may_spawn_bundled_with(settings, saved)
         && (app.is_installed_build()
             || std::env::var_os(ENV_SPAWN_SERVER).is_some_and(|v| v == "1"))
 }
@@ -196,9 +256,58 @@ struct Shared {
     cv: Condvar,
 }
 
+/// A random secret: 32 bytes from the kernel, hex.
+pub fn new_secret() -> String {
+    let mut buf = [0u8; 32];
+    let mut filled = 0;
+    while filled < buf.len() {
+        // SAFETY: writes at most the remaining length into our buffer.
+        let n =
+            unsafe { libc::getrandom(buf[filled..].as_mut_ptr().cast(), buf.len() - filled, 0) };
+        if n > 0 {
+            filled += n as usize;
+        } else if io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            // No getrandom (very old kernel): the device.
+            use std::io::Read;
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| f.read_exact(&mut buf))
+                .expect("no source of randomness");
+            break;
+        }
+    }
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A symlink named `name` to `bin` in a private directory, so the server
+/// runs under that name. Returns (directory, link).
+fn alias(bin: &Path, name: &str, port: u16) -> io::Result<(PathBuf, PathBuf)> {
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("bad process name {name:?}"),
+        ));
+    }
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join(format!("bato-shell-{}-{port}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(&dir)?;
+    let link = dir.join(name);
+    let target = std::fs::canonicalize(bin)?;
+    std::os::unix::fs::symlink(target, &link)?;
+    Ok((dir, link))
+}
+
 /// A running bundled server. Dropping it stops the server.
 pub struct Supervisor {
     url: String,
+    secret: Option<String>,
+    alias_dir: Option<PathBuf>,
     shared: Arc<Shared>,
     events: Option<mpsc::UnboundedReceiver<Event>>,
     monitor: Option<JoinHandle<()>>,
@@ -215,11 +324,11 @@ impl std::fmt::Debug for Supervisor {
 }
 
 impl Supervisor {
-    /// [`wanted`] + [`find_binary`] + [`start`](Self::start). `None` when the
-    /// app should not spawn, has no server, or the spawn failed (logged to
-    /// stderr; the UI shows the backend offline, the suite rule).
+    /// [`wanted_with`] + [`find_binary`] + [`start`](Self::start). `None`
+    /// when the app should not spawn, has no server, or the spawn failed
+    /// (logged to stderr; the UI shows the backend offline, the suite rule).
     pub fn start_bundled(app: &AppIdentity, settings: &Settings, cfg: Config) -> Option<Self> {
-        if !wanted(app, settings) {
+        if !wanted_with(app, settings, cfg.saved_backend) {
             return None;
         }
         let Some(bin) = find_binary(&cfg) else {
@@ -236,9 +345,37 @@ impl Supervisor {
 
     /// Spawn `bin --port N` on a free port and return at once; health is
     /// checked on the supervisor's thread.
-    pub fn start(bin: &Path, cfg: Config) -> io::Result<Self> {
+    pub fn start(bin: &Path, mut cfg: Config) -> io::Result<Self> {
         let port = free_port()?;
         let url = format!("http://127.0.0.1:{port}");
+        let secret = cfg.session_secret.then(new_secret);
+        if let Some(s) = &secret {
+            cfg.env.retain(|(k, _)| k != ENV_SESSION_SECRET);
+            cfg.env.push((ENV_SESSION_SECRET.into(), s.clone()));
+            // Before the spawn: the health check already carries it.
+            crate::http::register_session(&url, s);
+        }
+        let (alias_dir, exec) = match cfg.process_name.clone() {
+            Some(name) => match alias(bin, &name, port) {
+                Ok((dir, link)) => (Some(dir), link),
+                Err(e) => {
+                    if secret.is_some() {
+                        crate::http::unregister_session(&url);
+                    }
+                    return Err(e);
+                }
+            },
+            None => (None, bin.to_path_buf()),
+        };
+        let cleanup = |url: &str, dir: &Option<PathBuf>| {
+            if secret.is_some() {
+                crate::http::unregister_session(url);
+            }
+            if let Some(d) = dir {
+                let _ = std::fs::remove_dir_all(d);
+            }
+        };
+        let bin = exec.as_path();
         let shared = Arc::new(Shared::default());
         let (tx, rx) = mpsc::unbounded();
         let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
@@ -254,6 +391,8 @@ impl Supervisor {
         match started_rx.recv() {
             Ok(Ok(())) => Ok(Self {
                 url,
+                secret,
+                alias_dir,
                 shared,
                 events: Some(rx),
                 monitor: Some(monitor),
@@ -261,15 +400,26 @@ impl Supervisor {
             }),
             Ok(Err(e)) => {
                 let _ = monitor.join();
+                cleanup(&url, &alias_dir);
                 Err(e)
             }
-            Err(_) => Err(io::Error::other("supervisor thread ended before spawning")),
+            Err(_) => {
+                cleanup(&url, &alias_dir);
+                Err(io::Error::other("supervisor thread ended before spawning"))
+            }
         }
     }
 
     /// `http://127.0.0.1:<port>`, valid from the start (restarts keep the port).
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// The per-session secret the server got as `BATO_SESSION_SECRET`
+    /// (`None` with [`Config::session_secret`] off). `Http` sends it by
+    /// itself; this is for anything else that talks to the server.
+    pub fn session_secret(&self) -> Option<&str> {
+        self.secret.as_deref()
     }
 
     /// The running child's pid.
@@ -325,6 +475,12 @@ impl Supervisor {
             drop(s);
         }
         let _ = monitor.join();
+        if self.secret.is_some() {
+            crate::http::unregister_session(&self.url);
+        }
+        if let Some(d) = self.alias_dir.take() {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 }
 
@@ -346,6 +502,9 @@ fn signal_group(pid: i32, sig: i32) {
 
 pub(crate) fn command(bin: &Path, port: u16, cfg: &Config) -> Command {
     let mut cmd = Command::new(bin);
+    if let Some(name) = &cfg.process_name {
+        cmd.arg0(name);
+    }
     cmd.arg("--port")
         .arg(port.to_string())
         .args(&cfg.args)
@@ -354,6 +513,22 @@ pub(crate) fn command(bin: &Path, port: u16, cfg: &Config) -> Command {
         cmd.env_remove(k);
     }
     cmd.envs(cfg.env.iter().map(|(k, v)| (k, v)));
+    if !cfg.path_prepend.is_empty() {
+        let base = cfg
+            .env
+            .iter()
+            .rev()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| std::ffi::OsString::from(v))
+            .or_else(|| std::env::var_os("PATH"));
+        let mut parts = cfg.path_prepend.clone();
+        if let Some(b) = base {
+            parts.extend(std::env::split_paths(&b));
+        }
+        if let Ok(path) = std::env::join_paths(parts) {
+            cmd.env("PATH", path);
+        }
+    }
     cmd.process_group(0);
     let parent = std::process::id() as libc::pid_t;
     // SAFETY: only async-signal-safe calls between fork and exec.
@@ -721,6 +896,161 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
             "no third restart"
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A fake server that knows the session-secret convention: every route
+    /// but `/api/health` wants `X-Bato-Session` = `$BATO_SESSION_SECRET`.
+    const SECRET_SERVER: &str = r#"#!/usr/bin/env python3
+import http.server, os, sys
+port = int(sys.argv[sys.argv.index("--port") + 1])
+secret = os.environ.get("BATO_SESSION_SECRET", "")
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = bool(secret) and self.headers.get("X-Bato-Session") == secret
+        if self.path == "/api/health":
+            ok = True
+        b = b'{"ok":true}' if ok else b'{"error":"session secret required"}'
+        self.send_response(200 if ok else 401)
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+    def log_message(self, *a):
+        pass
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+"#;
+
+    #[test]
+    fn session_secret_reaches_the_server_and_only_our_requests() {
+        if !has_python() {
+            eprintln!("skipped: no python3 for the fake server");
+            return;
+        }
+        let dir = tmp("secret");
+        let bin = script(&dir, "app-server", SECRET_SERVER);
+        let cfg = Config {
+            health_timeout: Duration::from_secs(30),
+            ..Config::default()
+        };
+        let sup = Supervisor::start(&bin, cfg).unwrap();
+        assert!(sup.wait_healthy(Duration::from_secs(30)));
+        let secret = sup.session_secret().unwrap().to_string();
+        assert_eq!(secret.len(), 64);
+        // Any Http to the bundled URL carries it…
+        let v: serde_json::Value = crate::http::Http::new(sup.url()).get("/api/files").unwrap();
+        assert_eq!(v["ok"], true);
+        // …a caller without it is refused.
+        let raw = {
+            use std::io::{Read, Write};
+            let mut s =
+                std::net::TcpStream::connect(sup.url().trim_start_matches("http://")).unwrap();
+            write!(s, "GET /api/files HTTP/1.0\r\nHost: x\r\n\r\n").unwrap();
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+            out
+        };
+        assert!(raw.starts_with("HTTP/1.0 401"), "{raw}");
+        let url = sup.url().to_string();
+        drop(sup);
+        assert_eq!(crate::http::session_for(&url), None, "unregistered on stop");
+        // Off: no secret, and the server refuses (it was never told one).
+        let cfg = Config {
+            health_timeout: Duration::from_secs(30),
+            session_secret: false,
+            ..Config::default()
+        };
+        let sup = Supervisor::start(&bin, cfg).unwrap();
+        assert!(sup.wait_healthy(Duration::from_secs(30)));
+        assert_eq!(sup.session_secret(), None);
+        assert!(
+            crate::http::Http::new(sup.url())
+                .get::<serde_json::Value>("/api/files")
+                .is_err()
+        );
+        drop(sup);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn runs_under_its_process_name() {
+        let dir = tmp("alias");
+        let bin = script(
+            &dir,
+            "app-server",
+            "#!/bin/sh\nwhile :; do sleep 0.1; done\n",
+        );
+        let cfg = Config {
+            health_timeout: Duration::from_millis(100),
+            process_name: Some("batobrowse-server".into()),
+            ..Config::default()
+        };
+        let sup = Supervisor::start(&bin, cfg).unwrap();
+        let pid = sup.pid().unwrap();
+        // The kernel names the process after the path it executed (the
+        // link), truncated to 15 bytes.
+        let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+        let alias_dir = sup.alias_dir.clone().unwrap();
+        assert!(alias_dir.join("batobrowse-server").exists());
+        drop(sup);
+        assert!(
+            !alias_dir.exists(),
+            "the alias directory is removed on stop"
+        );
+        assert_eq!(comm.trim(), "batobrowse-serv");
+        assert!(
+            Supervisor::start(
+                &bin,
+                Config {
+                    process_name: Some("../x".into()),
+                    ..Config::default()
+                }
+            )
+            .is_err()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn path_prepend_and_arg0() {
+        let cfg = Config {
+            process_name: Some("batobrowse-server".into()),
+            path_prepend: vec!["/opt/tools".into(), "/opt/more".into()],
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            ..Config::default()
+        };
+        let cmd = command(Path::new("/x/app-server"), 1, &cfg);
+        let path = cmd
+            .get_envs()
+            .filter(|(k, _)| *k == "PATH")
+            .filter_map(|(_, v)| v)
+            .last()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(path, "/opt/tools:/opt/more:/usr/bin:/bin");
+        assert_eq!(cmd.get_program(), "/x/app-server");
+        // Without an explicit PATH, the inherited one follows the prepends.
+        let cfg = Config {
+            path_prepend: vec!["/opt/tools".into()],
+            ..Config::default()
+        };
+        let cmd = command(Path::new("/x/app-server"), 1, &cfg);
+        let path = cmd
+            .get_envs()
+            .find(|(k, _)| *k == "PATH")
+            .and_then(|(_, v)| v)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(path.starts_with("/opt/tools"), "{path}");
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        assert!(path.ends_with(&inherited), "{path}");
+    }
+
+    #[test]
+    fn secrets_are_random_hex() {
+        let (a, b) = (new_secret(), new_secret());
+        assert_ne!(a, b);
+        assert!(a.len() == 64 && a.bytes().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]

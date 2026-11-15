@@ -303,12 +303,18 @@ dependencies = [
  "bato-theme",
  "futures",
  "iced",
+ "iced_runtime",
  "libc",
  "png",
  "raw-window-handle",
  "serde",
  "serde_json",
  "ureq",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "x11rb",
  "zbus",
 ]
 
