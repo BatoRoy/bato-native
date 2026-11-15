@@ -162,7 +162,12 @@ pub enum Target {
 pub(crate) enum Request {
     /// Focus the first tab stop (or `initial`) inside scope `scope`,
     /// remembering what had focus.
-    Autofocus { scope: u64, initial: Option<Id> },
+    Autofocus {
+        scope: u64,
+        initial: Option<Id>,
+        /// Then select this cursor range of `initial` (a text input).
+        select: Option<(usize, usize)>,
+    },
     /// Give focus back.
     Restore(Target),
     /// Focus a target (self-test, programmatic).
@@ -745,6 +750,87 @@ impl Operation for BlurAll {
 /// scrollers bring it into view ([`revision`]).
 pub fn focus<M: Send + 'static>(id: impl Into<Id>) -> Task<M> {
     widget::operate(FocusId(id.into())).discard()
+}
+
+/// React's rename preselection (`selectStem`): the stem before the last
+/// `.` when that dot is not the first character (`notes.txt` → `notes`,
+/// `archive.tar.gz` → `archive.tar`), else the whole name (`.bashrc`,
+/// `Makefile`). A byte range of `name`.
+pub fn stem_range(name: &str) -> std::ops::Range<usize> {
+    match name.rfind('.') {
+        Some(dot) if dot > 0 => 0..dot,
+        _ => 0..name.len(),
+    }
+}
+
+/// A byte range of `value` as iced `text_input` cursor positions (it
+/// counts graphemes). Ends inside a character round down.
+pub fn grapheme_range(value: &str, bytes: std::ops::Range<usize>) -> (usize, usize) {
+    use unicode_segmentation::UnicodeSegmentation;
+    let at = |b: usize| {
+        let mut b = b.min(value.len());
+        while !value.is_char_boundary(b) {
+            b -= 1;
+        }
+        value[..b].graphemes(true).count()
+    };
+    let (a, b) = (at(bytes.start), at(bytes.end));
+    (a.min(b), a.max(b))
+}
+
+/// Focus the text input `id` (whose text is `value`) and select the byte
+/// range `bytes` of it: `select_range(ID, &name, stem_range(&name))`. For a
+/// field that is already on screen; a dialog that opens with a selection
+/// uses [`crate::modal::Modal::initial_select`] instead, which runs after
+/// the dialog's own autofocus.
+pub fn select_range<M: Send + 'static>(
+    id: impl Into<Id>,
+    value: &str,
+    bytes: std::ops::Range<usize>,
+) -> Task<M> {
+    let (start, end) = grapheme_range(value, bytes);
+    widget::operate(SelectRange {
+        id: id.into(),
+        start,
+        end,
+        focus: true,
+    })
+    .discard()
+}
+
+/// Focus (optionally) and select a cursor range of one text input.
+pub(crate) struct SelectRange {
+    pub id: Id,
+    pub start: usize,
+    pub end: usize,
+    pub focus: bool,
+}
+
+impl Operation for SelectRange {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+    fn focusable(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Focusable) {
+        if !self.focus {
+            return;
+        }
+        if id == Some(&self.id) {
+            state.focus();
+            bump();
+        } else if state.is_focused() {
+            state.unfocus();
+        }
+    }
+    fn text_input(
+        &mut self,
+        id: Option<&Id>,
+        _bounds: Rectangle,
+        state: &mut dyn widget::operation::TextInput,
+    ) {
+        if id == Some(&self.id) {
+            state.select_range(self.start, self.end);
+        }
+    }
 }
 
 /// Drop focus (`element.blur()`).

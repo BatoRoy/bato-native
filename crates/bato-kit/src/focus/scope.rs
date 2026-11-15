@@ -50,6 +50,7 @@ pub struct FocusScope<'a, M> {
     autofocus: bool,
     restore: bool,
     initial: Option<Id>,
+    select: Option<(usize, usize)>,
 }
 
 /// A dialog level: traps Tab, focuses its first tab stop on mount, restores
@@ -64,6 +65,7 @@ pub fn focus_scope<'a, M>(
         autofocus: true,
         restore: true,
         initial: None,
+        select: None,
     }
 }
 
@@ -94,6 +96,19 @@ impl<'a, M> FocusScope<'a, M> {
     /// Focus this widget on mount instead of the first tab stop.
     pub fn initial(mut self, id: impl Into<Id>) -> Self {
         self.initial = Some(id.into());
+        self
+    }
+    /// [`FocusScope::initial`] if `Some`.
+    pub fn initial_maybe(self, id: Option<Id>) -> Self {
+        match id {
+            Some(id) => self.initial(id),
+            None => self,
+        }
+    }
+    /// After focusing the initial text input, select these cursor
+    /// positions of it (graphemes; [`super::grapheme_range`]).
+    pub fn select(mut self, range: Option<(usize, usize)>) -> Self {
+        self.select = range;
         self
     }
     /// Reported to operations as a container id.
@@ -171,6 +186,7 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusScope<'a, M> {
                 push(Request::Autofocus {
                     scope: s.key,
                     initial: self.initial.clone(),
+                    select: self.select,
                 });
                 shell.request_redraw();
             }

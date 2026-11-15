@@ -589,10 +589,17 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         for l in levels {
             let top = l.kind() == Kind::Top;
             // Each level traps Tab while it is the top one, focuses its first
-            // control when it opens and gives focus back when it closes.
+            // control (or its initial focus) when it opens and gives focus
+            // back when it closes.
+            let (initial, select) = l.focus_init();
             let el: El<'a, M> = l
                 .id(level_id(depth))
-                .wrap_panel(|p| crate::focus::focus_scope(p).into())
+                .wrap_panel(move |p| {
+                    crate::focus::focus_scope(p)
+                        .initial_maybe(initial)
+                        .select(select)
+                        .into()
+                })
                 .blur(true)
                 .animate(animate)
                 .into();

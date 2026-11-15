@@ -237,7 +237,11 @@ impl<'a, M> FocusRoot<'a, M> {
         for r in requests {
             let col = self.collect(tree, layout, renderer);
             match r {
-                Request::Autofocus { scope, initial } => {
+                Request::Autofocus {
+                    scope,
+                    initial,
+                    select,
+                } => {
                     let opener = col
                         .entries
                         .iter()
@@ -260,6 +264,17 @@ impl<'a, M> FocusRoot<'a, M> {
                         renderer,
                         Apply::new(to).with_opener(scope, opener),
                     );
+                    // Focusing a text input put its cursor at the end;
+                    // now the dialog's preselection (rename: the stem).
+                    if let (Some(id), Some((start, end))) = (initial, select) {
+                        let mut op = super::SelectRange {
+                            id,
+                            start,
+                            end,
+                            focus: false,
+                        };
+                        self.each(tree, layout, renderer, &mut op);
+                    }
                     super::ANCHOR.set(None);
                     bump();
                 }
