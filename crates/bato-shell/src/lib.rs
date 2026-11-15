@@ -6,13 +6,17 @@
 //! |---|---|
 //! | [`identity`] | `identity.js`, the `BrowserWindow` options |
 //! | [`settings`] | `settings:get` / `settings:save` (the same `settings.json`) |
-//! | [`http`] | `net:request` (now a real client: TLS, Bearer, JSON, 5 s timeout) |
+//! | [`http`] | `net:request` (now a real client: TLS, Bearer, JSON, per-call timeouts, headers, byte and streamed bodies, SSE, a GET→PUT relay with progress and cancel, the bundled server's session secret) |
 //! | [`backend`] | `bridge.ts` backend URL resolution |
 //! | `supervisor` (feature `supervisor`) | `backend.js` |
 //! | `dialogs` (feature `dialogs`) | `dialog:openFiles` / `openDirectory` / `saveFile` |
 //! | `notify` (feature `notify`) | `notify` + click-to-focus |
 //! | [`updater`] | `updater.js` (through `bato install`, not electron-updater) |
 //! | [`hooks`] | `BATO_VIEW`, `BATO_SMOKE`, `BATO_TIMING` |
+//! | [`instance`] | `requestSingleInstanceLock` + `second-instance` (argv, cwd, activation token) |
+//! | `desktop` (feature `desktop`) | `shell.showItemInFolder`, `shell.openPath`, detached spawns |
+//! | `clipboard` (feature `clipboard`) | copy/cut/paste files (`text/uri-list`, `x-special/gnome-copied-files`) |
+//! | `activation` (feature `activation`) | raise a window with an xdg-activation token |
 //! | `iced_ext` (feature `iced`) | `Task`/`Subscription` wrappers for all of the above |
 //!
 //! The core API is toolkit-neutral: blocking functions meant for worker
@@ -58,10 +62,17 @@ pub mod gpu;
 pub mod hooks;
 pub mod http;
 pub mod identity;
+pub mod instance;
 pub mod settings;
 pub mod updater;
 pub mod worker;
 
+#[cfg(feature = "activation")]
+pub mod activation;
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
+#[cfg(feature = "desktop")]
+pub mod desktop;
 #[cfg(feature = "dialogs")]
 pub mod dialogs;
 #[cfg(feature = "notify")]

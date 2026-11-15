@@ -309,6 +309,11 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "x11rb",
  "zbus",
 ]
 

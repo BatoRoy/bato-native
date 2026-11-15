@@ -1,12 +1,12 @@
 [package]
 name = "bato-shell"
-description = "Platform services for native Bato apps: window identity, settings, HTTP, portal dialogs, notifications, backend supervisor, updater."
+description = "Platform services for native Bato apps: window identity, settings, HTTP (JSON, bytes, streams, SSE, relays), portal dialogs, notifications, backend supervisor, updater, single instance, file clipboard, reveal/open."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["iced", "dialogs", "notify"]
+default = ["iced", "dialogs", "notify", "desktop", "clipboard", "activation"]
 # Task/Subscription wrappers and window settings for iced 0.14. Everything else
 # in the crate is toolkit-neutral (plain fns, futures, threads).
 iced = ["dep:iced", "dep:png", "dep:raw-window-handle"]
@@ -21,6 +21,16 @@ notify = ["dep:zbus"]
 # app does local work in-process. Its code and tests always build under
 # `cargo test`, see lib.rs.
 supervisor = []
+# Reveal in the file manager (org.freedesktop.FileManager1 over zbus), open
+# with xdg-open, detached spawns.
+desktop = ["dep:zbus"]
+# Copy and paste files (text/uri-list, x-special/gnome-copied-files): Wayland
+# data-control (ext and wlr) or an X11 selection owner, in-process. The crates
+# are the ones winit already builds (wayland-client, x11rb), so nothing new.
+clipboard = ["desktop", "dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr", "dep:x11rb"]
+# Raise an existing window with an xdg-activation token (single instance,
+# notification clicks): winit's focus_window is a no-op on Wayland.
+activation = ["dep:raw-window-handle", "dep:wayland-client", "dep:wayland-backend", "dep:wayland-protocols"]
 
 [dependencies]
 bato-theme = { path = "../bato-theme" }
@@ -42,7 +52,22 @@ zbus = { version = "5", default-features = false, features = ["async-io"], optio
 iced = { version = "=0.14.0", default-features = false, features = ["wgpu", "tiny-skia", "web-colors", "wayland", "x11", "thread-pool", "svg", "advanced"], optional = true }
 png = { version = "0.17", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
+wayland-client = { version = "0.31", optional = true }
+# `client_system`: proxies on the libwayland connection winit opened (the
+# window's wl_display), as ashpd does for xdg-foreign.
+wayland-backend = { version = "0.3", features = ["client_system"], optional = true }
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
+wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
+x11rb = { version = "0.13", default-features = false, optional = true }
 
 [dev-dependencies]
 futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
 zbus = { version = "5", default-features = false, features = ["async-io", "p2p"] }
+
+[[example]]
+name = "fileclip"
+required-features = ["clipboard"]
+
+[[example]]
+name = "single_instance"
+required-features = ["iced", "activation"]

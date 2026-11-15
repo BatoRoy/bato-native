@@ -78,6 +78,40 @@ pub fn may_spawn_bundled_for(settings: &Settings) -> bool {
     may_spawn_bundled(env_url().as_deref(), settings.backend_url.as_deref())
 }
 
+/// Whether the saved `backendUrl` takes part in the rule.
+///
+/// An app without the Server address card (`Frame::without_server_card`:
+/// BatoFetch, BatoBrowse, whose remotes are connections, not "the backend")
+/// has no way to show or clear a saved address, so one left by an older
+/// client must neither retarget the app nor stop the bundled spawn (R19).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SavedUrl {
+    /// Steps 1-4 as above (the template, with the card).
+    #[default]
+    Honor,
+    /// Step 2 is skipped: `BATO_BACKEND_URL`, then the bundled server.
+    Ignore,
+}
+
+impl SavedUrl {
+    fn pick(self, settings: &Settings) -> Option<&str> {
+        match self {
+            Self::Honor => settings.backend_url.as_deref(),
+            Self::Ignore => None,
+        }
+    }
+}
+
+/// [`resolve_for`], with the saved address honoured or ignored.
+pub fn resolve_with(settings: &Settings, bundled: Option<&str>, saved: SavedUrl) -> Backend {
+    resolve(env_url().as_deref(), saved.pick(settings), bundled)
+}
+
+/// [`may_spawn_bundled_for`], with the saved address honoured or ignored.
+pub fn may_spawn_bundled_with(settings: &Settings, saved: SavedUrl) -> bool {
+    may_spawn_bundled(env_url().as_deref(), saved.pick(settings))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +165,24 @@ mod tests {
         assert!(may_spawn_bundled(Some(" "), Some("")));
         assert!(!may_spawn_bundled(Some("http://env:1"), None));
         assert!(!may_spawn_bundled(None, Some("http://saved:2")));
+    }
+
+    #[test]
+    fn an_ignored_saved_url_neither_retargets_nor_blocks_the_spawn() {
+        let s = Settings {
+            backend_url: Some("http://old-daemon:42110".into()),
+            ..Settings::default()
+        };
+        if env_url().is_some_and(|v| !v.trim().is_empty()) {
+            return; // the environment outranks both; nothing to compare
+        }
+        assert!(!may_spawn_bundled_with(&s, SavedUrl::Honor));
+        assert!(may_spawn_bundled_with(&s, SavedUrl::Ignore));
+        let b = resolve_with(&s, Some("http://127.0.0.1:4"), SavedUrl::Ignore);
+        assert_eq!(b.source, Source::Bundled);
+        assert_eq!(
+            resolve_with(&s, Some("http://127.0.0.1:4"), SavedUrl::Honor).source,
+            Source::Saved
+        );
     }
 }

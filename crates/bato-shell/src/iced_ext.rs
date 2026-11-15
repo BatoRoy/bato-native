@@ -245,6 +245,162 @@ pub fn save_file(
     )
 }
 
+/// What [`with_progress`] and its relatives yield: progress, then the
+/// result once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Progressed<P, R> {
+    Progress(P),
+    Done(R),
+}
+
+/// Run blocking `work` on a worker thread; each progress it reports becomes
+/// a message, then its result.
+///
+/// ```ignore
+/// Msg::Copy(job) => iced_ext::with_progress(move |report| {
+///     http::relay(src, dst, &job.cancel, |p| report(p))
+/// })
+/// .map(move |m| Msg::Transfer(job.id, m)),
+/// ```
+pub fn with_progress<P, R, F>(work: F) -> Task<Progressed<P, R>>
+where
+    P: Send + 'static,
+    R: Send + 'static,
+    F: FnOnce(&mut dyn FnMut(P)) -> R + Send + 'static,
+{
+    Task::run(
+        thread_stream(move |send| {
+            let r = work(&mut |p| {
+                send(Progressed::Progress(p));
+            });
+            send(Progressed::Done(r));
+        }),
+        |m| m,
+    )
+}
+
+/// [`with_progress`] as a subscription keyed by `key`: it runs while the
+/// app keeps returning it (a transfer list: one per job id), and starts
+/// over if it is dropped and returned again. Pair it with an
+/// [`http::Cancel`](crate::http::Cancel) in `key`'s job to stop the work.
+pub fn progress_subscription<K, P, R>(
+    key: K,
+    work: fn(&K, &mut dyn FnMut(P)) -> R,
+) -> Subscription<Progressed<P, R>>
+where
+    K: std::hash::Hash + Clone + Send + 'static,
+    P: Send + 'static,
+    R: Send + 'static,
+{
+    Subscription::run_with((key, work), |(k, w)| {
+        let (k, w) = (k.clone(), *w);
+        thread_stream(move |send| {
+            let r = w(&k, &mut |p| {
+                send(Progressed::Progress(p));
+            });
+            send(Progressed::Done(r));
+        })
+    })
+}
+
+/// [`crate::http::relay`] on a worker: progress (≤ 10 per second), then
+/// the outcome. `cancel` stops it.
+pub fn relay(
+    source: crate::http::Call,
+    dest: crate::http::Call,
+    cancel: crate::http::Cancel,
+) -> Task<Progressed<crate::http::Progress, Result<crate::http::Relayed, crate::http::RelayError>>>
+{
+    with_progress(move |report| crate::http::relay(source, dest, &cancel, report))
+}
+
+/// One item of [`sse`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SseItem {
+    Event(crate::http::SseEvent),
+    /// The request failed, or the stream broke; nothing follows.
+    Error(String),
+    /// The server closed the stream.
+    End,
+}
+
+/// A Server-Sent Events request, each event a message as it arrives.
+/// Stop early with `Task::abortable` (the worker ends at the next event or
+/// the stall timeout).
+pub fn sse(call: crate::http::Call) -> Task<SseItem> {
+    Task::run(
+        thread_stream(move |send| {
+            let stream = match call.stream().and_then(crate::http::Streamed::ok_or_status) {
+                Ok(s) => s,
+                Err(e) => {
+                    send(SseItem::Error(e.to_string()));
+                    return;
+                }
+            };
+            for ev in stream.sse() {
+                let alive = match ev {
+                    Ok(e) => send(SseItem::Event(e)),
+                    Err(e) => {
+                        send(SseItem::Error(e.to_string()));
+                        return;
+                    }
+                };
+                if !alive {
+                    return;
+                }
+            }
+            send(SseItem::End);
+        }),
+        |m| m,
+    )
+}
+
+/// Launches forwarded by later instances ([`crate::instance`]). The
+/// requests can be taken once: keep returning this subscription for the
+/// app's lifetime.
+pub fn instance_requests(
+    primary: &crate::instance::Primary,
+) -> Subscription<crate::instance::Request> {
+    Subscription::run_with(primary.clone(), |p| match p.take_requests() {
+        Some(rx) => rx.boxed(),
+        None => futures::stream::empty().boxed(),
+    })
+}
+
+/// Raise window `id`: xdg-activation with `token` on Wayland (a token of
+/// its own when `None`), `window::gain_focus` elsewhere. Yields whether the
+/// xdg-activation request went out. See [`crate::activation`] for what
+/// compositors do with it.
+#[cfg(feature = "activation")]
+pub fn activate(id: window::Id, token: Option<String>) -> Task<bool> {
+    window::run(id, move |w| {
+        crate::activation::activate(w, token.as_deref())
+    })
+    .then(move |sent| {
+        if sent {
+            Task::done(true)
+        } else {
+            window::gain_focus(id).chain(Task::done(false))
+        }
+    })
+}
+
+/// [`crate::clipboard::copy_files`] on a worker.
+#[cfg(feature = "clipboard")]
+pub fn copy_files(
+    paths: Vec<PathBuf>,
+    op: crate::clipboard::Op,
+) -> Task<Result<crate::clipboard::Backend, crate::clipboard::ClipboardError>> {
+    blocking(move || crate::clipboard::copy_files(&paths, op))
+}
+
+/// [`crate::clipboard::paste_files`] on a worker.
+#[cfg(feature = "clipboard")]
+pub fn paste_files()
+-> Task<Result<Option<crate::clipboard::Files>, crate::clipboard::ClipboardError>> {
+    blocking(crate::clipboard::paste_files)
+}
+
 /// Frame events while `BATO_SMOKE` is on, for [`crate::hooks::Smoke`].
 pub fn smoke_frames() -> Subscription<std::time::Instant> {
     if crate::hooks::smoke_enabled() {
