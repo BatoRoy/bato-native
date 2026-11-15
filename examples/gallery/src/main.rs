@@ -118,7 +118,8 @@ impl App {
             NavItem::new(Page::Home, Ico::Home, "Home"),
             NavItem::new(Page::Examples, Ico::LayoutGrid, "Examples"),
             NavItem::new(Page::ScrollLab, Ico::Rows3, "Scroll lab"),
-            NavItem::new(Page::Interaction, Ico::Command, "Interaction lab"),
+            NavItem::new(Page::Interaction, Ico::Command, "Interaction lab")
+                .keywords("overlays focus menus images grid"),
         ];
         let start = Start {
             dialog: view.modal.as_deref().and_then(Dialog::parse),

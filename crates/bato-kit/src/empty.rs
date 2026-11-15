@@ -12,7 +12,7 @@ use iced::{Alignment, Length, Padding};
 
 use crate::El;
 use crate::ctx::Ctx;
-use crate::icon::{Ico, icon};
+use crate::icon::{Icon, icon};
 use crate::label::{Align, label};
 use crate::layout::vgap;
 use crate::style::c;
@@ -21,7 +21,7 @@ use crate::surface::{BoxStyle, surface};
 pub struct EmptyState<'a, M> {
     cx: Ctx,
     title: String,
-    icon: Option<Ico>,
+    icon: Option<Icon>,
     subtitle: Option<String>,
     action: Option<El<'a, M>>,
 }
@@ -37,8 +37,8 @@ pub fn empty_state<'a, M: Clone + 'a>(cx: &Ctx, title: impl Into<String>) -> Emp
 }
 
 impl<'a, M: Clone + 'a> EmptyState<'a, M> {
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
     pub fn subtitle(mut self, text: impl Into<String>) -> Self {

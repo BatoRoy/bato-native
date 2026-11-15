@@ -87,6 +87,8 @@ pub struct Modal<'a, Message> {
     blur: bool,
     animate: bool,
     id: Option<widget::Id>,
+    initial_focus: Option<widget::Id>,
+    initial_select: Option<(usize, usize)>,
 }
 
 /// A dialog level: `panel` centred over the window, at most `max_width` wide
@@ -109,6 +111,8 @@ pub fn modal<'a, Message>(
         blur: false,
         animate: true,
         id: None,
+        initial_focus: None,
+        initial_select: None,
     }
 }
 
@@ -136,10 +140,36 @@ pub fn level<'a, Message>(
         blur: false,
         animate: true,
         id: None,
+        initial_focus: None,
+        initial_select: None,
     }
 }
 
 impl<'a, Message> Modal<'a, Message> {
+    /// Focus this widget when the level opens instead of its first tab stop
+    /// (React `autoFocus` on a field). The frame applies it when it wraps
+    /// the level in its focus scope; no delay needed.
+    pub fn initial_focus(mut self, id: impl Into<widget::Id>) -> Self {
+        self.initial_focus = Some(id.into());
+        self
+    }
+    /// [`Modal::initial_focus`] on the text input `id` holding `value`,
+    /// then select the byte range `bytes` of it (the rename prompt's stem,
+    /// [`crate::focus::stem_range`]).
+    pub fn initial_select(
+        mut self,
+        id: impl Into<widget::Id>,
+        value: &str,
+        bytes: std::ops::Range<usize>,
+    ) -> Self {
+        self.initial_focus = Some(id.into());
+        self.initial_select = Some(crate::focus::grapheme_range(value, bytes));
+        self
+    }
+    /// The level's initial focus and selection ([`Modal::initial_focus`]).
+    pub fn focus_init(&self) -> (Option<widget::Id>, Option<(usize, usize)>) {
+        (self.initial_focus.clone(), self.initial_select)
+    }
     /// Drawn under the scrim (the blurred page).
     pub fn backdrop(mut self, b: impl Into<El<'a, Message>>) -> Self {
         self.backdrop = Some(b.into());
@@ -194,6 +224,8 @@ impl<'a, Message> Modal<'a, Message> {
             blur: self.blur,
             animate: self.animate,
             id: self.id,
+            initial_focus: self.initial_focus,
+            initial_select: self.initial_select,
         }
     }
 }
@@ -601,7 +633,7 @@ pub fn modal_panel<'a, Message: Clone + 'a>(
     cx: &crate::Ctx,
     title: &str,
     description: Option<&str>,
-    mark: Option<crate::icon::Ico>,
+    mark: Option<crate::icon::Icon>,
     on_close: Message,
     body: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
 ) -> Element<'a, Message, iced::Theme, iced::Renderer> {

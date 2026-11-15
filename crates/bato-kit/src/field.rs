@@ -43,7 +43,7 @@ use crate::El;
 use crate::anim::{ease_standard, with_opacity};
 use crate::ctx::Ctx;
 use crate::fonts;
-use crate::icon::{Ico, icon};
+use crate::icon::{Icon, icon};
 use crate::label::label;
 use crate::style::{c, rgba};
 use crate::surface::{BoxStyle, paint};
@@ -75,6 +75,14 @@ impl Metrics {
     /// Border-box height (1 px borders included).
     pub fn height(&self) -> f32 {
         self.line + 2.0 * self.pad_y + 2.0
+    }
+    /// The same text in a box `height` px tall (a React bar built from raw
+    /// `div`s: `h-8` = 32, `h-9` = 36): the vertical padding absorbs it.
+    pub fn with_height(self, height: f32) -> Self {
+        Self {
+            pad_y: ((height - 2.0 - self.line) / 2.0).max(0.0),
+            ..self
+        }
     }
 }
 
@@ -265,6 +273,7 @@ pub struct Control<'a, M> {
     id: Option<widget::Id>,
     font: iced::Font,
     size: FieldSize,
+    height: Option<f32>,
     error: bool,
     disabled: bool,
     focused: Option<bool>,
@@ -291,6 +300,7 @@ pub fn text_control<'a, M: Clone + 'a>(
         id: None,
         font: fonts::sans(),
         size: FieldSize::Md,
+        height: None,
         error: false,
         disabled: false,
         focused: None,
@@ -304,6 +314,12 @@ pub fn text_control<'a, M: Clone + 'a>(
 impl<'a, M: Clone + 'a> Control<'a, M> {
     pub fn size(mut self, s: FieldSize) -> Self {
         self.size = s;
+        self
+    }
+    /// A border-box height other than the size's 30/38/42 (React's `h-8`,
+    /// `h-9` bars); the text keeps the size's font and stays centred.
+    pub fn height(mut self, px: f32) -> Self {
+        self.height = Some(px);
         self
     }
     /// Red border and halo.
@@ -353,7 +369,7 @@ impl<'a, M: Clone + 'a> Control<'a, M> {
         self
     }
     /// A 15 px `muted` icon in the left slot (`leftIcon`).
-    pub fn left_icon(self, ico: Ico) -> Self {
+    pub fn left_icon(self, ico: impl Into<Icon>) -> Self {
         let m = c(self.cx.p().muted);
         self.left(icon(ico, 15.0).color(m))
     }
@@ -369,7 +385,7 @@ impl<'a, M: Clone + 'a> Control<'a, M> {
         self
     }
     /// A 15 px `muted` icon in the right group (`rightIcon`).
-    pub fn right_icon(self, ico: Ico) -> Self {
+    pub fn right_icon(self, ico: impl Into<Icon>) -> Self {
         let m = c(self.cx.p().muted);
         self.right(icon(ico, 15.0).color(m))
     }
@@ -391,7 +407,10 @@ pub fn text_insets(size: FieldSize, left: bool, right: bool) -> (f32, f32) {
 
 impl<'a, M: Clone + 'a> From<Control<'a, M>> for El<'a, M> {
     fn from(f: Control<'a, M>) -> Self {
-        let m = f.size.metrics();
+        let m = match f.height {
+            Some(h) => f.size.metrics().with_height(h),
+            None => f.size.metrics(),
+        };
         let h = m.height();
         let (pl, pr) = text_insets(f.size, f.left.is_some(), !f.right.is_empty());
         let colors = text_colors(&f.cx, f.disabled);
@@ -792,6 +811,11 @@ mod tests {
         assert_eq!(FieldSize::Sm.metrics().height(), 30.0);
         assert_eq!(FieldSize::Md.metrics().height(), 38.0);
         assert_eq!(FieldSize::Lg.metrics().height(), 42.0);
+        // Custom heights: BatoFetch's h-8 / h-9 bars.
+        assert_eq!(FieldSize::Md.metrics().with_height(32.0).height(), 32.0);
+        assert_eq!(FieldSize::Md.metrics().with_height(36.0).pad_y, 7.0);
+        assert_eq!(FieldSize::Sm.metrics().with_height(36.0).text, 12.0);
+        assert_eq!(FieldSize::Md.metrics().with_height(10.0).pad_y, 0.0);
         // Text at border + px, or at pl-9 / pr-9 with adornments.
         assert_eq!(text_insets(FieldSize::Md, false, false), (13.0, 13.0));
         assert_eq!(text_insets(FieldSize::Sm, true, false), (37.0, 11.0));

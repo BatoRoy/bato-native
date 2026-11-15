@@ -45,7 +45,7 @@ pub use grid::{
 
 use crate::button::{Variant, button};
 use crate::ctx::Ctx;
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::kv::UiState;
 use crate::label::label;
 use crate::layout::hline;
@@ -71,7 +71,7 @@ pub enum Mode {
 pub struct WidgetType {
     pub kind: String,
     pub label: String,
-    pub icon: Option<Ico>,
+    pub icon: Option<Icon>,
     /// `defaultSize` (w, h) in cells.
     pub size: (i32, i32),
 }
@@ -85,8 +85,8 @@ impl WidgetType {
             size: (w, h),
         }
     }
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
 }

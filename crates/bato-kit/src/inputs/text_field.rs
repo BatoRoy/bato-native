@@ -37,7 +37,7 @@ use super::frame::CaretToEnd;
 use crate::El;
 use crate::ctx::Ctx;
 use crate::field::{FieldSize, field, text_control};
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::style::c;
 use crate::surface::{BoxStyle, Status, surface};
 
@@ -54,9 +54,10 @@ pub struct TextField<'a, M> {
     error: Option<String>,
     required: bool,
     size: FieldSize,
-    left_icon: Option<Ico>,
+    height: Option<f32>,
+    left_icon: Option<Icon>,
     prefix: Option<String>,
-    right_icon: Option<Ico>,
+    right_icon: Option<Icon>,
     suffix: Option<String>,
     clear: Option<M>,
     password: Option<(bool, OnBool<'a, M>)>,
@@ -87,6 +88,7 @@ pub fn text_field<'a, M: Clone + 'a>(
         error: None,
         required: false,
         size: FieldSize::Md,
+        height: None,
         left_icon: None,
         prefix: None,
         right_icon: None,
@@ -131,16 +133,21 @@ impl<'a, M: Clone + 'a> TextField<'a, M> {
         self.size = s;
         self
     }
-    pub fn left_icon(mut self, i: Ico) -> Self {
-        self.left_icon = Some(i);
+    /// A control height other than the size's ([`crate::field::Control::height`]).
+    pub fn height(mut self, px: f32) -> Self {
+        self.height = Some(px);
+        self
+    }
+    pub fn left_icon(mut self, i: impl Into<Icon>) -> Self {
+        self.left_icon = Some(i.into());
         self
     }
     pub fn prefix(mut self, t: impl Into<String>) -> Self {
         self.prefix = Some(t.into());
         self
     }
-    pub fn right_icon(mut self, i: Ico) -> Self {
-        self.right_icon = Some(i);
+    pub fn right_icon(mut self, i: impl Into<Icon>) -> Self {
+        self.right_icon = Some(i.into());
         self
     }
     pub fn suffix(mut self, t: impl Into<String>) -> Self {
@@ -243,6 +250,9 @@ impl<'a, M: Clone + 'a> From<TextField<'a, M>> for El<'a, M> {
             .secure(f.password.as_ref().is_some_and(|(r, _)| !r));
         if f.mono {
             ctl = ctl.mono();
+        }
+        if let Some(h) = f.height {
+            ctl = ctl.height(h);
         }
         if let Some(i) = f.left_icon {
             ctl = ctl.left_icon(i);

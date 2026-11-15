@@ -41,7 +41,7 @@ use iced::{
 
 use crate::El;
 use crate::ctx::Ctx;
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::label::label;
 use crate::layout::hline;
 use crate::modal::{Kind, Modal, level};
@@ -54,7 +54,7 @@ use crate::surface::{BoxStyle, surface};
 pub struct Command<M> {
     pub id: String,
     pub label: String,
-    pub icon: Option<Ico>,
+    pub icon: Option<Icon>,
     /// Shown right-aligned (a shortcut, `⌘N`).
     pub hint: Option<String>,
     /// Consecutive commands of one group share a header.
@@ -76,8 +76,8 @@ impl<M> Command<M> {
             run,
         }
     }
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
     pub fn hint(mut self, hint: impl Into<String>) -> Self {

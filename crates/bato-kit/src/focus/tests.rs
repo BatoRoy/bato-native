@@ -469,3 +469,76 @@ fn focus_out_reports_keyboard_focus_leaving() {
     );
     assert_eq!(h.focused(&mut el), id("out"));
 }
+
+#[test]
+fn rename_selects_the_stem_like_react() {
+    use super::{grapheme_range, stem_range};
+    assert_eq!(stem_range("notes.txt"), 0..5);
+    assert_eq!(stem_range("archive.tar.gz"), 0..11);
+    assert_eq!(
+        stem_range(".bashrc"),
+        0..7,
+        "a leading dot is not an extension"
+    );
+    assert_eq!(stem_range("Makefile"), 0..8);
+    assert_eq!(stem_range(""), 0..0);
+    // Bytes → text_input cursor positions (graphemes).
+    assert_eq!(grapheme_range("notes.txt", 0..5), (0, 5));
+    let s = "café.png"; // é is 2 bytes
+    assert_eq!(stem_range(s), 0..5);
+    assert_eq!(grapheme_range(s, stem_range(s)), (0, 4));
+    let s = "e\u{301}x.md"; // e + combining acute: one grapheme
+    assert_eq!(grapheme_range(s, stem_range(s)), (0, 2));
+    // Inside a character: rounds down; reversed: ordered; past the end: clamped.
+    assert_eq!(grapheme_range("é", 1..2), (0, 1));
+    #[allow(clippy::reversed_empty_ranges)]
+    let reversed = 3..1;
+    assert_eq!(grapheme_range("abc", reversed), (1, 3));
+    assert_eq!(grapheme_range("abc", 0..99), (0, 3));
+}
+
+/// A dialog that opens on its name field with the stem selected: typing
+/// replaces the stem and keeps the extension (BatoBrowse's rename prompt).
+#[test]
+fn scope_initial_focus_selects_the_stem() {
+    let cx = cx();
+    let name = "notes.txt";
+    let sel = super::grapheme_range(name, super::stem_range(name));
+    let mut el: El<'_> = focus_root(column![
+        surface(pad()).on_press(Msg::A).id("a"),
+        focus_scope(column![
+            crate::button::button(&cx)
+                .label("Close")
+                .id("x")
+                .on_press(Msg::B),
+            crate::input::input(&cx, "Name", name, Msg::Text).id("name"),
+        ])
+        .initial("name")
+        .select(Some(sel)),
+    ])
+    .into();
+    let mut h = Harness::new(&el);
+    h.idle(&mut el);
+    h.idle(&mut el);
+    assert_eq!(h.focused(&mut el), id("name"), "the initial field, not ✕");
+    let k = Key::Character("x".into());
+    let typed = h.send(
+        &mut el,
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: k.clone(),
+            modified_key: k,
+            physical_key: Physical::Code(Code::KeyX),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: Some("x".into()),
+            repeat: false,
+        }),
+        mouse::Cursor::Unavailable,
+    );
+    assert!(
+        typed
+            .iter()
+            .any(|m| matches!(m, Msg::Text(t) if t == "x.txt")),
+        "{typed:?}"
+    );
+}

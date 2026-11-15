@@ -14,7 +14,7 @@ use iced::Length;
 use super::dropdown::dropdown;
 use crate::El;
 use crate::ctx::Ctx;
-use crate::icon::Ico;
+use crate::icon::{Ico, Icon};
 use crate::menu::{MenuEntry, action};
 
 /// `SelectOption<T>`: a value with its label, optionally disabled or with
@@ -24,7 +24,7 @@ pub struct SelectOption<T> {
     pub value: T,
     pub label: String,
     pub disabled: bool,
-    pub icon: Option<Ico>,
+    pub icon: Option<Icon>,
 }
 
 /// `{ value, label }`.
@@ -42,8 +42,8 @@ impl<T> SelectOption<T> {
         self.disabled = on;
         self
     }
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
 }
@@ -148,7 +148,7 @@ mod tests {
             icons,
             vec![
                 ("Apple".to_string(), None, "a"),
-                ("Banana".to_string(), Some(Ico::Check), "b"),
+                ("Banana".to_string(), Some(Ico::Check.into()), "b"),
             ]
         );
         assert_eq!(label_of(&options, &"a"), Some("Apple"));

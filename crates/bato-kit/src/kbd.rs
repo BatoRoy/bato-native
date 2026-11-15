@@ -5,7 +5,7 @@ use iced::{Color, Padding};
 
 use crate::El;
 use crate::ctx::Ctx;
-use crate::icon::{Ico, icon};
+use crate::icon::{Icon, icon};
 use crate::label::label;
 use crate::style::c;
 use crate::surface::{BoxStyle, Sh, surface};
@@ -30,7 +30,7 @@ pub fn kbd<'a, M: Clone + 'a>(cx: &Ctx, text: &str) -> El<'a, M> {
 /// AppMark (§4.6): accent square of `size`, radius round(S × .28), the brand
 /// glyph at round(S / 2) in `accent_ink`, `0 1px 2px #000@.25` and a white@.2
 /// top highlight.
-pub fn app_mark<'a, M: Clone + 'a>(cx: &Ctx, glyph: Ico, size: f32) -> El<'a, M> {
+pub fn app_mark<'a, M: Clone + 'a>(cx: &Ctx, glyph: impl Into<Icon>, size: f32) -> El<'a, M> {
     let p = cx.p();
     let style = BoxStyle::default()
         .bg(c(p.accent))

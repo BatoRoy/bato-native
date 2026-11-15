@@ -19,6 +19,7 @@
 //! | [`anim`] | Easings, tweens, pulse, hold-repeat, group opacity |
 //! | [`cursor`], [`datefmt`], [`kv`], [`fonts`], [`scale`] | Cursors, date formatting, UI-state store, bundled fonts, device pixels |
 //! | [`inputs`], [`overlay`], [`feedback`], [`data`], [`date`], [`dnd`], [`graph`] | Phase 2/3 component batches |
+//! | [`thumb`], [`reveal`] | Images (thumbnail cache, off-thread decode, picture/vector), hover/focus-within reveal |
 //!
 //! Sizes are CSS px at 100 %; the UI scale is iced's application scale
 //! factor ([`frame::Frame::scale_factor`]).
@@ -53,6 +54,7 @@ pub mod layout;
 pub mod menu;
 pub mod modal;
 pub mod rail_tip;
+pub mod reveal;
 pub mod scale;
 pub mod scroller;
 pub mod segmented;
@@ -60,6 +62,7 @@ pub mod spinner;
 pub mod style;
 pub mod surface;
 pub mod switch;
+pub mod thumb;
 pub mod timer;
 pub mod toast;
 

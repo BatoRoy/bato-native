@@ -10,7 +10,7 @@ use super::{Dialog, Frame, Msg};
 use crate::El;
 use crate::ctx::Ctx;
 use crate::focus::Ring;
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::kbd::{app_mark, kbd};
 use crate::label::label;
 use crate::layout::{hline, vgap, vline};
@@ -27,7 +27,7 @@ pub const MOD_K: &str = "Ctrl K";
 fn nav_row<'a, M: Clone + 'a>(
     cx: &Ctx,
     collapsed: bool,
-    ico: Ico,
+    ico: impl Into<Icon>,
     text: &'a str,
     active: bool,
     msg: M,
@@ -89,7 +89,11 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         let w = self.sidebar.value(Instant::now());
 
         let header: El<'a, M> = {
-            let mut items: Vec<El<'a, M>> = vec![app_mark(cx, self.brand.icon, 32.0)];
+            let mark: El<'a, M> = match self.logo {
+                Some(logo) => icon(logo, 32.0).color(c(p.text)).into(),
+                None => app_mark(cx, self.brand.icon, 32.0),
+            };
+            let mut items: Vec<El<'a, M>> = vec![mark];
             if !collapsed {
                 items.push(
                     column![

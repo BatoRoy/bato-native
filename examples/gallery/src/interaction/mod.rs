@@ -7,6 +7,7 @@ pub mod gaps;
 pub mod modals;
 pub mod os_drag;
 pub mod overlay;
+pub mod ports;
 pub mod scroll;
 
 use bato_kit::iced::widget::column;
@@ -21,6 +22,7 @@ pub struct State {
     pub gaps: gaps::State,
     pub modals: modals::State,
     pub os_drag: os_drag::State,
+    pub ports: ports::State,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,7 @@ pub enum Msg {
     Gaps(gaps::Msg),
     Modals(modals::Msg),
     OsDrag(os_drag::Msg),
+    Ports(ports::Msg),
 }
 
 impl Msg {
@@ -59,11 +62,15 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Gaps(m) => gaps::update(&mut state.gaps, m).map(Msg::Gaps),
         Msg::Modals(m) => modals::update(&mut state.modals, m).map(Msg::Modals),
         Msg::OsDrag(m) => os_drag::update(&mut state.os_drag, m).map(Msg::OsDrag),
+        Msg::Ports(m) => ports::update(&mut state.ports, m).map(Msg::Ports),
     }
 }
 
 pub fn subscription(state: &State) -> Subscription<Msg> {
-    overlay::subscription(&state.overlay).map(Msg::Overlay)
+    Subscription::batch([
+        overlay::subscription(&state.overlay).map(Msg::Overlay),
+        ports::subscription(&state.ports).map(Msg::Ports),
+    ])
 }
 
 /// The overlay-stack levels the lab has open, for `Frame::view_with`.
@@ -75,6 +82,11 @@ pub fn levels<'a>(state: &'a State, cx: &Ctx) -> Vec<bato_kit::modal::Modal<'a, 
             modals::levels(&state.modals, cx)
                 .into_iter()
                 .map(|l| l.map(Msg::Modals)),
+        )
+        .chain(
+            ports::levels(&state.ports, cx)
+                .into_iter()
+                .map(|l| l.map(Msg::Ports)),
         )
         .collect()
 }
@@ -96,6 +108,9 @@ pub fn selftest(name: &str) -> Option<Vec<bato_kit::overlay::script::Step<Msg>>>
                 .map(|s| s.map(Msg::Modals))
                 .collect(),
         ),
+        n if n.starts_with("kit11") => {
+            ports::selftest(n).map(|v| v.into_iter().map(|s| s.map(Msg::Ports)).collect())
+        }
         "modals" => Some(
             modals::selftest()
                 .into_iter()
@@ -131,6 +146,8 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
             gaps::view(&state.gaps, cx).map(Msg::Gaps),
             vgap(24.0),
             os_drag::view(&state.os_drag, cx).map(Msg::OsDrag),
+            vgap(24.0),
+            ports::view(&state.ports, cx).map(Msg::Ports),
         ],
         wide,
         [48.0, 32.0],

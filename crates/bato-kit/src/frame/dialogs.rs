@@ -252,7 +252,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             &self.cx,
             "App Options",
             Some(description.as_str()),
-            Some(self.brand.icon),
+            Some(self.brand.icon.into()),
             wrap(Msg::Close),
             body,
         )

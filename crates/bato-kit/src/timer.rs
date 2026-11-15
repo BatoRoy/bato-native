@@ -168,3 +168,56 @@ impl<'a, Message: Clone + 'a> From<Timer<'a, Message>>
         Element::new(t)
     }
 }
+
+/// A tick every `period` while subscribed: `Subscription::none()` when the
+/// app does not need it, so nothing runs (idle stays idle). iced's
+/// `time::every` needs an async runtime the kit does not enable; this is a
+/// sleeping thread that ends once the subscription is dropped (within one
+/// period). Changing `period` restarts it.
+///
+/// ```ignore
+/// fn subscription(&self) -> Subscription<Msg> {
+///     if self.polling { timer::every(Duration::from_secs(2)).map(Msg::Tick) }
+///     else { Subscription::none() }
+/// }
+/// ```
+pub fn every(period: Duration) -> iced::Subscription<Instant> {
+    iced::Subscription::run_with(period, |period| ticker(*period))
+}
+
+fn ticker(period: Duration) -> iced::futures::channel::mpsc::UnboundedReceiver<Instant> {
+    let (tx, rx) = iced::futures::channel::mpsc::unbounded();
+    let period = period.max(Duration::from_millis(1));
+    let _ = std::thread::Builder::new()
+        .name("bato-every".into())
+        .spawn(move || {
+            let mut next = Instant::now() + period;
+            loop {
+                std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                if tx.unbounded_send(Instant::now()).is_err() {
+                    break;
+                }
+                // No drift, no catch-up burst after a stall (suspend).
+                next = (next + period).max(Instant::now());
+            }
+        });
+    rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::futures::StreamExt;
+
+    #[test]
+    fn ticks_until_dropped() {
+        let mut rx = ticker(Duration::from_millis(5));
+        let t0 = Instant::now();
+        let a = iced::futures::executor::block_on(rx.next()).unwrap();
+        let b = iced::futures::executor::block_on(rx.next()).unwrap();
+        assert!(a >= t0 + Duration::from_millis(5));
+        assert!(b > a);
+        // Dropping the receiver ends the thread at its next tick.
+        drop(rx);
+    }
+}

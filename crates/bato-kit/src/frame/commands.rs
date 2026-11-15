@@ -42,13 +42,17 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             .nav
             .iter()
             .map(|n| {
-                Command::new(
+                let c = Command::new(
                     format!("nav-{}", n.label.to_lowercase().replace(' ', "-")),
                     n.label,
                     Msg::Navigate(n.page),
                 )
                 .group("Navigate")
-                .icon(n.icon)
+                .icon(n.icon);
+                match n.keywords {
+                    Some(k) => c.keywords(k),
+                    None => c,
+                }
             })
             .collect();
         for (id, label, icon, theme) in [
@@ -138,7 +142,7 @@ mod tests {
             vec![
                 NavItem::new(Page::Home, Ico::Home, "Home"),
                 NavItem::new(Page::Examples, Ico::LayoutGrid, "Examples"),
-                NavItem::new(Page::ScrollLab, Ico::Rows3, "Scroll lab"),
+                NavItem::new(Page::ScrollLab, Ico::Rows3, "Scroll lab").keywords("physics wheel"),
             ],
             Settings::default(),
             Page::Home,
@@ -166,7 +170,9 @@ mod tests {
         );
         assert_eq!(c[7].label, "About App");
         assert_eq!(c[6].group.as_deref(), Some("App"));
-        assert_eq!(c[2].icon, Some(Ico::Rows3));
+        assert_eq!(c[2].icon, Some(Ico::Rows3.into()));
+        assert_eq!(c[2].keywords.as_deref(), Some("physics wheel"));
+        assert_eq!(c[0].keywords, None);
     }
 
     #[test]
@@ -187,6 +193,14 @@ mod tests {
         assert_eq!(f.update(Msg::Palette(P::Enter)), Action::SaveSettings);
         assert_eq!(f.settings().theme, ThemeId::Light);
         assert!(!f.palette_open());
+
+        f.update(Msg::OpenPalette);
+        f.update(Msg::Palette(P::Query("physics".into())));
+        assert_eq!(
+            f.update(Msg::Palette(P::Enter)),
+            Action::Navigated(Page::ScrollLab),
+            "a nav item's keywords"
+        );
 
         f.update(Msg::OpenPalette);
         f.update(Msg::Palette(P::Query("scroll".into())));

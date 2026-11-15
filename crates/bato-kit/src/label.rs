@@ -107,6 +107,12 @@ pub struct Label {
     width: Length,
     max_width: f32,
     tabular: bool,
+    /// `<wbr>` positions (byte offsets of the whole text).
+    hints: Vec<usize>,
+    /// `overflow-wrap: anywhere`.
+    anywhere: bool,
+    /// `line-clamp-N`.
+    max_lines: Option<usize>,
 }
 
 /// `text-[N]px` with Tailwind's default `line-height: 1.5`.
@@ -125,6 +131,9 @@ pub fn label(text: impl Into<String>, size: f32, line_height: f32) -> Label {
         width: Length::Shrink,
         max_width: f32::INFINITY,
         tabular: false,
+        hints: Vec::new(),
+        anywhere: false,
+        max_lines: None,
     }
 }
 
@@ -162,9 +171,32 @@ impl Label {
         self.tracking_em = em;
         self
     }
+    /// Wrap at the available width (`\n` always breaks a line, wrapped or
+    /// not: `white-space: pre-wrap` / `pre`).
     pub fn wrap(mut self) -> Self {
         self.wrap = true;
         self.width = Length::Fill;
+        self
+    }
+    /// Extra wrap opportunities (`<wbr>`) at these byte offsets of the text
+    /// (BatoBrowse's `nameSegments`: `ruby-|pickaxe.png`). Only matter with
+    /// [`Label::wrap`].
+    pub fn wrap_hints(mut self, offsets: impl IntoIterator<Item = usize>) -> Self {
+        self.hints = offsets.into_iter().collect();
+        self.hints.sort_unstable();
+        self.hints.dedup();
+        self
+    }
+    /// `overflow-wrap: anywhere`: a word wider than the line breaks between
+    /// any two characters instead of overflowing.
+    pub fn break_anywhere(mut self) -> Self {
+        self.anywhere = true;
+        self
+    }
+    /// `line-clamp-N`: at most `n` lines, the last one cut with "…" when
+    /// there is more.
+    pub fn max_lines(mut self, n: usize) -> Self {
+        self.max_lines = Some(n.max(1));
         self
     }
     pub fn ellipsis(mut self) -> Self {
@@ -207,6 +239,9 @@ impl Label {
         self.wrap.hash(&mut h);
         self.ellipsis.hash(&mut h);
         self.tabular.hash(&mut h);
+        self.hints.hash(&mut h);
+        self.anywhere.hash(&mut h);
+        self.max_lines.hash(&mut h);
         if self.wrap || self.ellipsis {
             avail.to_bits().hash(&mut h);
         }
@@ -248,7 +283,11 @@ impl Label {
         buf.set_wrap(
             fs,
             if width.is_some() {
-                ct::Wrap::Word
+                if self.anywhere {
+                    ct::Wrap::WordOrGlyph
+                } else {
+                    ct::Wrap::Word
+                }
             } else {
                 ct::Wrap::None
             },
@@ -270,12 +309,14 @@ impl Label {
     fn build(&self, avail: f32) -> Cache {
         let mut guard = font_system().write().expect("font system");
         let fs = guard.raw();
-        let spans: Vec<(String, usize)> = self
-            .spans
-            .iter()
-            .enumerate()
-            .map(|(i, s)| (s.text.clone(), i))
-            .collect();
+        let spans: Vec<(String, usize)> = with_hints(
+            self.spans
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (s.text.clone(), i))
+                .collect(),
+            &self.hints,
+        );
         let wrap_w = if self.wrap && avail.is_finite() {
             Some(avail.max(1.0))
         } else {
@@ -283,11 +324,17 @@ impl Label {
         };
         let full = self.buffer(fs, &spans, wrap_w);
 
+        let full_text: String = spans.iter().map(|(t, _)| t.as_str()).collect();
+        // Glyph offsets count from the start of their `\n`-separated line.
+        let starts: Vec<usize> = ct::LineIter::new(&full_text)
+            .map(|(r, _)| r.start)
+            .collect();
         // Byte ranges of each visual line in the concatenated text.
         let mut ranges: Vec<(usize, usize)> = Vec::new();
         for run in full.layout_runs() {
+            let base = starts.get(run.line_i).copied().unwrap_or(0);
             let (Some(first), Some(last)) = (run.glyphs.first(), run.glyphs.last()) else {
-                ranges.push((0, 0));
+                ranges.push((base, base));
                 continue;
             };
             let start = run
@@ -297,23 +344,47 @@ impl Label {
                 .min()
                 .unwrap_or(first.start);
             let end = run.glyphs.iter().map(|g| g.end).max().unwrap_or(last.end);
-            ranges.push((start, end));
+            ranges.push((base + start, base + end));
         }
         if ranges.is_empty() {
             ranges.push((0, 0));
         }
-        let full_text: String = spans.iter().map(|(t, _)| t.as_str()).collect();
+        // line-clamp: the last kept line runs to the end of the text.
+        let clamped = match self.max_lines {
+            Some(n) if ranges.len() > n => {
+                ranges.truncate(n);
+                if let Some(last) = ranges.last_mut() {
+                    last.1 = full_text.len();
+                }
+                true
+            }
+            _ => false,
+        };
+        let line_count = ranges.len();
 
         let mut lines = Vec::with_capacity(ranges.len());
-        for (start, mut end) in ranges {
+        for (n, (start, mut end)) in ranges.into_iter().enumerate() {
+            let cut_here = clamped && n + 1 == line_count;
             // Trailing spaces hang in CSS; they do not count toward width.
-            while end > start && full_text.as_bytes()[end - 1] == b' ' {
+            while end > start && matches!(full_text.as_bytes()[end - 1], b' ' | b'\n' | b'\r') {
                 end -= 1;
             }
             let mut line_spans = slice_spans(&spans, start, end);
+            if cut_here {
+                for s in &mut line_spans {
+                    s.0 = s.0.replace(['\n', '\r'], " ");
+                }
+            }
             let mut buf = self.buffer(fs, &line_spans, None);
             let mut w = line_width(&buf);
-            if self.ellipsis && avail.is_finite() && w > avail + 0.01 {
+            if cut_here && (w <= avail || !avail.is_finite()) {
+                // More text follows on hidden lines: "…" after this one.
+                let idx = line_spans.last().map(|x| x.1).unwrap_or(0);
+                line_spans.push(("…".to_string(), idx));
+                buf = self.buffer(fs, &line_spans, None);
+                w = line_width(&buf);
+            }
+            if (self.ellipsis || cut_here) && avail.is_finite() && w > avail + 0.01 {
                 // Cut at the last glyph boundary that leaves room for "…".
                 let ell = {
                     let last_style = line_spans.last().map(|s| s.1).unwrap_or(0);
@@ -370,6 +441,34 @@ impl Label {
             width,
         }
     }
+}
+
+/// Insert a zero-width space (a break opportunity, like `<wbr>`) at each
+/// byte offset of the concatenated spans.
+fn with_hints(spans: Vec<(String, usize)>, hints: &[usize]) -> Vec<(String, usize)> {
+    if hints.is_empty() {
+        return spans;
+    }
+    let mut pos = 0;
+    spans
+        .into_iter()
+        .map(|(t, i)| {
+            let (s0, s1) = (pos, pos + t.len());
+            pos = s1;
+            let mut out = String::with_capacity(t.len() + 3 * hints.len());
+            let mut last = 0;
+            for &h in hints.iter().filter(|h| **h > s0 && **h < s1) {
+                let at = h - s0;
+                if t.is_char_boundary(at) {
+                    out.push_str(&t[last..at]);
+                    out.push('\u{200B}');
+                    last = at;
+                }
+            }
+            out.push_str(&t[last..]);
+            (out, i)
+        })
+        .collect()
 }
 
 fn line_width(buf: &ct::Buffer) -> f32 {
@@ -616,5 +715,74 @@ mod tests {
         assert_eq!(blink_baseline(Fam::Sans, 14.0, 20.0, 1.0), 15.0);
         // Sidebar version, JetBrains Mono 11/13.75: negative half-leading floors to -1.
         assert_eq!(blink_baseline(Fam::Mono, 11.0, 13.75, 1.0), 10.0);
+    }
+
+    fn lines(l: &Label, avail: f32) -> Vec<String> {
+        crate::fonts::setup();
+        l.build(avail)
+            .lines
+            .iter()
+            .map(|ln| {
+                ln.buffer
+                    .lines
+                    .iter()
+                    .map(|b| b.text().replace('\u{200B}', "|"))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn newlines_break_lines() {
+        let l = label("one\ntwo\n\nfour", 13.0, 20.0);
+        assert_eq!(lines(&l, f32::INFINITY), ["one", "two", "", "four"]);
+        assert_eq!(l.shape(f32::INFINITY).height(), 80.0);
+        // Wrapped too, and the lines after a break keep their own offsets.
+        let l = label("alpha beta\ngamma", 13.0, 20.0).wrap();
+        assert_eq!(lines(&l, 500.0), ["alpha beta", "gamma"]);
+        // Spans across a break.
+        let l = rich(vec![Span::new("a\nb"), Span::new("c").mono()], 13.0, 20.0);
+        assert_eq!(lines(&l, f32::INFINITY), ["a", "bc"]);
+    }
+
+    #[test]
+    fn wrap_hints_break_anywhere_and_clamp() {
+        let name = "SomeCamelCaseFileName.png";
+        let full = label(name, 13.0, 20.0).shape(f32::INFINITY).width();
+        let avail = (full * 0.6).floor();
+        // No break opportunity: one overflowing line (CSS without hints).
+        let plain = label(name, 13.0, 20.0).wrap();
+        assert_eq!(lines(&plain, avail).len(), 1);
+        // <wbr> at the camel humps: breaks there, text otherwise intact.
+        let hinted = label(name, 13.0, 20.0).wrap().wrap_hints([4, 9, 13, 17]);
+        let got = lines(&hinted, avail);
+        assert!(got.len() >= 2, "{got:?}");
+        assert_eq!(got.concat().replace('|', ""), name);
+        assert!(
+            got[0].ends_with("Camel|") || got[0].ends_with("Case|"),
+            "{got:?}"
+        );
+        let unwrapped = label(name, 13.0, 20.0).wrap_hints([4, 9, 13, 17]);
+        assert_eq!(
+            unwrapped.shape(f32::INFINITY).width(),
+            full,
+            "a hint is zero-width"
+        );
+        // overflow-wrap: anywhere: breaks inside the word.
+        let any = label(name, 13.0, 20.0).wrap().break_anywhere();
+        let got = lines(&any, avail);
+        assert!(got.len() >= 2 && got.concat() == name, "{got:?}");
+        // line-clamp-2 with "…".
+        let long = "one two three four five six seven eight nine ten eleven twelve";
+        let w = label(long, 13.0, 20.0).shape(f32::INFINITY).width();
+        let clamp = label(long, 13.0, 20.0).wrap().max_lines(2);
+        let got = lines(&clamp, (w / 3.0).floor());
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[1].ends_with('…'), "{got:?}");
+        assert!(clamp.shape((w / 3.0).floor()).width() <= (w / 3.0).floor() + 0.01);
+        // Fits: no ellipsis.
+        let got = lines(&label("short", 13.0, 20.0).wrap().max_lines(2), 500.0);
+        assert_eq!(got, ["short"]);
     }
 }
