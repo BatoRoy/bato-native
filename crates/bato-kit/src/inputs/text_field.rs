@@ -37,7 +37,7 @@ use super::frame::CaretToEnd;
 use crate::El;
 use crate::ctx::Ctx;
 use crate::field::{FieldSize, field, text_control};
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::style::c;
 use crate::surface::{BoxStyle, Status, surface};
 
@@ -54,9 +54,9 @@ pub struct TextField<'a, M> {
     error: Option<String>,
     required: bool,
     size: FieldSize,
-    left_icon: Option<Ico>,
+    left_icon: Option<Icon>,
     prefix: Option<String>,
-    right_icon: Option<Ico>,
+    right_icon: Option<Icon>,
     suffix: Option<String>,
     clear: Option<M>,
     password: Option<(bool, OnBool<'a, M>)>,
@@ -131,16 +131,16 @@ impl<'a, M: Clone + 'a> TextField<'a, M> {
         self.size = s;
         self
     }
-    pub fn left_icon(mut self, i: Ico) -> Self {
-        self.left_icon = Some(i);
+    pub fn left_icon(mut self, i: impl Into<Icon>) -> Self {
+        self.left_icon = Some(i.into());
         self
     }
     pub fn prefix(mut self, t: impl Into<String>) -> Self {
         self.prefix = Some(t.into());
         self
     }
-    pub fn right_icon(mut self, i: Ico) -> Self {
-        self.right_icon = Some(i);
+    pub fn right_icon(mut self, i: impl Into<Icon>) -> Self {
+        self.right_icon = Some(i.into());
         self
     }
     pub fn suffix(mut self, t: impl Into<String>) -> Self {

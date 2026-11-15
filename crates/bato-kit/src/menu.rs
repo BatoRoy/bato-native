@@ -35,7 +35,7 @@ use iced::{
 
 use crate::anim::{ease_standard, with_opacity};
 use crate::ctx::Ctx;
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::label::label;
 use crate::style::{c, shadows};
 use crate::surface::{BoxStyle, paint};
@@ -46,7 +46,7 @@ type El<'a, M> = Element<'a, M, iced::Theme, iced::Renderer>;
 #[derive(Debug, Clone)]
 pub struct MenuAction<M> {
     pub label: String,
-    pub icon: Option<Ico>,
+    pub icon: Option<Icon>,
     /// Display-only hint, e.g. `⌘C`.
     pub shortcut: Option<String>,
     pub danger: bool,
@@ -90,8 +90,8 @@ pub fn separator<M>() -> MenuEntry<M> {
 }
 
 impl<M> MenuAction<M> {
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
     pub fn shortcut(mut self, s: impl Into<String>) -> Self {

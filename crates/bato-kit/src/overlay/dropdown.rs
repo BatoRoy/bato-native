@@ -35,7 +35,7 @@ use super::popover::{local, press_probe};
 use crate::anim::{Tween, ease_standard};
 use crate::ctx::Ctx;
 use crate::focus::Ring;
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::label::label;
 use crate::menu::{MenuAction, MenuEntry, menu_list};
 use crate::style::c;
@@ -150,7 +150,7 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Chevron {
         let ico = icon(Ico::ChevronDown, self.size)
             .color_maybe(self.color)
             .rotation(r);
-        <crate::icon::Icon as Widget<M, iced::Theme, iced::Renderer>>::draw(
+        <crate::icon::IconWidget as Widget<M, iced::Theme, iced::Renderer>>::draw(
             &ico,
             &Tree::empty(),
             renderer,
@@ -195,7 +195,7 @@ pub fn map_entries<M: Clone, N>(entries: &[MenuEntry<M>], f: &dyn Fn(M) -> N) ->
 pub struct Dropdown<M> {
     cx: Ctx,
     trigger: String,
-    icon: Option<Ico>,
+    icon: Option<Icon>,
     items: Vec<MenuEntry<M>>,
     align_right: bool,
     width: Length,
@@ -224,8 +224,8 @@ impl<M> Dropdown<M> {
         self
     }
     /// A 14 px icon before the label, 6 px apart (Dashboard "Add widget").
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
     /// `className="w-full"` and the like.
@@ -253,7 +253,7 @@ pub enum DropdownEvent<M> {
 pub fn trigger<'a, E: Clone + 'a>(
     cx: &Ctx,
     text: &str,
-    ico: Option<Ico>,
+    ico: Option<Icon>,
     open: bool,
     width: Length,
     on_press: E,
@@ -354,7 +354,7 @@ mod tests {
         };
         assert_eq!(
             (a.label.as_str(), a.icon, a.shortcut.as_deref(), a.on_select),
-            ("Edit", Some(Ico::Pencil), Some("E"), 10)
+            ("Edit", Some(Ico::Pencil.into()), Some("E"), 10)
         );
         assert!(matches!(mapped[1], MenuEntry::Separator));
         let MenuEntry::Action(d) = &mapped[2] else {

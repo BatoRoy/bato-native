@@ -18,7 +18,7 @@ use iced::{Alignment, Color, Length, Padding};
 use crate::El;
 use crate::ctx::Ctx;
 use crate::focus::Ring;
-use crate::icon::{Ico, icon};
+use crate::icon::{Icon, icon};
 use crate::label::{Label, label};
 use crate::spinner::spinner;
 use crate::style::{c, sh};
@@ -131,7 +131,7 @@ pub fn btn_label(text: &str, size: Size) -> Label {
 
 enum Item<'a, M> {
     Label(String),
-    Icon(Ico, Option<f32>),
+    Icon(Icon, Option<f32>),
     El(El<'a, M>),
 }
 
@@ -203,12 +203,12 @@ impl<'a, M: Clone + 'a> Button<'a, M> {
         self
     }
     /// An icon at the default size (13 in sm, 14 otherwise).
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.items.push(Item::Icon(ico, None));
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.items.push(Item::Icon(ico.into(), None));
         self
     }
-    pub fn icon_sized(mut self, ico: Ico, px: f32) -> Self {
-        self.items.push(Item::Icon(ico, Some(px)));
+    pub fn icon_sized(mut self, ico: impl Into<Icon>, px: f32) -> Self {
+        self.items.push(Item::Icon(ico.into(), Some(px)));
         self
     }
     /// Any element (a `kbd` chip, a spinning icon).

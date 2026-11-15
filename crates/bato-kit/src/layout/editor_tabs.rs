@@ -34,7 +34,7 @@ use crate::anim::{ease_standard, fade, with_opacity};
 use crate::ctx::Ctx;
 use crate::date::ua_ring;
 use crate::dnd::{self, Axis, PreviewStyle};
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::label::label;
 use crate::scroller::scroll_area;
 use crate::style::c;
@@ -46,7 +46,7 @@ type El<'a, M> = Element<'a, M, iced::Theme, iced::Renderer>;
 pub struct EditorTab {
     pub id: String,
     pub label: String,
-    pub icon: Option<Ico>,
+    pub icon: Option<Icon>,
     pub dirty: bool,
 }
 
@@ -59,8 +59,8 @@ impl EditorTab {
             dirty: false,
         }
     }
-    pub fn icon(mut self, i: Ico) -> Self {
-        self.icon = Some(i);
+    pub fn icon(mut self, i: impl Into<Icon>) -> Self {
+        self.icon = Some(i.into());
         self
     }
     pub fn dirty(mut self, d: bool) -> Self {

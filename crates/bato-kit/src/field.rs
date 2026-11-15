@@ -43,7 +43,7 @@ use crate::El;
 use crate::anim::{ease_standard, with_opacity};
 use crate::ctx::Ctx;
 use crate::fonts;
-use crate::icon::{Ico, icon};
+use crate::icon::{Icon, icon};
 use crate::label::label;
 use crate::style::{c, rgba};
 use crate::surface::{BoxStyle, paint};
@@ -353,7 +353,7 @@ impl<'a, M: Clone + 'a> Control<'a, M> {
         self
     }
     /// A 15 px `muted` icon in the left slot (`leftIcon`).
-    pub fn left_icon(self, ico: Ico) -> Self {
+    pub fn left_icon(self, ico: impl Into<Icon>) -> Self {
         let m = c(self.cx.p().muted);
         self.left(icon(ico, 15.0).color(m))
     }
@@ -369,7 +369,7 @@ impl<'a, M: Clone + 'a> Control<'a, M> {
         self
     }
     /// A 15 px `muted` icon in the right group (`rightIcon`).
-    pub fn right_icon(self, ico: Ico) -> Self {
+    pub fn right_icon(self, ico: impl Into<Icon>) -> Self {
         let m = c(self.cx.p().muted);
         self.right(icon(ico, 15.0).color(m))
     }

@@ -13,7 +13,7 @@ use iced::{Alignment, Length};
 
 use crate::El;
 use crate::ctx::Ctx;
-use crate::icon::{Ico, icon};
+use crate::icon::{Icon, icon};
 use crate::label::label;
 use crate::layout::vgap;
 use crate::style::{c, inset_of, shadows};
@@ -43,7 +43,7 @@ pub fn card_box<'a, M: Clone + 'a>(cx: &Ctx, content: impl Into<El<'a, M>>) -> S
 pub struct Card<'a, M> {
     cx: Ctx,
     title: String,
-    icon: Option<Ico>,
+    icon: Option<Icon>,
     action: Option<El<'a, M>>,
     body: Option<El<'a, M>>,
 }
@@ -60,8 +60,8 @@ pub fn card<'a, M: Clone + 'a>(cx: &Ctx, title: impl Into<String>) -> Card<'a, M
 
 impl<'a, M: Clone + 'a> Card<'a, M> {
     /// The 28 px icon tile before the title.
-    pub fn icon(mut self, ico: Ico) -> Self {
-        self.icon = Some(ico);
+    pub fn icon(mut self, ico: impl Into<Icon>) -> Self {
+        self.icon = Some(ico.into());
         self
     }
     /// Content on the right of the title row.

@@ -185,7 +185,7 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Chevron {
         let i = icon(Ico::ChevronDown, 16.0)
             .color(self.color)
             .rotation(t * std::f32::consts::PI);
-        <crate::icon::Icon as Widget<M, iced::Theme, iced::Renderer>>::draw(
+        <crate::icon::IconWidget as Widget<M, iced::Theme, iced::Renderer>>::draw(
             &i,
             &Tree::empty(),
             renderer,

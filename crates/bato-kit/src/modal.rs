@@ -601,7 +601,7 @@ pub fn modal_panel<'a, Message: Clone + 'a>(
     cx: &crate::Ctx,
     title: &str,
     description: Option<&str>,
-    mark: Option<crate::icon::Ico>,
+    mark: Option<crate::icon::Icon>,
     on_close: Message,
     body: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
 ) -> Element<'a, Message, iced::Theme, iced::Renderer> {

@@ -72,7 +72,7 @@ use crate::autoscroll::{AutoscrollBus, autoscroll_layer, new_bus};
 use crate::badge::Tone;
 use crate::blur::backdrop_blur;
 use crate::ctx::Ctx;
-use crate::icon::Ico;
+use crate::icon::{Ico, Icon};
 use crate::modal::{Kind, Modal, level_id, modal};
 use crate::scale::set_device_scale;
 use crate::scroller::scroller;
@@ -107,13 +107,25 @@ impl Brand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NavItem<P> {
     pub page: P,
-    pub icon: Ico,
+    pub icon: Icon,
     pub label: &'static str,
+    /// Extra words the command palette matches (`appearance theme`).
+    pub keywords: Option<&'static str>,
 }
 
 impl<P> NavItem<P> {
-    pub const fn new(page: P, icon: Ico, label: &'static str) -> Self {
-        Self { page, icon, label }
+    pub fn new(page: P, icon: impl Into<Icon>, label: &'static str) -> Self {
+        Self {
+            page,
+            icon: icon.into(),
+            label,
+            keywords: None,
+        }
+    }
+    /// Extra words the command palette matches for this page.
+    pub fn keywords(mut self, words: &'static str) -> Self {
+        self.keywords = Some(words);
+        self
     }
 }
 
@@ -226,6 +238,7 @@ const COLLAPSED: f32 = 64.0;
 
 pub struct Frame<P> {
     brand: Brand,
+    logo: Option<Icon>,
     nav: Vec<NavItem<P>>,
     settings: Settings,
     cx: Ctx,
@@ -264,6 +277,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         Self {
             server_url: backend_url(&settings),
             brand,
+            logo: None,
             nav,
             settings,
             cx,
@@ -294,6 +308,14 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         self.dialog = start.dialog;
         self.start = start;
         self.dialog_opened = Instant::now();
+        self
+    }
+
+    /// The app's own logo in the sidebar header, 32 px, instead of the
+    /// AppMark (BatoFetch's `<img src={appIcon} className="w-8 h-8">`).
+    /// Usually [`Icon::svg_colored`]; a tinted icon takes the text colour.
+    pub fn logo(mut self, logo: impl Into<Icon>) -> Self {
+        self.logo = Some(logo.into());
         self
     }
 

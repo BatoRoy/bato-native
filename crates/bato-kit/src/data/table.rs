@@ -46,7 +46,7 @@ use crate::ctx::Ctx;
 use crate::empty::empty_state;
 use crate::field::text_control;
 use crate::focus::Ring;
-use crate::icon::{Ico, icon};
+use crate::icon::{Ico, Icon, icon};
 use crate::label::{Align, label};
 use crate::layout::rounded_clip;
 use crate::overlay::tooltip;
@@ -299,7 +299,7 @@ pub enum ActionTone {
 /// revealed on row hover (unless `show_on_hover(false)`).
 #[derive(Debug, Clone)]
 pub struct RowAction<M> {
-    pub icon: Ico,
+    pub icon: Icon,
     pub label: Option<String>,
     pub on_press: M,
     pub tone: ActionTone,
@@ -308,9 +308,9 @@ pub struct RowAction<M> {
 }
 
 impl<M> RowAction<M> {
-    pub fn new(icon: Ico, on_press: M) -> Self {
+    pub fn new(icon: impl Into<Icon>, on_press: M) -> Self {
         Self {
-            icon,
+            icon: icon.into(),
             label: None,
             on_press,
             tone: ActionTone::Default,
