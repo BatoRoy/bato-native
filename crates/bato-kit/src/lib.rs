@@ -115,14 +115,16 @@ pub mod prelude {
 /// The patched-crate tripwires. Each patched crate (bato-native/patched)
 /// exports `BATO_PATCH`; the crates.io releases do not, so a build that lost
 /// the `[patch.crates-io]` block fails here instead of silently losing the
-/// fix (wheel deltas, text hinting, gamma, backdrop blur, Wayland paste).
+/// fix (wheel deltas, text hinting, gamma, backdrop blur, Wayland paste,
+/// pointer hot-unplug, the clipboard thread surviving it).
 #[doc(hidden)]
-pub const BATO_PATCHES: [&str; 5] = [
+pub const BATO_PATCHES: [&str; 6] = [
     winit::BATO_PATCH,
     cosmic_text::BATO_PATCH,
     cryoglyph::BATO_PATCH,
     iced_wgpu::BATO_PATCH,
     iced_winit::BATO_PATCH,
+    smithay_clipboard::BATO_PATCH,
 ];
 
 // Linked for its `bundled` feature only (FreeType built from source).
@@ -139,7 +141,8 @@ mod tests {
                 "cosmic-text",
                 "cryoglyph",
                 "iced_wgpu",
-                "iced_winit"
+                "iced_winit",
+                "smithay-clipboard"
             ]
         );
     }

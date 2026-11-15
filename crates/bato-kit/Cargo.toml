@@ -46,6 +46,7 @@ cosmic-text = { version = "=0.15.0", default-features = false }
 cryoglyph = { version = "=0.1.0", default-features = false }
 iced_wgpu = { version = "=0.14.0", default-features = false }
 iced_winit = { version = "=0.14.1", default-features = false }
+smithay-clipboard = { version = "=0.7.3", default-features = false }
 # FreeType for the patched cosmic-text rasterizer, built from source
 # (`bundled`): the same hinting on every machine and no system FreeType
 # requirement. See README "FreeType".
