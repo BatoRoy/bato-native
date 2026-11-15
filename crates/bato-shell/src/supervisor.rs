@@ -16,6 +16,26 @@
 //!   [`Restart::OnCrash`] restarts after a non-zero exit, a bounded number of
 //!   times, on the same port so the URL stays valid.
 //!
+//! **Fixed port, attach or spawn** ([`Config::port`],
+//! [`Supervisor::attach_or_start`]): a daemon-capable server on a claimed
+//! port (BatoSound on 42108, which its Stream Deck plugin and `systemd
+//! --user` unit also call) is used as is when something healthy already
+//! answers there, and spawned on that port otherwise, as Electron's
+//! `backend.js` did. In a UI, the probe ([`answers`]) goes on a worker and
+//! the spawn ([`Supervisor::start_bundled`]) stays non-blocking:
+//!
+//! ```no_run
+//! # use bato_shell::{AppIdentity, Settings, supervisor::*};
+//! # const APP: AppIdentity = AppIdentity::new("BatoSound", "batosound", "1.0.0");
+//! # let settings = Settings::default();
+//! let cfg = Config { port: Some(42108), ..Config::default() };
+//! match Supervisor::attach_or_start(&APP, &settings, cfg) {
+//!     Attach::Attached { url } => { /* someone else's server: never stopped by us */ }
+//!     Attach::Spawned(server) => { /* ours, on 42108; dropping it stops it */ }
+//!     Attach::Offline { url } => { /* nothing answers and nothing was spawned */ }
+//! }
+//! ```
+//!
 //! **When to spawn** ([`wanted`]): only when nothing outranks the bundled
 //! server (no `BATO_BACKEND_URL`, no saved `backendUrl`; the QML rule), and
 //! only for an installed build or with `APP_SPAWN_SERVER=1` in dev, so the
@@ -101,6 +121,14 @@ pub enum Restart {
 pub struct Config {
     /// Binary name next to the client, and the stem of `dist/<name>-linux-<arch>`.
     pub server_name: String,
+    /// `None`: a free loopback port each start. `Some(p)`: always `p` (a
+    /// claimed suite port that other clients call); the spawn fails with
+    /// `AddrInUse` when something already listens there, and
+    /// [`Supervisor::attach_or_start`] uses a healthy server there instead.
+    pub port: Option<u16>,
+    /// How long [`answers`] waits for an already running server (Electron's
+    /// `isHealthy(500)`).
+    pub attach_timeout: Duration,
     /// Extra arguments after `--port N`.
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
@@ -129,6 +157,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             server_name: SERVER_NAME.into(),
+            port: None,
+            attach_timeout: Duration::from_millis(500),
             args: Vec::new(),
             env: Vec::new(),
             strip_env: STRIPPED_ENV.iter().map(|s| s.to_string()).collect(),
@@ -231,6 +261,44 @@ fn executable(p: &Path) -> bool {
         return std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).is_ok();
     }
     true
+}
+
+/// `http://127.0.0.1:<port>` for a [`Config::port`].
+pub fn fixed_url(cfg: &Config) -> Option<String> {
+    cfg.port.map(|p| format!("http://127.0.0.1:{p}"))
+}
+
+/// Does a healthy server answer `cfg.health_path` at `url` within
+/// [`Config::attach_timeout`]? Blocking: call it from a worker.
+pub fn answers(url: &str, cfg: &Config) -> bool {
+    crate::http::Http::new(url)
+        .with_timeout(cfg.attach_timeout)
+        .send(crate::http::Method::Get, &cfg.health_path, None)
+        .is_ok_and(|r| r.ok())
+}
+
+/// What [`Supervisor::attach_or_start`] found.
+#[derive(Debug)]
+pub enum Attach {
+    /// A healthy server already answered on the fixed port (the user's
+    /// daemon, another client's server). Not ours: nothing stops it.
+    Attached { url: String },
+    /// Nothing answered: ours, spawned on the fixed port.
+    Spawned(Supervisor),
+    /// Nothing answered and nothing was spawned (not [`wanted`], no binary,
+    /// or the port is taken by something unhealthy); the UI shows the
+    /// backend offline and may retry `url`.
+    Offline { url: String },
+}
+
+impl Attach {
+    /// Where the server is (or would be).
+    pub fn url(&self) -> &str {
+        match self {
+            Attach::Attached { url } | Attach::Offline { url } => url,
+            Attach::Spawned(s) => s.url(),
+        }
+    }
 }
 
 /// Ask the kernel for a free loopback port (bind :0, read it back, close).
@@ -343,10 +411,39 @@ impl Supervisor {
             .ok()
     }
 
-    /// Spawn `bin --port N` on a free port and return at once; health is
-    /// checked on the supervisor's thread.
+    /// Fixed-port mode ([`Config::port`]): use a healthy server that already
+    /// answers there, else [`start_bundled`](Self::start_bundled) on that
+    /// port. Blocks for up to [`Config::attach_timeout`] (the probe); a UI
+    /// calls [`answers`] on a worker and `start_bundled` itself instead.
+    /// Without a fixed port there is nothing to attach to: `start_bundled`.
+    pub fn attach_or_start(app: &AppIdentity, settings: &Settings, cfg: Config) -> Attach {
+        let url = fixed_url(&cfg);
+        if let Some(url) = &url
+            && answers(url, &cfg)
+        {
+            return Attach::Attached { url: url.clone() };
+        }
+        match Self::start_bundled(app, settings, cfg) {
+            Some(s) => Attach::Spawned(s),
+            None => Attach::Offline {
+                url: url.unwrap_or_default(),
+            },
+        }
+    }
+
+    /// Spawn `bin --port N` on [`Config::port`] or a free port and return at
+    /// once; health is checked on the supervisor's thread.
     pub fn start(bin: &Path, mut cfg: Config) -> io::Result<Self> {
-        let port = free_port()?;
+        let port = match cfg.port {
+            Some(p) => {
+                // Taken (by an unhealthy or foreign listener): say so now
+                // rather than spawn a server that cannot bind.
+                std::net::TcpListener::bind(("127.0.0.1", p))
+                    .map_err(|e| io::Error::new(e.kind(), format!("port {p} on 127.0.0.1: {e}")))?;
+                p
+            }
+            None => free_port()?,
+        };
         let url = format!("http://127.0.0.1:{port}");
         let secret = cfg.session_secret.then(new_secret);
         if let Some(s) = &secret {
@@ -801,6 +898,64 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         );
         assert!(!crate::http::Http::new(sup.url()).health());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fixed_port_spawns_there_then_attaches() {
+        if !has_python() {
+            eprintln!("skipped: no python3 for the fake server");
+            return;
+        }
+        let dir = tmp("fixed");
+        let bin = script(&dir, "app-server", FAKE_SERVER);
+        let port = free_port().unwrap();
+        let cfg = Config {
+            port: Some(port),
+            health_timeout: Duration::from_secs(30),
+            attach_timeout: Duration::from_secs(5),
+            session_secret: false,
+            ..Config::default()
+        };
+        let mut sup = Supervisor::start(&bin, cfg.clone()).unwrap();
+        assert_eq!(sup.url(), format!("http://127.0.0.1:{port}"));
+        assert_eq!(fixed_url(&cfg).as_deref(), Some(sup.url()));
+        assert!(sup.wait_healthy(Duration::from_secs(30)));
+        assert!(answers(sup.url(), &cfg));
+        // Another client attaches instead of spawning.
+        const APP: AppIdentity = AppIdentity::new("Fixed", "bato-shell-fixed", "1.0.0");
+        let a = Supervisor::attach_or_start(&APP, &Settings::default(), cfg.clone());
+        assert!(
+            matches!(&a, Attach::Attached { url } if url == sup.url()),
+            "{a:?}"
+        );
+        // The port is taken: a second spawn there says so instead of
+        // starting a server that cannot bind.
+        let e = Supervisor::start(&bin, cfg.clone()).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AddrInUse, "{e}");
+        sup.stop();
+        assert!(!answers(&fixed_url(&cfg).unwrap(), &cfg));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn attach_or_start_with_nothing_to_attach_or_spawn_is_offline() {
+        // A test binary is no installed build, and APP_SPAWN_SERVER is unset
+        // in the gates: nothing spawns.
+        if std::env::var_os(ENV_SPAWN_SERVER).is_some() {
+            return;
+        }
+        const APP: AppIdentity = AppIdentity::new("Fixed", "bato-shell-fixed", "1.0.0");
+        let port = free_port().unwrap();
+        let cfg = Config {
+            port: Some(port),
+            attach_timeout: Duration::from_millis(300),
+            ..Config::default()
+        };
+        let a = Supervisor::attach_or_start(&APP, &Settings::default(), cfg);
+        assert!(matches!(a, Attach::Offline { .. }), "{a:?}");
+        assert_eq!(a.url(), format!("http://127.0.0.1:{port}"));
+        assert_eq!(Config::default().port, None);
+        assert_eq!(fixed_url(&Config::default()), None);
     }
 
     #[test]

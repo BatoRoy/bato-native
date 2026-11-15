@@ -1,6 +1,6 @@
 [package]
 name = "bato-shell"
-description = "Platform services for native Bato apps: window identity, settings, HTTP (JSON, bytes, streams, SSE, relays), portal dialogs, notifications, backend supervisor, updater, single instance, file clipboard, reveal/open."
+description = "Platform services for native Bato apps: window identity, settings, HTTP (JSON, bytes, streams, SSE, relays), portal dialogs, notifications, backend supervisor, updater, single instance, file clipboard, reveal/open, system tray."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -31,6 +31,11 @@ clipboard = ["desktop", "dep:wayland-client", "dep:wayland-protocols", "dep:wayl
 # Raise an existing window with an xdg-activation token (single instance,
 # notification clicks): winit's focus_window is a no-op on Wayland.
 activation = ["dep:raw-window-handle", "dep:wayland-client", "dep:wayland-backend", "dep:wayland-protocols"]
+# A system-tray icon (StatusNotifierItem + com.canonical.dbusmenu over the
+# session bus; Waybar, KDE, the GNOME AppIndicator extension). Off by default:
+# an app opts in, see `tray`. Its code and tests always build under
+# `cargo test`, like `supervisor`.
+tray = ["dep:ksni", "dep:png"]
 
 [dependencies]
 bato-theme = { path = "../bato-theme" }
@@ -46,6 +51,9 @@ ureq = { version = "3.5", default-features = false, features = ["rustls-no-provi
 
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser", "raw_handle", "wayland"], optional = true }
 zbus = { version = "5", default-features = false, features = ["async-io"], optional = true }
+# The SNI/dbusmenu protocol (Unlicense). On zbus 5 and async-io like the rest,
+# so no tokio.
+ksni = { version = "0.3.7", default-features = false, features = ["async-io"], optional = true }
 
 # Same version and features as bato-kit (the PoC's list plus x11), so the
 # workspace never builds two feature sets of iced.
@@ -65,6 +73,9 @@ futures = { version = "0.3", default-features = false, features = ["std", "execu
 zbus = { version = "5", default-features = false, features = ["async-io", "p2p"] }
 # Runs iced Tasks in the iced_ext tests (already in the tree through iced).
 iced_runtime = "0.14"
+# `tray` builds under `cargo test` (see the feature).
+ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
+png = "0.17"
 
 [[example]]
 name = "fileclip"

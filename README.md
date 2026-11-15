@@ -9,7 +9,7 @@ fix to text, scrolling, theme or a widget is made once and reaches an app when i
 | `crates/bato-theme` | Hybrid tokens, contrast-safe accents, persisted settings (port of `theme.tsx`) |
 | `crates/scroll-physics` | Chromium wheel/touchpad/touchscreen scrolling and BatoScroll autoscroll, toolkit-neutral |
 | `crates/bato-kit` | The widget kit; re-exports `iced` (apps use iced only through `bato_kit::iced`) |
-| `crates/bato-shell` | Platform services: window identity, settings, HTTP, portal dialogs, notifications, backend supervisor, updater |
+| `crates/bato-shell` | Platform services: window identity, settings, HTTP, portal dialogs, notifications, backend supervisor, updater, system tray |
 | `examples/gallery` | The Showcase: every kit component, and the visual test bench |
 | `patched/` | Patched upstream crates (normalised sources); regenerated from `patches/` by `scripts/regen-patched.sh` |
 | `assets/` | Fonts (Inter, JetBrains Mono; OFL) and lucide icons, compiled in |
@@ -44,17 +44,17 @@ fails if they disagree:
 
 ```toml
 [dependencies]
-bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2", optional = true }  # Examples + Scroll lab (`examples` feature)
+bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0", optional = true }  # Examples + Scroll lab (`examples` feature)
 
 [patch.crates-io]
-winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
-smithay-clipboard = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
+smithay-clipboard = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.2.0" }
 ```
 
 Working on the kit and an app together, without tagging: in the app, a git-ignored

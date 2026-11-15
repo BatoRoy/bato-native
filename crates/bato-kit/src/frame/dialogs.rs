@@ -252,7 +252,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             &self.cx,
             "App Options",
             Some(description.as_str()),
-            Some(self.brand.icon.into()),
+            Some(self.mark),
             wrap(Msg::Close),
             body,
         )
@@ -336,7 +336,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         let cx = self.cx.on_card();
         let p = cx.p();
         let body = column![
-            app_mark(&cx, self.brand.icon, 56.0),
+            app_mark(&cx, self.mark, 56.0),
             vgap(12.0),
             label(self.brand.name, 16.0, 24.0)
                 .semibold()

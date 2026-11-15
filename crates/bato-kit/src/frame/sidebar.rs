@@ -91,7 +91,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         let header: El<'a, M> = {
             let mark: El<'a, M> = match self.logo {
                 Some(logo) => icon(logo, 32.0).color(c(p.text)).into(),
-                None => app_mark(cx, self.brand.icon, 32.0),
+                None => app_mark(cx, self.mark, 32.0),
             };
             let mut items: Vec<El<'a, M>> = vec![mark];
             if !collapsed {
