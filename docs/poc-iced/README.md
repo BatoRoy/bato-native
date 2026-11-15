@@ -10,7 +10,7 @@
 > → `scripts/regen-patched.sh`. This file and `shots/` are kept as the record of the PoC.
 
 
-The slice from `native/POC-BRIEF.md` (sidebar, Home, Examples placeholder, Scroll lab, App Options,
+The proof-of-concept slice (sidebar, Home, Examples placeholder, Scroll lab, App Options,
 About) built on **iced 0.14** (crates.io release) with the wgpu renderer, aiming for pixel parity with
 the Electron client in `native/reference/`.
 

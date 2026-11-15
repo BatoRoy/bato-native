@@ -60,9 +60,9 @@ Working on the kit and an app together, without tagging: in the app, a git-ignor
 
 ```toml
 [patch."https://github.com/BatoRoy/bato-native"]
-bato-kit   = { path = "/home/batoroy/Code/BatoApps/bato-native/crates/bato-kit" }
-bato-shell = { path = "/home/batoroy/Code/BatoApps/bato-native/crates/bato-shell" }
-gallery    = { path = "/home/batoroy/Code/BatoApps/bato-native/examples/gallery" }
+bato-kit   = { path = "/path/to/bato-native/crates/bato-kit" }
+bato-shell = { path = "/path/to/bato-native/crates/bato-shell" }
+gallery    = { path = "/path/to/bato-native/examples/gallery" }
 ```
 
 ## Develop

@@ -541,7 +541,7 @@ impl<'buffer> Edit<'buffer> for ViEditor<'_, 'buffer> {
                 }
                 Event::Escape => Action::Escape,
                 Event::Insert(c) => Action::Insert(c),
-                // bato: the user's Neovim has `autoindent` + `smartindent`:
+                // bato: like Neovim with `autoindent` + `smartindent`:
                 // a new line takes the indent of the text before the cursor,
                 // one level (2 spaces) more after an opening brace. At column
                 // 0 (`O`, or Enter before the text) the split is plain and

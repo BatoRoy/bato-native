@@ -128,7 +128,7 @@ fn typed(s: &str) -> Vec<Step<Msg>> {
 /// Rest; click after the last line and type a block with auto-closed
 /// brackets and indentation; select a word with Shift+Ctrl+→ (its other
 /// occurrence lights up); undo; gutter off; TypeScript; vim: normal (block
-/// cursor), `dw`, insert, visual; then the user's Neovim keys: a pending
+/// cursor), `dw`, insert, visual; then the Neovim-style keys: a pending
 /// `<leader>` (`<20>` in the status bar, then `"+y`), `<leader>yy` to the
 /// clipboard and
 /// Ctrl+Shift+V putting it below the last line, visual `<leader>p` twice

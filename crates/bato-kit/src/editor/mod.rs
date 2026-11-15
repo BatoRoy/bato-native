@@ -20,7 +20,7 @@
 //!   Delete), matched by the key's Latin letter on any layout; a selection
 //!   becomes the primary selection and middle-click pastes it.
 //! - Vim mode (`vi.rs`, cosmic-text's `ViEditor` vendored for vim's
-//!   register and operator semantics) plus the user's Neovim keymap
+//!   register and operator semantics) plus a Neovim-style keymap
 //!   (`engine::Doc::vim_input`): `<leader>` = Space with `timeoutlen`
 //!   1000 ms (`<20>` in the status bar), `<leader>y` → `"+y`,
 //!   `<leader>d` → `"_d`, visual `<leader>p` (paste keeping `""`),

@@ -1,3 +1,8 @@
 target/
 # local kit development overrides in consuming apps live there, not here
 .cargo/config.toml
+# Planning and personal notes live in the private bato repo (docs/native/), never here:
+# this repo is public.
+docs/PORT-PLAN.md
+docs/POC-BRIEF.md
+docs/plan/

@@ -639,7 +639,7 @@ impl Doc {
         }
     }
 
-    // ── Vim: the host keymap (the user's Neovim config) ──────────────────
+    // ── Vim: the host keymap (Neovim-style leader bindings) ──────────────────
 
     fn vi(&mut self) -> Option<&mut ViEditor> {
         match &mut self.engine {
@@ -685,7 +685,7 @@ impl Doc {
         self.feed(fs, ct::Action::Insert(LEADER), clip)
     }
 
-    /// One key in vim mode, with the user's mappings (see [`VimKey`]).
+    /// One key in vim mode, with the Bato keymap (see [`VimKey`]).
     /// `None`: not a vim key (the event goes on).
     pub fn vim_input(
         &mut self,
@@ -703,7 +703,7 @@ impl Doc {
             return None;
         }
 
-        // `<C-c>` is `<Esc>` in every mode (the user's insert-mode map,
+        // `<C-c>` is `<Esc>` in every mode (a common insert-mode map,
         // extended to visual and normal); it never copies.
         if matches!(key, VimKey::Ctrl('c' | '[', _)) {
             self.leader = None;
@@ -955,7 +955,7 @@ impl Doc {
     }
 
     /// Visual `J` / `K`: move the selected lines down / up one line,
-    /// keeping them selected (the user's `:m '>+1<CR>gv=gv`, without `=`:
+    /// keeping them selected (the common `:m '>+1<CR>gv=gv`, without `=`:
     /// modit has no reindent). One undo step.
     fn move_lines(&mut self, down: bool) -> Outcome {
         let Some(Engine::Vi(v)) = &mut self.engine else {
@@ -1045,9 +1045,9 @@ impl Doc {
 type ViEditor = super::vi::ViEditor<'static, 'static>;
 pub use super::vi::Register;
 
-/// `mapleader` (the user's `vim.g.mapleader = " "`).
+/// `mapleader` (Space, as `vim.g.mapleader = " "`).
 pub const LEADER: char = ' ';
-/// `timeoutlen`: Neovim's default (the user's `set.lua` keeps it).
+/// `timeoutlen`: Neovim's default.
 pub const TIMEOUTLEN: Duration = Duration::from_millis(1000);
 
 /// A key in vim mode, decoded by the widget.

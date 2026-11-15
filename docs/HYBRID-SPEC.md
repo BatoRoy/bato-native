@@ -596,7 +596,7 @@ Page wrapper: padding 24, vertical gap 24, max-width 896 / none; h1 "Component k
 7. Settings are split across stores: theme, scale, accent, width, selection and collapse go in **localStorage** (Chromium profile), and only `backendUrl` goes in `~/.config/<slug>/settings.json`. `electron.d.ts` comments the settings path as `~/.config/app/settings.json`, which is the template slug hard-coded.
 8. Browser-mode UI scale uses `#root.style.zoom`, which does not scale portaled Tooltip and CommandPalette; Electron uses page zoom, which scales everything.
 9. `net:request` has no timeout, so "Test connection" against an unroutable LAN IP can hang for the OS TCP timeout (about 2 min on Linux) with the button disabled.
-10. `-webkit-font-smoothing: antialiased` has no effect on Linux or Windows, so the "look" on the user's Linux box is FreeType + fontconfig defaults, not macOS grayscale.
+10. `-webkit-font-smoothing: antialiased` has no effect on Linux or Windows, so the "look" on Linux is FreeType + fontconfig defaults, not macOS grayscale.
 11. `.mono-text` (12px, lh 1.6) silently overrides `text-xs` on the About version because it is declared after the Tailwind utilities.
 12. Toast enters by sliding **from the left** (−8px) even though toasts are anchored bottom-right.
 13. Tailwind `screens.app` (900px) is defined, but nothing in the template's own markup uses `app:`; Home's 2-column grid is keyed to `sm` (640px).

@@ -352,7 +352,7 @@ fn a_line_split_off_a_comment_is_not_slanted() {
 
 #[test]
 fn vim_new_lines_keep_the_indent_like_neovim() {
-    // The user's Neovim: autoindent + smartindent, 2-space indents.
+    // Neovim with autoindent + smartindent, 2-space indents.
     crate::fonts::setup();
     let mut d = Doc::new("function f() {\n  a()\n}");
     let mut fs = font_system().write().unwrap();

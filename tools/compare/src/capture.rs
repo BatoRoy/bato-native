@@ -1,6 +1,6 @@
 //! Launching a client on the off-screen output and capturing its window.
 //!
-//! Safety rules (docs/POC-BRIEF.md "Testing"): `tools/offscreen.sh check` before
+//! Safety rules (tools/README.md): `tools/offscreen.sh check` before
 //! every launch; right after the window maps, its workspace must be `batopoc`
 //! on output BATOPOC, else the process is killed at once; native windows are
 //! captured only through `tools/shot.sh <pid>` (which refuses windows anywhere

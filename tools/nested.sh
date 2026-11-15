@@ -9,7 +9,7 @@
 # with its own XDG_RUNTIME_DIR, HOME, config and D-Bus, started from `env -i`.
 # Clipboard, primary selection, keyboard focus and drag-and-drop are real, so
 # paste, shortcuts and file drops can be exercised end to end. Nothing in here
-# can reach the user's session: hyprctl, wl-copy and grim talk to the nested
+# can reach the desktop session: hyprctl, wl-copy and grim talk to the nested
 # sockets only.
 #
 #   tools/nested.sh up                         start the session (and build the driver)
