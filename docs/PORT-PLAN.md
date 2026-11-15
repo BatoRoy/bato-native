@@ -195,6 +195,16 @@ testing on desktop and the touchscreen laptop, and the fixes it turned up:
 The template's Examples and Scroll lab pages sit behind an `examples` cargo feature (on by default). Without
 it the release is 22.5 MB instead of 29.9 MB.
 
+#### Phase 5 foundations: `v1.1.0` (2026-11-15)
+
+What the BatoFetch pilot and the BatoBrowse plan needed from the kit:
+
+| Crate | Added |
+|---|---|
+| bato-kit | `thumb` (async decode, LRU, glyph fallback), `picture`/`vector`, app icons and logos (`Icon::svg`, `Frame::logo`, 82 more lucide icons), menu submenus, `focus::select_range`/`stem_range`, `Modal::initial_focus`, label `\n`/`wrap_hints`/`max_lines`, `reveal_group`, `timer::every`, control heights, `scroller::virtual_grid`, `dnd::os_drag` |
+| bato-shell | streaming `http` (headers, Range, bytes, SSE, relay with progress and cancel, stall timeouts, session secret), `instance` (single instance with argv forwarding), `clipboard` (file copy and cut, interop with other file managers), `desktop` (reveal, open, detached spawn), `activation`, supervisor options (process name, PATH prepend, session secret, saved-backend policy) |
+| winit | Two more patches: OS drag sources on Wayland (`wl_data_source`) and X11 (XDND) |
+
 **Still not done** (carried from Phase 3): avatar images, CodeMirror search/multi-cursor/folding and IME in the
 editor, the Kanban drag tilt, a few React `title` tooltips. Middle-click paste works in the code editor only, not in
 plain text fields.
