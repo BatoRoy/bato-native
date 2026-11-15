@@ -131,9 +131,9 @@ struct Shared {
     wheel: Option<WheelLatch>,
     /// (finger, scroller)
     touch: Option<(u64, u64)>,
-    keys: Vec<u64>,
-    drawn: HashMap<u64, Instant>,
-    last_draw: Option<Instant>,
+    drawn: HashMap<u64, Drawn>,
+    surfaces: HashMap<u64, Surface>,
+    focus: KeyFocus,
     requests: Vec<Request>,
     offsets: HashMap<u64, (f32, f32)>,
     names: HashMap<u64, iced::widget::Id>,
@@ -353,45 +353,253 @@ pub fn is_synthetic_lost() -> bool {
 }
 
 // ── Keyboard chain ──────────────────────────────────────────────────────
+//
+// Chromium's rule for the scroll keys (arrows, Page Up/Down, Space,
+// Home/End), after every key handler had its chance (`preventDefault`):
+// the scroller nearest the focused element, else the one the last click
+// landed in, else the document's main scroller, each bubbling to its
+// ancestors at an edge. An unfocused side scroller never takes them.
+//
+// Everything here is per *surface* (one window's focus root, see
+// [`in_surface`]): a click in one window never steers the keys of another.
+
+/// Where the focus was when the current key press arrived.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum KeyFocus {
+    /// Not known on this pass (an overlay pass that found no focus in its
+    /// own layer): the click chain decides.
+    #[default]
+    Unknown,
+    /// Nothing has focus (the body).
+    Nothing,
+    /// A widget has focus, inside these scrollers (outer → inner; empty:
+    /// in none of them, so the main scroller takes the keys).
+    In(Vec<u64>),
+}
+
+/// The scroll keys, as a bit set ([`key_bit`]).
+pub type KeySet = u16;
+/// Every scroll key.
+pub const ALL_KEYS: KeySet = 0x1ff;
+
+/// The bit of a scroll key in a [`KeySet`]; `None` for any other key.
+pub fn key_bit(k: iced::keyboard::key::Named) -> Option<KeySet> {
+    use iced::keyboard::key::Named;
+    let i = match k {
+        Named::ArrowUp => 0,
+        Named::ArrowDown => 1,
+        Named::ArrowLeft => 2,
+        Named::ArrowRight => 3,
+        Named::PageUp => 4,
+        Named::PageDown => 5,
+        Named::Space => 6,
+        Named::Home => 7,
+        Named::End => 8,
+        _ => return None,
+    };
+    Some(1 << i)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Drawn {
+    at: Instant,
+    surface: u64,
+    /// The surface's draw pass ([`begin_draw`]).
+    pass: u64,
+    root: bool,
+    /// Owns the autoscroll bus: the frame's page.
+    page: bool,
+    /// Visible area (logical px²).
+    area: f32,
+}
+
+#[derive(Debug, Default)]
+struct Surface {
+    /// The scrollers around the last press (outer → inner).
+    keys: Vec<u64>,
+    /// The latest draw pass (0: none counted, liveness falls back to time).
+    pass: u64,
+    last_draw: Option<Instant>,
+    /// Keys reserved by live [`own_keys`] widgets: (pass, keys).
+    owned: (u64, KeySet),
+}
+
+thread_local! {
+    static SURFACE: Cell<u64> = const { Cell::new(0) };
+    static DRAW_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+static NEXT_SURFACE: AtomicU64 = AtomicU64::new(1);
+
+/// A fresh surface identity (a focus root keeps one per window).
+pub fn next_surface() -> u64 {
+    NEXT_SURFACE.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Run `f` (a window's `update` or `draw`) as part of `surface`.
+pub fn in_surface<R>(surface: u64, f: impl FnOnce() -> R) -> R {
+    let was = SURFACE.with(|c| c.replace(surface));
+    let r = f();
+    SURFACE.with(|c| c.set(was));
+    r
+}
+
+/// The surface whose `update` or `draw` is running (0 outside any).
+pub fn surface() -> u64 {
+    SURFACE.with(Cell::get)
+}
+
+/// The focus root starts drawing its window: a new pass for liveness.
+pub fn begin_draw() {
+    let sf = surface();
+    with(|s| s.surfaces.entry(sf).or_default().pass += 1);
+}
+
+/// A scroller's `draw` starts; the guard ends it. `root`: no scroller is
+/// drawing around it.
+pub fn draw_enter() -> DrawGuard {
+    let depth = DRAW_DEPTH.with(|d| d.replace(d.get() + 1));
+    DrawGuard { root: depth == 0 }
+}
+
+pub struct DrawGuard {
+    pub root: bool,
+}
+
+impl Drop for DrawGuard {
+    fn drop(&mut self) {
+        DRAW_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
 
 /// A press landed in the running scroller: it and its ancestors take the
 /// keys. Outer scrollers see the press first, so the innermost one wins.
 pub fn press_here() {
-    with(|s| s.keys = s.stack.clone());
+    let sf = surface();
+    with(|s| {
+        let keys = s.stack.clone();
+        s.surfaces.entry(sf).or_default().keys = keys;
+    });
 }
 
-/// May the running scroller `id` act on a scroll key? The clicked
-/// scroller's chain does; a root scroller also does while no scroller of the
-/// chain is on screen (nothing clicked yet, or it was removed).
-pub fn key_eligible(id: u64, root: bool) -> bool {
+/// Record where the focus is for the key press being delivered.
+pub fn set_key_focus(f: KeyFocus) {
+    with(|s| s.focus = f);
+}
+
+/// A widget that handles these keys itself (a list with its own cursor) is
+/// on screen: no scroller of its window acts on them (see
+/// [`super::own_keys`]).
+pub fn reserve_keys(keys: KeySet) {
+    let sf = surface();
     with(|s| {
-        if s.keys.contains(&id) {
+        let e = s.surfaces.entry(sf).or_default();
+        if e.owned.0 != e.pass {
+            e.owned = (e.pass, 0);
+        }
+        e.owned.1 |= keys;
+    });
+}
+
+/// Is `key` (a [`key_bit`]) reserved by a live owner in this surface?
+pub fn key_reserved(key: KeySet) -> bool {
+    let sf = surface();
+    with(|s| {
+        s.surfaces
+            .get(&sf)
+            .is_some_and(|e| e.pass > 0 && e.owned.0 == e.pass && e.owned.1 & key != 0)
+    })
+}
+
+/// May the running scroller `id` act on a scroll key? See the section
+/// comment: the focus chain, else the click chain, else the main scroller.
+pub fn key_eligible(id: u64, root: bool) -> bool {
+    let sf = surface();
+    with(|s| {
+        match &s.focus {
+            KeyFocus::In(chain) if !chain.is_empty() => return chain.contains(&id),
+            KeyFocus::In(_) => return root && is_main(s, sf, id),
+            KeyFocus::Nothing | KeyFocus::Unknown => {}
+        }
+        let keys = s
+            .surfaces
+            .get(&sf)
+            .map(|e| e.keys.as_slice())
+            .unwrap_or(&[]);
+        if keys.contains(&id) {
             return true;
         }
         if !root {
             return false;
         }
-        match s.keys.first() {
-            None => true,
-            Some(r) => !is_live(s, *r),
+        match keys.first() {
+            Some(r) if is_live(s, *r) => false,
+            _ => is_main(s, sf, id),
         }
     })
 }
 
+/// The document's main scroller of surface `sf`: the page (the one with the
+/// autoscroll bus) if it is on screen, else the largest root scroller.
+fn is_main(s: &Shared, sf: u64, id: u64) -> bool {
+    let live = s
+        .drawn
+        .iter()
+        .filter(|(i, d)| d.surface == sf && d.root && is_live(s, **i));
+    let main = live
+        .max_by(|a, b| {
+            (a.1.page, a.1.area)
+                .partial_cmp(&(b.1.page, b.1.area))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                // Equal: the first drawn (lower id) wins.
+                .then(b.0.cmp(a.0))
+        })
+        .map(|(i, _)| *i);
+    main == Some(id)
+}
+
 fn is_live(s: &Shared, id: u64) -> bool {
-    match (s.drawn.get(&id), s.last_draw) {
-        (Some(t), Some(last)) => last.saturating_duration_since(*t) < Duration::from_millis(30),
-        _ => false,
+    let Some(d) = s.drawn.get(&id) else {
+        return false;
+    };
+    let Some(sf) = s.surfaces.get(&d.surface) else {
+        return false;
+    };
+    if sf.pass > 0 {
+        return d.pass == sf.pass;
     }
+    sf.last_draw
+        .is_some_and(|last| last.saturating_duration_since(d.at) < Duration::from_millis(30))
 }
 
 /// The scroller was drawn (liveness for the keyboard chain) at these
-/// offsets (logical px; debug and self-test readout).
-pub fn drawn(id: u64, name: Option<&iced::widget::Id>, offsets: (f32, f32)) {
+/// offsets (logical px; debug and self-test readout). `root`: no scroller
+/// around it; `page`: it owns the autoscroll bus; `area`: its visible size.
+pub fn drawn(
+    id: u64,
+    name: Option<&iced::widget::Id>,
+    offsets: (f32, f32),
+    root: bool,
+    page: bool,
+    area: f32,
+) {
     let now = Instant::now();
+    let sf = surface();
     with(|s| {
-        s.drawn.insert(id, now);
-        s.last_draw = Some(now);
+        let e = s.surfaces.entry(sf).or_default();
+        e.last_draw = Some(now);
+        let pass = e.pass;
+        s.drawn.insert(
+            id,
+            Drawn {
+                at: now,
+                surface: sf,
+                pass,
+                root,
+                page,
+                area,
+            },
+        );
         s.offsets.insert(id, offsets);
         if let Some(n) = name {
             s.names.insert(id, n.clone());
@@ -505,8 +713,8 @@ mod tests {
         }
         drop(a);
         assert!(stack().is_empty());
-        drawn(100, None, (0.0, 0.0));
-        drawn(101, None, (0.0, 0.0));
+        drawn(100, None, (0.0, 0.0), true, true, 1e5);
+        drawn(101, None, (0.0, 0.0), false, false, 1e4);
         assert!(key_eligible(101, false));
         assert!(key_eligible(100, true));
         assert!(!key_eligible(102, false));
@@ -514,6 +722,121 @@ mod tests {
             !key_eligible(103, true),
             "another root while the chain is on screen"
         );
+    }
+
+    /// One window's scrollers: a page (with the bus) or not, a side one.
+    fn draw_pass(sf: u64, page: bool) {
+        in_surface(sf, || {
+            begin_draw();
+            // Side scroller first in tree order (BatoBrowse's sidebar).
+            drawn(sf * 10 + 1, None, (0.0, 0.0), true, false, 240.0 * 700.0);
+            drawn(sf * 10 + 2, None, (0.0, 0.0), true, page, 1000.0 * 700.0);
+            drawn(sf * 10 + 3, None, (0.0, 0.0), false, false, 300.0 * 200.0);
+        });
+    }
+
+    #[test]
+    fn keys_go_to_the_main_scroller_before_any_click() {
+        let sf = next_surface();
+        let (side, main, inner) = (sf * 10 + 1, sf * 10 + 2, sf * 10 + 3);
+        draw_pass(sf, false);
+        in_surface(sf, || {
+            set_key_focus(KeyFocus::Nothing);
+            assert!(!key_eligible(side, true), "an unclicked side scroller");
+            assert!(key_eligible(main, true), "the largest root is the main one");
+            assert!(!key_eligible(inner, false));
+        });
+        // The page (bus owner) is the main scroller even when smaller.
+        let sf2 = next_surface();
+        in_surface(sf2, || {
+            begin_draw();
+            drawn(sf2 * 10 + 1, None, (0.0, 0.0), true, false, 9e5);
+            drawn(sf2 * 10 + 2, None, (0.0, 0.0), true, true, 1e5);
+            set_key_focus(KeyFocus::Unknown);
+            assert!(!key_eligible(sf2 * 10 + 1, true));
+            assert!(key_eligible(sf2 * 10 + 2, true));
+        });
+    }
+
+    #[test]
+    fn focus_then_click_then_main() {
+        let sf = next_surface();
+        let (side, main, inner) = (sf * 10 + 1, sf * 10 + 2, sf * 10 + 3);
+        draw_pass(sf, true);
+        in_surface(sf, || {
+            // A click in the side scroller: it takes the keys.
+            {
+                let _a = enter(side, None, (0.0, 0.0));
+                press_here();
+            }
+            set_key_focus(KeyFocus::Nothing);
+            assert!(key_eligible(side, true));
+            assert!(!key_eligible(main, true));
+            // A focused widget in the inner scroller (inside the page) wins
+            // over the click, and bubbles to the page.
+            set_key_focus(KeyFocus::In(vec![main, inner]));
+            assert!(key_eligible(inner, false));
+            assert!(key_eligible(main, true));
+            assert!(!key_eligible(side, true));
+            // Focus outside every scroller: the document, i.e. the main one.
+            set_key_focus(KeyFocus::In(vec![]));
+            assert!(key_eligible(main, true));
+            assert!(!key_eligible(side, true));
+            assert!(!key_eligible(inner, false));
+        });
+        // The clicked scroller went away: the main one again.
+        in_surface(sf, || {
+            begin_draw();
+            drawn(main, None, (0.0, 0.0), true, true, 1e5);
+            set_key_focus(KeyFocus::Nothing);
+            assert!(key_eligible(main, true));
+        });
+    }
+
+    #[test]
+    fn surfaces_keep_their_own_click_and_owners() {
+        let (a, b) = (next_surface(), next_surface());
+        draw_pass(a, true);
+        draw_pass(b, true);
+        set_key_focus(KeyFocus::Nothing);
+        in_surface(a, || {
+            let _s = enter(a * 10 + 1, None, (0.0, 0.0));
+            press_here();
+        });
+        // A click in window a does not steer window b.
+        in_surface(b, || {
+            assert!(key_eligible(b * 10 + 2, true));
+            assert!(!key_eligible(b * 10 + 1, true));
+        });
+        in_surface(a, || assert!(key_eligible(a * 10 + 1, true)));
+        // A key owner drawn in b reserves its keys there only.
+        let down = key_bit(iced::keyboard::key::Named::ArrowDown).unwrap();
+        let home = key_bit(iced::keyboard::key::Named::Home).unwrap();
+        in_surface(b, || {
+            begin_draw();
+            reserve_keys(down);
+            assert!(key_reserved(down));
+            assert!(!key_reserved(home));
+        });
+        in_surface(a, || assert!(!key_reserved(down)));
+        // Not drawn in the next pass: no longer reserved.
+        in_surface(b, || {
+            begin_draw();
+            assert!(!key_reserved(down));
+        });
+        assert_eq!(key_bit(iced::keyboard::key::Named::Enter), None);
+    }
+
+    #[test]
+    fn draw_depth_marks_roots() {
+        let outer = draw_enter();
+        assert!(outer.root);
+        {
+            let inner = draw_enter();
+            assert!(!inner.root);
+        }
+        drop(outer);
+        assert!(draw_enter().root);
     }
 
     #[test]

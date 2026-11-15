@@ -48,6 +48,7 @@ use crate::anim::{ease_out, ease_standard, with_opacity};
 use crate::ctx::Ctx;
 use crate::icon::{Ico, Icon, icon};
 use crate::label::label;
+use crate::scale::snap_rect;
 use crate::style::{c, shadows};
 use crate::surface::{BoxStyle, paint};
 use iced::advanced::overlay;
@@ -167,6 +168,10 @@ const ROW_PX: f32 = 10.0; // px-2.5
 const GAP: f32 = 10.0; // gap-2.5
 const ICON: f32 = 15.0;
 const SHORTCUT_PL: f32 = 16.0; // pl-4
+/// The shortcut's line box: `.mono-text` (index.css, after the utilities)
+/// sets `line-height: 1.6` over `text-xs`'s 16 px, so 12 × 1.6. Centred in
+/// the 32 px row, that puts its baseline 1 px higher than a 16 px box would.
+const SHORTCUT_LH: f32 = 19.2;
 const SEP_MY: f32 = 4.0; // my-1
 const MIN_W: f32 = 192.0; // min-w-[12rem]
 const TRANSITION: Duration = Duration::from_millis(150);
@@ -179,6 +184,16 @@ pub const CLOSE_DELAY: Duration = Duration::from_millis(250);
 const SUB_ENTER: f32 = 0.120;
 /// Window margin of the flip/shift (`window.innerWidth - 8`).
 const EDGE: f32 = 8.0;
+
+/// The panel's border-box width for rows of max-content width `natural`
+/// (padding and border included): `min-w`, capped by the room. Like
+/// Chromium's LayoutUnits it stays fractional, so a label is never cut by
+/// a rounding; the box is painted pixel-snapped (`snap_rect`: both edges
+/// rounded), which is how a content-sized menu comes out as wide as React's
+/// instead of a pixel wider (a `ceil` here did that).
+fn panel_width(natural: f32, min_width: f32, max_w: f32) -> f32 {
+    natural.max(min_width).min(max_w.max(min_width.min(max_w)))
+}
 
 /// Where a fly-out of `size` opens next to the submenu `row` (absolute
 /// coordinates) in a `window`: right of the row, its first item level with
@@ -347,7 +362,12 @@ pub fn menu_list<'a, M: Clone + 'a>(cx: &Ctx, entries: Vec<MenuEntry<M>>) -> Men
                     children.push(icon(Ico::ChevronRight, 14.0).color(c(p.muted)).into());
                     true
                 } else if let Some(s) = &a.shortcut {
-                    children.push(label(s.clone(), 12.0, 16.0).mono().color(c(p.muted)).into());
+                    children.push(
+                        label(s.clone(), 12.0, SHORTCUT_LH)
+                            .mono()
+                            .color(c(p.muted))
+                            .into(),
+                    );
                     true
                 } else {
                     false
@@ -624,10 +644,7 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for MenuList<'a, 
             let iw = if a.has_icon { ICON + GAP } else { 0.0 };
             natural = natural.max(ROW_PX + iw + lw + tw + ROW_PX);
         }
-        let width = (natural + 2.0 * inset)
-            .max(self.min_width)
-            .min(max_w.max(self.min_width.min(max_w)))
-            .ceil();
+        let width = panel_width(natural + 2.0 * inset, self.min_width, max_w);
         let inner_w = width - 2.0 * inset;
 
         let mut nodes: Vec<layout::Node> = Vec::with_capacity(self.children.len());
@@ -965,7 +982,7 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for MenuList<'a, 
     ) {
         let st = tree.state.downcast_ref::<State>();
         let b = layout.bounds();
-        paint(renderer, b, &self.style());
+        paint(renderer, snap_rect(b), &self.style());
         let kids: Vec<Layout<'_>> = layout.children().collect();
         let draw_child = |renderer: &mut iced::Renderer, i: usize| {
             self.children[i].as_widget().draw(
@@ -981,11 +998,11 @@ impl<'a, M: Clone + 'a> Widget<M, iced::Theme, iced::Renderer> for MenuList<'a, 
         let mut node = 0usize;
         for (i, row) in self.rows.iter().enumerate() {
             let rect = st.rects.get(i).copied().unwrap_or_default();
-            let rect = Rectangle {
+            let rect = snap_rect(Rectangle {
                 x: b.x + rect.x,
                 y: b.y + rect.y,
                 ..rect
-            };
+            });
             let Some(a) = &row.action else {
                 renderer.fill_quad(
                     Quad {
@@ -1177,6 +1194,41 @@ mod tests {
         let none: Vec<MenuEntry<u8>> = vec![separator(), action("Off", 0).disabled(true).into()];
         assert_eq!(next_enabled_index(&none, -1, 1), -1);
         assert_eq!(next_enabled_index::<u8>(&[], -1, 1), -1);
+    }
+
+    #[test]
+    fn content_sized_width_stays_fractional() {
+        // Room to spare: max-content wins over min-w and is not rounded up.
+        assert_eq!(panel_width(205.3, MIN_W, 1280.0), 205.3);
+        // Painted with both edges rounded: 205 px at x = 100, like Chromium
+        // (a ceil made it 206).
+        let r = snap_rect(Rectangle::new(
+            Point::new(100.0, 0.0),
+            Size::new(205.3, 10.0),
+        ));
+        assert_eq!(r.width, 205.0);
+        assert_eq!(panel_width(150.0, MIN_W, 1280.0), MIN_W);
+        // No room: the window width caps it, min-w included.
+        assert_eq!(panel_width(400.0, MIN_W, 300.0), 300.0);
+        assert_eq!(panel_width(400.0, MIN_W, 150.0), 150.0);
+    }
+
+    #[test]
+    fn shortcut_baseline_matches_chromium() {
+        use crate::label::{Fam, blink_baseline};
+        // `.mono-text` 12/19.2 centred in the 32 px row: Blink's baseline
+        // sits 19 px below the row top (6.4 + 12 + floor(1.6), rounded).
+        let top = (ROW_H - SHORTCUT_LH) / 2.0;
+        assert_eq!(
+            (top + blink_baseline(Fam::Mono, 12.0, SHORTCUT_LH, 1.0)).round(),
+            19.0
+        );
+        // With text-xs's own 16 px line box it was 20: the pixel too low.
+        let top16 = (ROW_H - 16.0) / 2.0;
+        assert_eq!(
+            (top16 + blink_baseline(Fam::Mono, 12.0, 16.0, 1.0)).round(),
+            20.0
+        );
     }
 
     #[test]

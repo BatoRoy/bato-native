@@ -100,9 +100,11 @@ struct Script {
     next: Option<Instant>,
 }
 
-#[derive(Default)]
 struct State {
     script: Option<Script>,
+    /// This window's identity for the scroll-key rules
+    /// ([`crate::scroller::chain::in_surface`]).
+    surface: u64,
 }
 
 fn key_event(named: Named, shift: bool, pressed: bool) -> Event {
@@ -167,6 +169,130 @@ fn describe(e: Option<&Entry>) -> String {
 }
 
 impl<'a, M> FocusRoot<'a, M> {
+    /// [`Widget::update`], inside the window's surface.
+    #[allow(clippy::too_many_arguments)]
+    fn update_in(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, M>,
+        viewport: &Rectangle,
+    ) {
+        self.viewport = *viewport;
+        // Where the focus is, for the scroll keys (the overlays had theirs).
+        if crate::scroller::keys::scroll_key(event) {
+            let chain = self.focus_chain(tree, layout, renderer, viewport);
+            crate::scroller::chain::set_key_focus(match chain {
+                Some(c) => crate::scroller::chain::KeyFocus::In(c),
+                None => crate::scroller::chain::KeyFocus::Nothing,
+            });
+        }
+        // Modality first, so widgets see the new value while handling it.
+        let press = super::is_pointer_press(event);
+        match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if !is_modifier(key) && plain(*modifiers) =>
+            {
+                if set_keyboard_modality(true) {
+                    shell.request_redraw();
+                }
+            }
+            _ if press => {
+                if set_keyboard_modality(false) {
+                    shell.request_redraw();
+                }
+                begin_press();
+            }
+            _ => {}
+        }
+        crate::scroller::chain::in_ui(|| {
+            self.content.as_widget_mut().update(
+                &mut tree.children[0],
+                event,
+                layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        });
+        if press {
+            end_press();
+        }
+        if let Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Named(Named::Tab),
+            modifiers,
+            ..
+        }) = event
+            && plain(*modifiers)
+            && !shell.is_event_captured()
+        {
+            self.tab(tree, layout, renderer, modifiers.shift());
+            shell.capture_event();
+            shell.request_redraw();
+        }
+        let requests = take_requests();
+        if !requests.is_empty() {
+            self.serve(tree, layout, renderer, requests);
+            shell.request_redraw();
+        }
+        // The self-test script, on redraws.
+        if let Event::Window(window::Event::RedrawRequested(now)) = event {
+            let st = tree.state.downcast_mut::<State>();
+            let Some(script) = &mut st.script else {
+                return;
+            };
+            let due = *script.next.get_or_insert(*now + Duration::from_millis(800));
+            if *now < due {
+                shell.request_redraw_at(due);
+                return;
+            }
+            let Some(step) = script.steps.pop_front() else {
+                st.script = None;
+                eprintln!("focus selftest: done");
+                return;
+            };
+            script.next = Some(*now + Duration::from_millis(150));
+            let at = script.next.unwrap();
+            self.play(tree, step, layout, renderer, clipboard, shell, viewport);
+            shell.request_redraw_at(at);
+        }
+    }
+
+    /// The kit scrollers around the focused widget (base layer or an
+    /// overlay); `None` when nothing has focus.
+    fn focus_chain(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+    ) -> Option<Vec<u64>> {
+        let mut op = crate::scroller::FocusChain::default();
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, &mut op);
+        if op.found.is_some() {
+            return op.found;
+        }
+        let ov = self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            Vector::ZERO,
+        )?;
+        let mut nested = overlay::Nested::new(ov);
+        let node = nested.layout(renderer, layout.bounds().size());
+        let mut op = crate::scroller::FocusChain::default();
+        nested.operate(Layout::new(&node), renderer, &mut op);
+        op.found
+    }
     /// Run `op` on the content, then on its overlay (anchored panels come
     /// last in document order, like React portals).
     fn each(
@@ -380,7 +506,10 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
                 steps: steps.into(),
                 next: None,
             });
-        tree::State::new(State { script })
+        tree::State::new(State {
+            script,
+            surface: crate::scroller::chain::next_surface(),
+        })
     }
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.content)]
@@ -409,78 +538,12 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) {
-        self.viewport = *viewport;
-        // Modality first, so widgets see the new value while handling it.
-        let press = super::is_pointer_press(event);
-        match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-                if !is_modifier(key) && plain(*modifiers) =>
-            {
-                if set_keyboard_modality(true) {
-                    shell.request_redraw();
-                }
-            }
-            _ if press => {
-                if set_keyboard_modality(false) {
-                    shell.request_redraw();
-                }
-                begin_press();
-            }
-            _ => {}
-        }
-        crate::scroller::chain::in_ui(|| {
-            self.content.as_widget_mut().update(
-                &mut tree.children[0],
-                event,
-                layout,
-                cursor,
-                renderer,
-                clipboard,
-                shell,
-                viewport,
+        let surface = tree.state.downcast_ref::<State>().surface;
+        crate::scroller::chain::in_surface(surface, || {
+            self.update_in(
+                tree, event, layout, cursor, renderer, clipboard, shell, viewport,
             );
         });
-        if press {
-            end_press();
-        }
-        if let Event::Keyboard(keyboard::Event::KeyPressed {
-            key: Key::Named(Named::Tab),
-            modifiers,
-            ..
-        }) = event
-            && plain(*modifiers)
-            && !shell.is_event_captured()
-        {
-            self.tab(tree, layout, renderer, modifiers.shift());
-            shell.capture_event();
-            shell.request_redraw();
-        }
-        let requests = take_requests();
-        if !requests.is_empty() {
-            self.serve(tree, layout, renderer, requests);
-            shell.request_redraw();
-        }
-        // The self-test script, on redraws.
-        if let Event::Window(window::Event::RedrawRequested(now)) = event {
-            let st = tree.state.downcast_mut::<State>();
-            let Some(script) = &mut st.script else {
-                return;
-            };
-            let due = *script.next.get_or_insert(*now + Duration::from_millis(800));
-            if *now < due {
-                shell.request_redraw_at(due);
-                return;
-            }
-            let Some(step) = script.steps.pop_front() else {
-                st.script = None;
-                eprintln!("focus selftest: done");
-                return;
-            };
-            script.next = Some(*now + Duration::from_millis(150));
-            let at = script.next.unwrap();
-            self.play(tree, step, layout, renderer, clipboard, shell, viewport);
-            shell.request_redraw_at(at);
-        }
     }
     fn operate(
         &mut self,
@@ -519,15 +582,19 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.content.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            style,
-            layout,
-            cursor,
-            viewport,
-        );
+        let surface = tree.state.downcast_ref::<State>().surface;
+        crate::scroller::chain::in_surface(surface, || {
+            crate::scroller::chain::begin_draw();
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout,
+                cursor,
+                viewport,
+            );
+        });
     }
     fn overlay<'b>(
         &'b mut self,
@@ -537,6 +604,7 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, iced::Theme, iced::Renderer>> {
+        let surface = tree.state.downcast_ref::<State>().surface;
         self.content
             .as_widget_mut()
             .overlay(
@@ -546,7 +614,7 @@ impl<'a, M> Widget<M, iced::Theme, iced::Renderer> for FocusRoot<'a, M> {
                 viewport,
                 translation,
             )
-            .map(crate::scroller::ui_overlay)
+            .map(|o| crate::scroller::ui_overlay(o, surface))
     }
 }
 
