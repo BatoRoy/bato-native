@@ -53,6 +53,7 @@ pub mod layout;
 pub mod menu;
 pub mod modal;
 pub mod rail_tip;
+pub mod reveal;
 pub mod scale;
 pub mod scroller;
 pub mod segmented;

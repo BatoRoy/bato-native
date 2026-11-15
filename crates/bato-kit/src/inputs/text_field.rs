@@ -54,6 +54,7 @@ pub struct TextField<'a, M> {
     error: Option<String>,
     required: bool,
     size: FieldSize,
+    height: Option<f32>,
     left_icon: Option<Icon>,
     prefix: Option<String>,
     right_icon: Option<Icon>,
@@ -87,6 +88,7 @@ pub fn text_field<'a, M: Clone + 'a>(
         error: None,
         required: false,
         size: FieldSize::Md,
+        height: None,
         left_icon: None,
         prefix: None,
         right_icon: None,
@@ -129,6 +131,11 @@ impl<'a, M: Clone + 'a> TextField<'a, M> {
     }
     pub fn size(mut self, s: FieldSize) -> Self {
         self.size = s;
+        self
+    }
+    /// A control height other than the size's ([`crate::field::Control::height`]).
+    pub fn height(mut self, px: f32) -> Self {
+        self.height = Some(px);
         self
     }
     pub fn left_icon(mut self, i: impl Into<Icon>) -> Self {
@@ -243,6 +250,9 @@ impl<'a, M: Clone + 'a> From<TextField<'a, M>> for El<'a, M> {
             .secure(f.password.as_ref().is_some_and(|(r, _)| !r));
         if f.mono {
             ctl = ctl.mono();
+        }
+        if let Some(h) = f.height {
+            ctl = ctl.height(h);
         }
         if let Some(i) = f.left_icon {
             ctl = ctl.left_icon(i);
