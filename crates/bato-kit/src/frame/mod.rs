@@ -239,6 +239,8 @@ const COLLAPSED: f32 = 64.0;
 pub struct Frame<P> {
     brand: Brand,
     logo: Option<Icon>,
+    /// The AppMark glyph: `brand.icon`, or an app SVG ([`Frame::mark`]).
+    mark: Icon,
     nav: Vec<NavItem<P>>,
     settings: Settings,
     cx: Ctx,
@@ -276,6 +278,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         };
         Self {
             server_url: backend_url(&settings),
+            mark: brand.icon.into(),
             brand,
             logo: None,
             nav,
@@ -316,6 +319,15 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     /// Usually [`Icon::svg_colored`]; a tinted icon takes the text colour.
     pub fn logo(mut self, logo: impl Into<Icon>) -> Self {
         self.logo = Some(logo.into());
+        self
+    }
+
+    /// The AppMark glyph (About, App Options, the sidebar without a
+    /// [`logo`](Self::logo)) as any icon, e.g. the app's own lucide-style
+    /// SVG ([`Icon::svg`], tinted like a kit icon) when [`Brand::icon`]'s
+    /// [`Ico`](crate::Ico) set lacks it. Default: `Brand::icon`.
+    pub fn mark(mut self, mark: impl Into<Icon>) -> Self {
+        self.mark = mark.into();
         self
     }
 

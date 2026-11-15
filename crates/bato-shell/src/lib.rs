@@ -17,6 +17,7 @@
 //! | `desktop` (feature `desktop`) | `shell.showItemInFolder`, `shell.openPath`, detached spawns |
 //! | `clipboard` (feature `clipboard`) | copy/cut/paste files (`text/uri-list`, `x-special/gnome-copied-files`) |
 //! | `activation` (feature `activation`) | raise a window with an xdg-activation token |
+//! | `tray` (feature `tray`) | `Tray` (a StatusNotifierItem), close-to-tray |
 //! | `iced_ext` (feature `iced`) | `Task`/`Subscription` wrappers for all of the above |
 //!
 //! The core API is toolkit-neutral: blocking functions meant for worker
@@ -81,6 +82,9 @@ pub mod notify;
 // features) lint and test it although apps opt in.
 #[cfg(any(test, feature = "supervisor"))]
 pub mod supervisor;
+// Same: built and tested by `cargo test`, opted into by apps.
+#[cfg(any(test, feature = "tray"))]
+pub mod tray;
 
 #[cfg(feature = "iced")]
 pub mod iced_ext;

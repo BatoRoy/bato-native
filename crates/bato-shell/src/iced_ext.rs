@@ -166,6 +166,101 @@ pub fn supervisor_events(
     }
 }
 
+/// The tray's clicks, menu rows and status changes ([`crate::tray::Event`]).
+/// Keyed on the tray instance: keep returning it while the tray lives.
+#[cfg(any(test, feature = "tray"))]
+pub fn tray_events(tray: &crate::tray::Tray) -> Subscription<crate::tray::Event> {
+    Subscription::run_with(tray.clone(), |t| t.events())
+}
+
+/// The main window of an `iced::daemon` app, for closing to the tray.
+///
+/// Wayland cannot hide a window, so "hide" closes it and "show" opens a new
+/// one; the app's state lives in the daemon, not the window, so the page,
+/// data and settings come back as they were (widget-local state such as a
+/// scroll offset or a caret does not). With `iced::daemon` closing the last
+/// window does not exit: the app decides on `window::close_events()`.
+///
+/// ```ignore
+/// // boot:   let mut main = MainWindow::new(iced_ext::window_settings(&APP));
+/// //         (App { main, tray: Some(Tray::start(Spec::for_app(&APP))), .. }, main.show())
+/// // subscription: window::close_events().map(Msg::Closed),
+/// //               iced_ext::tray_events(tray).map(Msg::Tray)
+/// Msg::Closed(id) if self.main.closed(id) => {
+///     // Nobody sees a tray icon (no bar, Waybar without `tray`): quit as before.
+///     if !self.tray.as_ref().is_some_and(Tray::is_shown) { return self.quit(); }
+/// }
+/// Msg::Tray(tray::Event::Activate) => return self.main.toggle(),
+/// Msg::Tray(tray::Event::Menu(id)) if id == tray::SHOW => return self.main.show(),
+/// Msg::Tray(tray::Event::Menu(id)) if id == tray::QUIT => return self.quit(),
+/// // view(&self, id): the frame for `self.main.id()`, nothing for any other id.
+/// ```
+#[derive(Debug, Clone)]
+pub struct MainWindow {
+    settings: window::Settings,
+    id: Option<window::Id>,
+}
+
+impl MainWindow {
+    /// Not open yet: [`show`](Self::show) opens it (the daemon's boot task).
+    pub fn new(settings: window::Settings) -> Self {
+        Self { settings, id: None }
+    }
+
+    pub fn id(&self) -> Option<window::Id> {
+        self.id
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.id.is_some()
+    }
+
+    /// Open it, or raise it when it is already open (the tray's "Show", a
+    /// second launch).
+    pub fn show<T: Send + 'static>(&mut self) -> Task<T> {
+        match self.id {
+            #[cfg(feature = "activation")]
+            Some(id) => activate(id, None).discard(),
+            #[cfg(not(feature = "activation"))]
+            Some(id) => window::gain_focus(id),
+            None => {
+                let (id, open) = window::open(self.settings.clone());
+                self.id = Some(id);
+                open.discard()
+            }
+        }
+    }
+
+    /// Close it; the daemon keeps running.
+    pub fn hide<T: Send + 'static>(&mut self) -> Task<T> {
+        match self.id.take() {
+            Some(id) => window::close(id),
+            None => Task::none(),
+        }
+    }
+
+    /// Electron's tray click: hide when open, show otherwise.
+    pub fn toggle<T: Send + 'static>(&mut self) -> Task<T> {
+        if self.is_open() {
+            self.hide()
+        } else {
+            self.show()
+        }
+    }
+
+    /// For each `window::close_events()` id: true when the user closed this
+    /// window (the decision point: stay in the tray or quit). False for
+    /// other windows and after [`hide`](Self::hide), which already forgot it.
+    pub fn closed(&mut self, id: window::Id) -> bool {
+        if self.id == Some(id) {
+            self.id = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// The dialog parent for a window: its X11 id, or on Wayland an xdg-foreign
 /// export of its toplevel ([`crate::dialogs::Parent::from_window`]). The
 /// task yields nothing if the window closed meanwhile.
@@ -446,6 +541,47 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    /// The first action of a task: which window action it is.
+    fn window_action<T: Send + 'static>(task: Task<T>) -> &'static str {
+        use iced_runtime::{Action, window::Action as W};
+        let Some(stream) = iced_runtime::task::into_stream(task) else {
+            return "none";
+        };
+        let first = futures::executor::block_on(stream.take(1).collect::<Vec<_>>());
+        match first.first() {
+            Some(Action::Window(W::Open(..))) => "open",
+            Some(Action::Window(W::Close(_))) => "close",
+            Some(Action::Window(W::Run(..))) => "run",
+            Some(Action::Window(W::GainFocus(_))) => "focus",
+            Some(_) => "other",
+            None => "none",
+        }
+    }
+
+    #[test]
+    fn main_window_shows_hides_and_toggles() {
+        let mut main = MainWindow::new(window::Settings::default());
+        assert!(!main.is_open());
+        assert_eq!(window_action(main.hide::<()>()), "none");
+        assert_eq!(window_action(main.show::<()>()), "open");
+        let id = main.id().unwrap();
+        // Open: raising it (xdg-activation runs on the window) opens nothing.
+        assert_ne!(window_action(main.show::<()>()), "open");
+        assert_eq!(main.id(), Some(id));
+        // Another window's close is not ours.
+        assert!(!main.closed(window::Id::unique()));
+        assert_eq!(window_action(main.toggle::<()>()), "close");
+        assert!(!main.is_open());
+        // A hide already forgot it: its close event is no decision.
+        assert!(!main.closed(id));
+        assert_eq!(window_action(main.toggle::<()>()), "open");
+        let id2 = main.id().unwrap();
+        assert_ne!(id2, id);
+        // The user closed it.
+        assert!(main.closed(id2));
+        assert!(!main.is_open());
     }
 
     #[test]
