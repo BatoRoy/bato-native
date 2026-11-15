@@ -491,7 +491,9 @@ fn rename_selects_the_stem_like_react() {
     assert_eq!(grapheme_range(s, stem_range(s)), (0, 2));
     // Inside a character: rounds down; reversed: ordered; past the end: clamped.
     assert_eq!(grapheme_range("é", 1..2), (0, 1));
-    assert_eq!(grapheme_range("abc", 3..1), (1, 3));
+    #[allow(clippy::reversed_empty_ranges)]
+    let reversed = 3..1;
+    assert_eq!(grapheme_range("abc", reversed), (1, 3));
     assert_eq!(grapheme_range("abc", 0..99), (0, 3));
 }
 

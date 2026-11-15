@@ -179,10 +179,12 @@ impl<'a, M: 'a> VirtualGrid<'a, M> {
     }
 }
 
+/// `(count, width bits, key)`: what the row heights were measured for.
+type MeasureKey = (usize, u32, u64);
+
 #[derive(Default)]
 struct State {
-    /// Row heights for `(count, width bits, key)`.
-    measured: Option<((usize, u32, u64), GridLayout, Rc<Vec<f32>>)>,
+    measured: Option<(MeasureKey, GridLayout, Rc<Vec<f32>>)>,
     reported: Option<GridLayout>,
     revealed: Option<usize>,
     inner: Option<Tree>,

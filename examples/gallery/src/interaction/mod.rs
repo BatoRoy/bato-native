@@ -6,6 +6,7 @@ pub mod focus;
 pub mod gaps;
 pub mod modals;
 pub mod overlay;
+pub mod ports;
 pub mod scroll;
 
 use bato_kit::iced::widget::column;
@@ -19,6 +20,7 @@ pub struct State {
     pub scroll: scroll::State,
     pub gaps: gaps::State,
     pub modals: modals::State,
+    pub ports: ports::State,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +30,7 @@ pub enum Msg {
     Scroll(scroll::Msg),
     Gaps(gaps::Msg),
     Modals(modals::Msg),
+    Ports(ports::Msg),
 }
 
 impl Msg {
@@ -55,11 +58,15 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Scroll(m) => scroll::update(&mut state.scroll, m).map(Msg::Scroll),
         Msg::Gaps(m) => gaps::update(&mut state.gaps, m).map(Msg::Gaps),
         Msg::Modals(m) => modals::update(&mut state.modals, m).map(Msg::Modals),
+        Msg::Ports(m) => ports::update(&mut state.ports, m).map(Msg::Ports),
     }
 }
 
 pub fn subscription(state: &State) -> Subscription<Msg> {
-    overlay::subscription(&state.overlay).map(Msg::Overlay)
+    Subscription::batch([
+        overlay::subscription(&state.overlay).map(Msg::Overlay),
+        ports::subscription(&state.ports).map(Msg::Ports),
+    ])
 }
 
 /// The overlay-stack levels the lab has open, for `Frame::view_with`.
@@ -71,6 +78,11 @@ pub fn levels<'a>(state: &'a State, cx: &Ctx) -> Vec<bato_kit::modal::Modal<'a, 
             modals::levels(&state.modals, cx)
                 .into_iter()
                 .map(|l| l.map(Msg::Modals)),
+        )
+        .chain(
+            ports::levels(&state.ports, cx)
+                .into_iter()
+                .map(|l| l.map(Msg::Ports)),
         )
         .collect()
 }
@@ -125,6 +137,8 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
             scroll::view(&state.scroll, cx).map(Msg::Scroll),
             vgap(24.0),
             gaps::view(&state.gaps, cx).map(Msg::Gaps),
+            vgap(24.0),
+            ports::view(&state.ports, cx).map(Msg::Ports),
         ],
         wide,
         [48.0, 32.0],
