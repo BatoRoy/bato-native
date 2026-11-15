@@ -44,17 +44,17 @@ fails if they disagree:
 
 ```toml
 [dependencies]
-bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1", optional = true }  # Examples + Scroll lab (`examples` feature)
+bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2", optional = true }  # Examples + Scroll lab (`examples` feature)
 
 [patch.crates-io]
-winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
-smithay-clipboard = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.1" }
+winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
+smithay-clipboard = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.1.2" }
 ```
 
 Working on the kit and an app together, without tagging: in the app, a git-ignored
