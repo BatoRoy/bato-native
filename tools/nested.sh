@@ -145,8 +145,12 @@ cmd_run() {
   while [[ $# -gt 0 && "$1" == *=* ]]; do vars+=("$1"); shift; done
   [[ $# -gt 0 ]] || die "run: no binary"
   local bin; bin="$(realpath "$1")"; shift
-  # BATO_* from the caller (BATO_VIEW, BATO_SELFTEST …) pass through too.
-  while IFS= read -r v; do vars+=("$v"); done < <(env | grep '^BATO_' || true)
+  # BATO_* from the caller (BATO_VIEW, BATO_SELFTEST …) pass through too, except
+  # credentials and service addresses (keys, secrets, tokens, URLs, hosts, S3):
+  # test apps must never reach real services by accident. Pass one explicitly
+  # (`run BATO_BACKEND_URL=… bin`) when a test needs it.
+  while IFS= read -r v; do vars+=("$v"); done < <(env | grep '^BATO_' \
+    | grep -Eiv '^BATO_[A-Z0-9_]*(KEY|SECRET|TOKEN|PASS|S3|CRED|AUTH|URL|REGISTRY|BUCKET|DOKPLOY|HOST|ENDPOINT)[A-Z0-9_]*=' || true)
   local n=0; while [[ -e "$D/app-$n.pid" ]]; do n=$((n + 1)); done
   local cfg="$D/app-cfg-$n"; rm -rf "$cfg"; mkdir -p "$cfg"
   setsid env -i bash -c 'source "$1/env.sh"
