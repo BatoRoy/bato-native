@@ -13,9 +13,8 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
-    FOS_ALLOWMULTISELECT, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST,
-    FOS_PICKFOLDERS, FileOpenDialog, FileSaveDialog, IFileDialog, IFileOpenDialog, IFileSaveDialog,
-    IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
+    FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileDialog, IFileOpenDialog, IShellItem,
+    SIGDN_FILESYSPATH,
 };
 use windows::core::{HSTRING, Interface, PCWSTR};
 
@@ -119,27 +118,6 @@ fn item_path(item: &IShellItem) -> Result<PathBuf, DialogError> {
     }
 }
 
-pub(super) fn open_files(o: &OpenFiles) -> Result<Vec<PathBuf>, DialogError> {
-    // SAFETY: COM on this thread's apartment.
-    unsafe {
-        let d: IFileOpenDialog =
-            CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).map_err(failed)?;
-        let mut opts = d.GetOptions().map_err(failed)? | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
-        if o.multiple {
-            opts |= FOS_ALLOWMULTISELECT;
-        }
-        d.SetOptions(opts).map_err(failed)?;
-        if !show(&d.cast().map_err(failed)?, &o.title, &o.filters, &o.parent)? {
-            return Ok(Vec::new());
-        }
-        let items = d.GetResults().map_err(failed)?;
-        let n = items.GetCount().map_err(failed)?;
-        (0..n)
-            .map(|i| item_path(&items.GetItemAt(i).map_err(failed)?))
-            .collect()
-    }
-}
-
 pub(super) fn open_directory(o: &OpenDirectory) -> Result<Option<PathBuf>, DialogError> {
     // SAFETY: COM on this thread's apartment.
     unsafe {
@@ -154,46 +132,148 @@ pub(super) fn open_directory(o: &OpenDirectory) -> Result<Option<PathBuf>, Dialo
     }
 }
 
-pub(super) fn save_file(o: &SaveFile) -> Result<Option<PathBuf>, DialogError> {
-    let target = SaveTarget::from_default_path(o.default_path.as_deref());
-    // SAFETY: COM on this thread's apartment.
-    unsafe {
-        let d: IFileSaveDialog =
-            CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).map_err(failed)?;
-        let opts = d.GetOptions().map_err(failed)? | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM;
-        d.SetOptions(opts).map_err(failed)?;
-        let (folder, name) = match &target.file {
-            Some(f) => (
-                f.parent().map(|p| p.to_path_buf()),
-                f.file_name().map(|n| n.to_string_lossy().into_owned()),
-            ),
-            None => (target.folder.clone(), target.name.clone()),
-        };
-        if let Some(dir) = folder {
-            let item: Result<IShellItem, _> =
-                SHCreateItemFromParsingName(&HSTRING::from(dir.as_os_str()), None);
-            if let Ok(item) = item {
-                let _ = d.SetFolder(&item);
-            }
-        }
-        if let Some(name) = &name {
-            d.SetFileName(&HSTRING::from(name.as_str()))
-                .map_err(failed)?;
-        }
-        // The first filter's extension is appended when the name has none.
-        if let Some(ext) = o
-            .filters
-            .first()
-            .and_then(|f| f.globs().into_iter().next())
-            .and_then(|g| g.strip_prefix("*.").map(str::to_string))
-        {
-            let _ = d.SetDefaultExtension(&HSTRING::from(ext));
-        }
-        if !show(&d.cast().map_err(failed)?, &o.title, &o.filters, &o.parent)? {
-            return Ok(None);
-        }
-        item_path(&d.GetResult().map_err(failed)?).map(Some)
+// Files: the classic `GetOpenFileNameW` / `GetSaveFileNameW` without hooks,
+// which Windows shows as the same modern dialog, and which Wine implements
+// fully (its common item dialog cannot always be created). Folders keep the
+// common item dialog (`FOS_PICKFOLDERS`), as Electron does.
+
+/// `Name\0*.a;*.b\0…\0\0`, or `None` without filters.
+pub(super) fn filter_string(filters: &[FileFilter]) -> Option<Vec<u16>> {
+    let specs = specs(filters);
+    if specs.is_empty() {
+        return None;
     }
+    let mut out: Vec<u16> = Vec::new();
+    for (n, s) in specs {
+        out.extend(n.as_wide());
+        out.push(0);
+        out.extend(s.as_wide());
+        out.push(0);
+    }
+    out.push(0);
+    Some(out)
+}
+
+/// Split a multi-select answer: `dir\0a\0b\0\0`, or `path\0\0` for one.
+pub(super) fn split_multi(buf: &[u16]) -> Vec<PathBuf> {
+    let parts: Vec<String> = buf
+        .split(|&c| c == 0)
+        .take_while(|p| !p.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect();
+    match parts.as_slice() {
+        [] => Vec::new(),
+        [one] => vec![PathBuf::from(one)],
+        [dir, files @ ..] => files.iter().map(|f| PathBuf::from(dir).join(f)).collect(),
+    }
+}
+
+const BUF: usize = 64 * 1024;
+
+fn classic(
+    title: &str,
+    filters: &[FileFilter],
+    parent: &Parent,
+    flags: u32,
+    initial_name: Option<&str>,
+    initial_dir: Option<&std::path::Path>,
+    save: bool,
+) -> Result<Option<Vec<u16>>, DialogError> {
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        CommDlgExtendedError, GetOpenFileNameW, GetSaveFileNameW, OPENFILENAMEW,
+    };
+    let mut buf = vec![0u16; BUF];
+    if let Some(n) = initial_name {
+        let w: Vec<u16> = n.encode_utf16().take(BUF - 1).collect();
+        buf[..w.len()].copy_from_slice(&w);
+    }
+    let filter = filter_string(filters);
+    let title_w = crate::win::wide(title);
+    let dir_w = initial_dir.map(|d| crate::win::wide(d.as_os_str()));
+    let def_ext = filters
+        .first()
+        .and_then(|f| f.globs().into_iter().next())
+        .and_then(|g| g.strip_prefix("*.").map(crate::win::wide));
+    // SAFETY: a zeroed OPENFILENAMEW is valid; every pointer outlives the call.
+    let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    ofn.hwndOwner = match parent {
+        Parent::Win32(h) => *h as _,
+        _ => std::ptr::null_mut(),
+    };
+    ofn.lpstrFilter = filter.as_ref().map_or(std::ptr::null(), |f| f.as_ptr());
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = buf.as_mut_ptr();
+    ofn.nMaxFile = BUF as u32;
+    ofn.lpstrTitle = if title.is_empty() {
+        std::ptr::null()
+    } else {
+        title_w.as_ptr()
+    };
+    ofn.lpstrInitialDir = dir_w.as_ref().map_or(std::ptr::null(), |d| d.as_ptr());
+    ofn.lpstrDefExt = def_ext.as_ref().map_or(std::ptr::null(), |e| e.as_ptr());
+    ofn.Flags = flags;
+    // SAFETY: as above.
+    let ok = unsafe {
+        if save {
+            GetSaveFileNameW(&mut ofn)
+        } else {
+            GetOpenFileNameW(&mut ofn)
+        }
+    };
+    if ok != 0 {
+        return Ok(Some(buf));
+    }
+    // SAFETY: no preconditions.
+    match unsafe { CommDlgExtendedError() } {
+        0 => Ok(None), // cancelled
+        code => Err(DialogError::Failed(format!(
+            "common dialog error {code:#x}"
+        ))),
+    }
+}
+
+pub(super) fn open_files(o: &OpenFiles) -> Result<Vec<PathBuf>, DialogError> {
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        OFN_ALLOWMULTISELECT, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_HIDEREADONLY, OFN_NOCHANGEDIR,
+        OFN_PATHMUSTEXIST,
+    };
+    let mut flags =
+        OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+    if o.multiple {
+        flags |= OFN_ALLOWMULTISELECT;
+    }
+    Ok(
+        classic(&o.title, &o.filters, &o.parent, flags, None, None, false)?
+            .map(|b| split_multi(&b))
+            .unwrap_or_default(),
+    )
+}
+
+pub(super) fn save_file(o: &SaveFile) -> Result<Option<PathBuf>, DialogError> {
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        OFN_EXPLORER, OFN_HIDEREADONLY, OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
+    };
+    let target = SaveTarget::from_default_path(o.default_path.as_deref());
+    let (folder, name) = match &target.file {
+        Some(f) => (
+            f.parent().map(|p| p.to_path_buf()),
+            f.file_name().map(|n| n.to_string_lossy().into_owned()),
+        ),
+        None => (target.folder.clone(), target.name.clone()),
+    };
+    let flags =
+        OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+    Ok(classic(
+        &o.title,
+        &o.filters,
+        &o.parent,
+        flags,
+        name.as_deref(),
+        folder.as_deref(),
+        true,
+    )?
+    .and_then(|b| split_multi(&b).into_iter().next()))
 }
 
 #[cfg(test)]
@@ -210,5 +290,25 @@ mod tests {
         assert_eq!(s.len(), 2);
         assert_eq!(s[0].1.to_string(), "*.jar;*.zip");
         assert_eq!(s[1].1.to_string(), "*.*");
+        let f = filter_string(&[FileFilter::new("Mods", ["jar"])]).unwrap();
+        assert_eq!(String::from_utf16_lossy(&f), "Mods\0*.jar\0\0");
+        assert!(filter_string(&[]).is_none());
+    }
+
+    #[test]
+    fn multi_select_answers() {
+        let w = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        assert_eq!(
+            split_multi(&w("C:\\a.jar\0\0")),
+            [PathBuf::from("C:\\a.jar")]
+        );
+        assert_eq!(
+            split_multi(&w("C:\\m\0a.jar\0b.jar\0\0")),
+            [
+                PathBuf::from("C:\\m").join("a.jar"),
+                PathBuf::from("C:\\m").join("b.jar")
+            ]
+        );
+        assert!(split_multi(&w("\0\0")).is_empty());
     }
 }
