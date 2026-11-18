@@ -61,6 +61,8 @@ two-face = { version = "0.5", optional = true, default-features = false, feature
 modit = { version = "=0.1.5", optional = true }
 cosmic_undo_2 = { version = "=0.2.0", optional = true }
 
+# `data::qr`: QR code encoding (no dependencies).
+qrcodegen = "1.8"
 # Byte ranges → iced text_input cursor positions (its graphemes).
 unicode-segmentation = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
