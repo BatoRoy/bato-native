@@ -3,11 +3,12 @@
 
 use std::time::Instant;
 
-use iced::widget::{column, container, row};
+use iced::widget::{Space, column, container, row, stack};
 use iced::{Alignment, Length, Padding};
 
-use super::{Dialog, Frame, Msg};
+use super::{Dialog, Frame, Msg, NavBadge};
 use crate::El;
+use crate::badge::Tone;
 use crate::ctx::Ctx;
 use crate::focus::Ring;
 use crate::icon::{Ico, Icon, icon};
@@ -21,15 +22,76 @@ use crate::surface::{BoxStyle, Status, surface};
 /// `mod+k` as the chip shows it on Linux.
 pub const MOD_K: &str = "Ctrl K";
 
+/// A nav row's badge, expanded: the accent count pill (`min-w-5 h-5 px-1.5
+/// rounded-full text-[11px] font-semibold tabular-nums`), the quiet pill,
+/// or the dot.
+fn badge_view<'a, M: Clone + 'a>(cx: &Ctx, badge: NavBadge) -> El<'a, M> {
+    let p = cx.p();
+    match badge {
+        NavBadge::Count(n) => {
+            let text = label(n.to_string(), 11.0, 16.5)
+                .semibold()
+                .tabular()
+                .color(c(p.accent_ink));
+            let w = (text.shape(f32::INFINITY).width().ceil() + 12.0).max(20.0);
+            surface(text)
+                .width(w)
+                .height(20)
+                .center()
+                .fixed(BoxStyle::default().bg(c(p.accent)).radius(10.0))
+                .into()
+        }
+        NavBadge::Muted(n) => {
+            let bg = cx.wash(0.06);
+            surface(
+                label(n.to_string(), 11.0, 16.5)
+                    .mono()
+                    .semibold()
+                    .color(c(p.text)),
+            )
+            .height(20)
+            .padding(Padding::from([0.0, 6.0]))
+            .center()
+            .fixed(
+                BoxStyle::default()
+                    .bg(c(bg))
+                    .inner_ring(c(cx.t.line_strong_on(bg)))
+                    .radius(10.0),
+            )
+            .into()
+        }
+        NavBadge::Dot => dot(cx),
+    }
+}
+
+/// An 8 px accent dot with a 2 px `bg` ring (`w-2 h-2 rounded-full
+/// bg-app-accent ring-2 ring-app-bg`).
+fn dot<'a, M: Clone + 'a>(cx: &Ctx) -> El<'a, M> {
+    let p = cx.p();
+    surface(Space::new())
+        .width(8)
+        .height(8)
+        .fixed(
+            BoxStyle::default()
+                .bg(c(p.accent))
+                .radius(4.0)
+                .ring(2.0, c(p.bg)),
+        )
+        .into()
+}
+
 /// One nav / footer row: 36 px, icon 16, 13 px label; active `text@.07`,
 /// hover `text@.05`; a rail tip when collapsed. Focus-visible: `ring-2`
-/// accentBright, no offset.
+/// accentBright, no offset. A badge sits at the end of the row; collapsed,
+/// it is a dot on the icon's corner and its count joins the tip.
+#[allow(clippy::too_many_arguments)]
 fn nav_row<'a, M: Clone + 'a>(
     cx: &Ctx,
     collapsed: bool,
     ico: impl Into<Icon>,
     text: &'a str,
     active: bool,
+    badge: Option<NavBadge>,
     msg: M,
 ) -> El<'a, M> {
     let p = cx.p();
@@ -38,13 +100,35 @@ fn nav_row<'a, M: Clone + 'a>(
     } else {
         c(p.muted)
     };
-    let mut items: Vec<El<'a, M>> = vec![icon(ico, 16.0).color(icon_color).into()];
+    let badge = badge.filter(|b| b.visible());
+    let glyph: El<'a, M> = icon(ico, 16.0).color(icon_color).into();
+    let glyph: El<'a, M> = if collapsed && badge.is_some() {
+        // `absolute -top-1.5 -right-1.5` on the 16 px icon: the icon centred
+        // in a 32 px box (the row's centring is unchanged), the dot at (22, 2).
+        stack![
+            container(glyph).center(32),
+            container(dot(cx)).padding(Padding {
+                top: 2.0,
+                left: 22.0,
+                ..Padding::ZERO
+            }),
+        ]
+        .width(32)
+        .height(32)
+        .into()
+    } else {
+        glyph
+    };
+    let mut items: Vec<El<'a, M>> = vec![glyph];
     if !collapsed {
         let mut l = label(text, 13.0, 19.5).ellipsis().width(Length::Fill);
         if active {
             l = l.medium();
         }
         items.push(l.into());
+        if let Some(b) = badge {
+            items.push(badge_view(cx, b));
+        }
     }
     let t = cx.t.clone();
     let s = surface(row(items).spacing(10).align_y(Alignment::Center))
@@ -75,7 +159,11 @@ fn nav_row<'a, M: Clone + 'a>(
             }
         });
     if collapsed {
-        rail_tip(cx, s.align_x(Alignment::Center), text)
+        let tip = match badge.and_then(NavBadge::count) {
+            Some(n) => format!("{text} ({n})"),
+            None => text.to_string(),
+        };
+        rail_tip(cx, s.align_x(Alignment::Center), &tip)
     } else {
         s.into()
     }
@@ -89,26 +177,49 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         let w = self.sidebar.value(Instant::now());
 
         let header: El<'a, M> = {
-            let mark: El<'a, M> = match self.logo {
+            let mut mark: El<'a, M> = match self.logo {
                 Some(logo) => icon(logo, 32.0).color(c(p.text)).into(),
                 None => app_mark(cx, self.mark, 32.0),
             };
+            let note_color = |tone: Tone| match tone {
+                Tone::Warning => Some(p.yellow),
+                Tone::Error => Some(p.red),
+                Tone::Success => Some(p.green),
+                Tone::Info => Some(p.accent_bright),
+                _ => None,
+            };
+            if collapsed
+                && let Some(note) = &self.header_note
+                && matches!(note.tone, Tone::Warning | Tone::Error)
+                && let Some(col) = note_color(note.tone)
+            {
+                // `ring-2 ring-app-yellow` on the mark, the note as its tip.
+                let ringed = surface(mark).fixed(BoxStyle::default().radius(9.0).ring(2.0, c(col)));
+                mark = rail_tip(cx, ringed, &note.text);
+            }
             let mut items: Vec<El<'a, M>> = vec![mark];
             if !collapsed {
-                items.push(
-                    column![
-                        label(self.brand.name, 14.0, 17.5)
-                            .semibold()
-                            .color(c(p.text))
-                            .ellipsis(),
-                        vgap(2.0),
-                        label(format!("v{}", self.brand.version), 11.0, 13.75)
+                let mut text = column![
+                    label(self.brand.name, 14.0, 17.5)
+                        .semibold()
+                        .color(c(p.text))
+                        .ellipsis(),
+                    vgap(2.0),
+                    label(format!("v{}", self.brand.version), 11.0, 13.75)
+                        .mono()
+                        .color(c(p.muted)),
+                ]
+                .width(Length::Fill);
+                if let Some(note) = &self.header_note {
+                    text = text.push(vgap(2.0)).push(
+                        label(note.text.clone(), 11.0, 13.75)
                             .mono()
-                            .color(c(p.muted)),
-                    ]
-                    .width(Length::Fill)
-                    .into(),
-                );
+                            .ellipsis()
+                            .width(Length::Fill)
+                            .color(c(note_color(note.tone).unwrap_or(p.muted))),
+                    );
+                }
+                items.push(text.into());
             }
             let r = row(items).spacing(12).align_y(Alignment::Center);
             let s = surface(r).width(Length::Fill).height(64).center_y();
@@ -173,6 +284,7 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
                 n.icon,
                 n.label,
                 self.page == n.page,
+                self.badge(n.page),
                 wrap(Msg::Navigate(n.page)),
             )
         }))
@@ -180,43 +292,61 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
         .padding(Padding::from([0.0, 12.0]))
         .height(Length::Fill);
 
-        let footer = column![
-            hline(c(cx.line())),
-            column![
+        let mut rows: Vec<El<'a, M>> = self
+            .footer_rows
+            .iter()
+            .map(|r| {
                 nav_row(
                     cx,
                     collapsed,
-                    Ico::Info,
-                    "About",
-                    false,
-                    wrap(Msg::Open(Dialog::About))
-                ),
-                nav_row(
-                    cx,
-                    collapsed,
-                    Ico::Settings,
-                    "App Options",
-                    false,
-                    wrap(Msg::Open(Dialog::Options))
-                ),
-                nav_row(
-                    cx,
-                    collapsed,
-                    if collapsed {
-                        Ico::PanelLeftOpen
-                    } else {
-                        Ico::PanelLeftClose
-                    },
-                    if collapsed { "Expand" } else { "Collapse" },
-                    false,
-                    wrap(Msg::ToggleSidebar)
-                ),
-            ]
-            .spacing(4)
-            .padding(12),
-        ];
+                    r.icon,
+                    &r.label,
+                    r.active,
+                    r.badge,
+                    wrap(Msg::Command(r.command.clone())),
+                )
+            })
+            .collect();
+        if self.show_about {
+            rows.push(nav_row(
+                cx,
+                collapsed,
+                Ico::Info,
+                "About",
+                false,
+                None,
+                wrap(Msg::Open(Dialog::About)),
+            ));
+        }
+        rows.push(nav_row(
+            cx,
+            collapsed,
+            Ico::Settings,
+            "App Options",
+            false,
+            None,
+            wrap(Msg::Open(Dialog::Options)),
+        ));
+        rows.push(nav_row(
+            cx,
+            collapsed,
+            if collapsed {
+                Ico::PanelLeftOpen
+            } else {
+                Ico::PanelLeftClose
+            },
+            if collapsed { "Expand" } else { "Collapse" },
+            false,
+            None,
+            wrap(Msg::ToggleSidebar),
+        ));
+        let footer = column![hline(c(cx.line())), column(rows).spacing(4).padding(12),];
 
-        let mut body = column![header, search, nav];
+        let mut body = column![header];
+        if self.show_search {
+            body = body.push(search);
+        }
+        let mut body = body.push(nav);
         if let Some(card) = self.sidebar_update_view(collapsed, wrap) {
             body = body.push(card);
         }

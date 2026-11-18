@@ -88,15 +88,16 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer> for T
             viewport,
         );
         if let Event::Window(window::Event::RedrawRequested(now)) = event {
-            let deadline = self.born + self.after;
-            if *now >= deadline {
+            // `Duration::MAX` (or anything past the clock's range): never.
+            let deadline = self.born.checked_add(self.after);
+            if deadline.is_some_and(|d| *now >= d) {
                 shell.publish(self.message.clone());
             } else if self.slide_in
                 && now.saturating_duration_since(self.born) < Duration::from_millis(200)
             {
                 shell.request_redraw();
-            } else {
-                shell.request_redraw_at(deadline);
+            } else if let Some(d) = deadline {
+                shell.request_redraw_at(d);
             }
         }
     }
