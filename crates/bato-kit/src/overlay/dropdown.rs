@@ -260,12 +260,27 @@ pub fn trigger<'a, E: Clone + 'a>(
 ) -> El<'a, E> {
     let p = cx.p().clone();
     let fill = c(cx.recessed());
+    // A trigger wider than its text (`width(Fill)`, a fixed width): the
+    // text takes the free space (`flex-1 text-left truncate`), so the
+    // chevron sits at the right edge.
+    let grow = width != Length::Shrink;
+    let text_w = if grow { Length::Fill } else { Length::Shrink };
     let text_el: El<'a, E> = match ico {
-        Some(i) => row![icon(i, 14.0), label(text.to_string(), 14.0, 20.0)]
-            .spacing(6)
-            .align_y(Alignment::Center)
+        Some(i) => {
+            let mut l = label(text.to_string(), 14.0, 20.0);
+            if grow {
+                l = l.ellipsis().width(Length::Fill);
+            }
+            row![icon(i, 14.0), l]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .width(text_w)
+                .into()
+        }
+        None => label(text.to_string(), 14.0, 20.0)
+            .ellipsis()
+            .width(text_w)
             .into(),
-        None => label(text.to_string(), 14.0, 20.0).ellipsis().into(),
     };
     let body = row![text_el, chevron(open, 14.0)]
         .spacing(8)
@@ -365,5 +380,52 @@ mod tests {
             panic!()
         };
         assert_eq!(sub.on_select, 30);
+    }
+
+    /// `select(..).width(Fill)`: the chevron at the right edge, not next
+    /// to the text; a shrinking trigger keeps it beside the text.
+    #[test]
+    fn a_wide_trigger_puts_the_chevron_at_the_right_edge() {
+        use iced::advanced::layout::Limits;
+        use iced::advanced::renderer::Headless;
+        use iced::advanced::widget::Tree;
+        crate::fonts::setup();
+        let r = {
+            let fut = <iced::Renderer as Headless>::new(
+                iced::Font::DEFAULT,
+                iced::Pixels(16.0),
+                Some("tiny-skia"),
+            );
+            let mut fut = std::pin::pin!(fut);
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            loop {
+                if let std::task::Poll::Ready(r) = fut.as_mut().poll(&mut cx) {
+                    break r.expect("renderer");
+                }
+            }
+        };
+        let cx = Ctx::from_palette(bato_theme::palette(
+            bato_theme::ThemeId::Dark,
+            bato_theme::Rgb::new(0x8b, 0x5c, 0xf6),
+        ));
+        let chevron_right = |w: Length| {
+            let mut el: El<'_, u8> = trigger(&cx, "Apple", None, false, w, 1);
+            let mut tree = Tree::new(&el);
+            let node = el.as_widget_mut().layout(
+                &mut tree,
+                &r,
+                &Limits::new(iced::Size::ZERO, iced::Size::new(300.0, 100.0)),
+            );
+            let outer = node.bounds();
+            // surface → row → [text, chevron]
+            let row = &node.children()[0];
+            let chev = row.children()[1].bounds();
+            (outer.width, row.bounds().x + chev.x + chev.width)
+        };
+        let (w, right) = chevron_right(Length::Fill);
+        assert_eq!(w, 300.0);
+        assert!((w - 13.0 - right).abs() < 1.0, "{right}");
+        let (w, right) = chevron_right(Length::Shrink);
+        assert!(w < 150.0 && (w - 13.0 - right).abs() < 1.0, "{w} {right}");
     }
 }

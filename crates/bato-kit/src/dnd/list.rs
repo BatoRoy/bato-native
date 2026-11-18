@@ -520,7 +520,9 @@ impl<'a, K: Clone + PartialEq + 'static, M: 'a> Widget<M, iced::Theme, iced::Ren
                 signal = state.session.cancel();
                 shell.capture_event();
             }
-            Event::Window(window::Event::Resized(_)) => {
+            // A resize, or the window losing focus mid-drag (its release
+            // may never come): drop nothing.
+            Event::Window(window::Event::Resized(_) | window::Event::Unfocused) => {
                 signal = state.session.cancel();
             }
             _ => {}
@@ -666,17 +668,28 @@ impl<'a, K: Clone + PartialEq + 'static, M: 'a> Widget<M, iced::Theme, iced::Ren
             item.as_widget_mut()
                 .update(t, event, l, c, renderer, clipboard, shell, &vp);
         }
-        // A drag starting cancels the item's press (no click on release).
+        // A drag starting cancels the item's press (no click on release):
+        // a lost finger, or a release with no cursor for the mouse. The
+        // drag captures the pointer events that end it, so the item never
+        // saw its release: it stayed pressed, and the next release over it
+        // (a press that began elsewhere) clicked it.
         if signal == Signal::Started
             && let Some(g) = state.session.dragging()
-            && let Pointer::Finger(f) = g.pointer
+            && g.pointer != Pointer::Keyboard
             && let Some(i) = state.from()
         {
-            let lost = Event::Touch(touch::Event::FingerLost {
-                id: touch::Finger(f),
-                position: g.at + shift,
-            });
+            let lost = match g.pointer {
+                Pointer::Finger(f) => Event::Touch(touch::Event::FingerLost {
+                    id: touch::Finger(f),
+                    position: g.at + shift,
+                }),
+                _ => Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            };
             let l = layout.children().nth(i).unwrap();
+            // A fresh shell: the drag start already captured this event,
+            // and a captured event stops at the item's surface.
+            let mut msgs = Vec::new();
+            let mut sub = Shell::new(&mut msgs);
             self.items[i].as_widget_mut().update(
                 &mut children[i],
                 &lost,
@@ -684,9 +697,12 @@ impl<'a, K: Clone + PartialEq + 'static, M: 'a> Widget<M, iced::Theme, iced::Ren
                 mouse::Cursor::Unavailable,
                 renderer,
                 clipboard,
-                shell,
+                &mut sub,
                 viewport,
             );
+            for m in msgs {
+                shell.publish(m);
+            }
         }
     }
 
@@ -860,5 +876,123 @@ impl<'a, K: Clone + PartialEq + 'static, M: 'a> Widget<M, iced::Theme, iced::Ren
 impl<'a, K: Clone + PartialEq + 'static, M: 'a> From<List<'a, K, M>> for El<'a, M> {
     fn from(l: List<'a, K, M>) -> Self {
         Element::new(l)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::advanced::clipboard;
+    use iced::advanced::layout::Limits;
+    use iced::advanced::renderer::Headless;
+    use iced::widget::Space;
+    use iced::{Font, Pixels};
+
+    use crate::surface::surface;
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Msg {
+        Select(usize),
+        Reorder(usize, usize),
+    }
+
+    fn renderer() -> iced::Renderer {
+        let fut = <iced::Renderer as Headless>::new(Font::DEFAULT, Pixels(16.0), Some("tiny-skia"));
+        let mut fut = std::pin::pin!(fut);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        loop {
+            if let std::task::Poll::Ready(r) = fut.as_mut().poll(&mut cx) {
+                return r.expect("tiny-skia renderer");
+            }
+        }
+    }
+
+    fn tabs<'a>() -> El<'a, Msg> {
+        let mut l = sortable::<usize, Msg>(Axis::Horizontal).on_reorder(Msg::Reorder);
+        for i in 0..3 {
+            l = l.item(
+                i,
+                surface(Space::new().width(100).height(30)).on_press(Msg::Select(i)),
+            );
+        }
+        l.into()
+    }
+
+    fn send(
+        r: &iced::Renderer,
+        tree: &mut Tree,
+        el: &mut El<'_, Msg>,
+        event: Event,
+        at: Option<Point>,
+    ) -> Vec<Msg> {
+        let view = Size::new(800.0, 100.0);
+        tree.diff(&*el);
+        let node = el
+            .as_widget_mut()
+            .layout(tree, r, &Limits::new(Size::ZERO, view));
+        let mut msgs = Vec::new();
+        let mut shell = Shell::new(&mut msgs);
+        let cursor = at.map_or(mouse::Cursor::Unavailable, mouse::Cursor::Available);
+        el.as_widget_mut().update(
+            tree,
+            &event,
+            Layout::new(&node),
+            cursor,
+            r,
+            &mut clipboard::Null,
+            &mut shell,
+            &Rectangle::new(Point::ORIGIN, view),
+        );
+        msgs
+    }
+
+    fn press() -> Event {
+        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+    }
+    fn release() -> Event {
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+    }
+    fn moved(p: Point) -> Event {
+        Event::Mouse(mouse::Event::CursorMoved { position: p })
+    }
+
+    /// A drag that ends without its own release (here: the window loses
+    /// focus) leaves no press behind: the next release over the tab
+    /// clicks nothing, and the next real click selects as usual.
+    #[test]
+    fn a_drag_cancels_the_items_press() {
+        let r = renderer();
+        let mut el = tabs();
+        let mut tree = Tree::new(&el);
+        let a = Point::new(50.0, 15.0);
+        assert!(send(&r, &mut tree, &mut el, press(), Some(a)).is_empty());
+        let b = Point::new(90.0, 15.0);
+        send(&r, &mut tree, &mut el, moved(b), Some(b));
+        let lost = Event::Window(window::Event::Unfocused);
+        send(&r, &mut tree, &mut el, lost, Some(b));
+        send(&r, &mut tree, &mut el, moved(a), Some(a));
+        assert_eq!(
+            send(&r, &mut tree, &mut el, release(), Some(a)),
+            vec![],
+            "a stale press must not click"
+        );
+        // An ordinary click still selects.
+        send(&r, &mut tree, &mut el, press(), Some(a));
+        assert_eq!(
+            send(&r, &mut tree, &mut el, release(), Some(a)),
+            vec![Msg::Select(0)]
+        );
+        // A drag and drop reorders and clicks nothing.
+        send(&r, &mut tree, &mut el, press(), Some(a));
+        let c = Point::new(160.0, 15.0);
+        send(&r, &mut tree, &mut el, moved(c), Some(c));
+        let out = send(&r, &mut tree, &mut el, release(), Some(c));
+        assert_eq!(out, vec![Msg::Reorder(0, 1)]);
+        // …and leaves no press: a press elsewhere released over the tab
+        // selects nothing (it used to select the dragged tab).
+        let away = Point::new(500.0, 80.0);
+        send(&r, &mut tree, &mut el, press(), Some(away));
+        send(&r, &mut tree, &mut el, moved(a), Some(a));
+        assert_eq!(send(&r, &mut tree, &mut el, release(), Some(a)), vec![]);
     }
 }
