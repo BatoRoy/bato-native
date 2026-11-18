@@ -1,5 +1,6 @@
-//! Bundled fonts: Inter 4.001 (wght axis, opsz pinned to 14) and JetBrains
-//! Mono 400/500, compiled in from `assets/fonts`. Call [`setup`] once before
+//! Bundled fonts: Inter 4.001 (wght axis, opsz pinned to 14; upright and
+//! italic) and JetBrains Mono 400/500/600/700 (upright and italic), compiled
+//! in from `assets/fonts`. Call [`setup`] once before
 //! the first frame (the frame's `run` helper does).
 //!
 //! The family names are pinned: a machine may also have a system `Inter`
@@ -50,6 +51,24 @@ pub const INTER_SUBSETS: [(&str, &[u8]); 6] = [
         "Inter cyrillic-ext",
         include_bytes!("../../../assets/fonts/InterVariable-cyrillic-ext.ttf"),
     ),
+];
+/// Inter Italic (fontsource `wght-italic`): the Latin subset is the `Inter`
+/// italic face, Latin Extended joins the `Inter latin-ext` family. The other
+/// subsets have no italic here: their upright faces stand in (registered as
+/// italic too), so an italic run never leaves the Inter families.
+pub const INTER_ITALIC: &[u8] =
+    include_bytes!("../../../assets/fonts/InterVariable-Italic-latin.ttf");
+pub const INTER_ITALIC_LATIN_EXT: &[u8] =
+    include_bytes!("../../../assets/fonts/InterVariable-Italic-latin-ext.ttf");
+/// JetBrains Mono's other static faces (fontsource `latin`): italic 400/500,
+/// SemiBold and Bold, upright and italic.
+pub const JBM_FACES: [&[u8]; 6] = [
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Italic-latin.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-MediumItalic-latin.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-SemiBold-latin.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-SemiBoldItalic-latin.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Bold-latin.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-BoldItalic-latin.ttf"),
 ];
 pub const JBM_REGULAR: &[u8] =
     include_bytes!("../../../assets/fonts/JetBrainsMono-Regular-latin.ttf");
@@ -105,7 +124,15 @@ fn setup_once() {
     fs.load_font(Cow::Borrowed(INTER));
     fs.load_font(Cow::Borrowed(JBM_REGULAR));
     fs.load_font(Cow::Borrowed(JBM_MEDIUM));
-    for (family, bytes) in INTER_SUBSETS {
+    fs.load_font(Cow::Borrowed(INTER_ITALIC));
+    for bytes in JBM_FACES {
+        fs.load_font(Cow::Borrowed(bytes));
+    }
+    let subsets = INTER_SUBSETS
+        .iter()
+        .copied()
+        .chain([("Inter latin-ext", INTER_ITALIC_LATIN_EXT)]);
+    for (family, bytes) in subsets {
         let before: HashSet<fontdb::ID> = fs.raw().db().faces().map(|f| f.id).collect();
         fs.load_font(Cow::Borrowed(bytes));
         let db = fs.raw().db_mut();
@@ -122,6 +149,34 @@ fn setup_once() {
                 .map_or(fontdb::Language::English_UnitedStates, |f| f.1);
             face.families = vec![(family.into(), lang)];
             db.push_face_info(face);
+        }
+    }
+    // The subsets without an italic file: their upright faces also serve
+    // italic runs (cosmic-text only matches faces of the requested style).
+    {
+        let db = fs.raw().db_mut();
+        let has_italic = |db: &fontdb::Database, family: &str| {
+            db.faces().any(|f| {
+                f.style == fontdb::Style::Italic && f.families.iter().any(|(n, _)| n == family)
+            })
+        };
+        for (family, _) in INTER_SUBSETS {
+            if has_italic(db, family) {
+                continue;
+            }
+            let upright: Vec<fontdb::FaceInfo> = db
+                .faces()
+                .filter(|f| {
+                    matches!(f.source, fontdb::Source::Binary(_))
+                        && f.style == fontdb::Style::Normal
+                        && f.families.iter().any(|(n, _)| n == family)
+                })
+                .cloned()
+                .collect();
+            for mut face in upright {
+                face.style = fontdb::Style::Italic;
+                db.push_face_info(face);
+            }
         }
     }
     let mut chain: Vec<String> = INTER_SUBSETS.iter().map(|(f, _)| f.to_string()).collect();
@@ -191,6 +246,72 @@ mod tests {
             }
         }
         out
+    }
+
+    /// (family, italic, weight of the face) per character.
+    fn styled(
+        text: &str,
+        family: &str,
+        weight: u16,
+        italic: bool,
+    ) -> Vec<(char, String, bool, u16)> {
+        use iced::advanced::graphics::text::cosmic_text::Style;
+        setup();
+        let mut guard = font_system().write().expect("font system");
+        let fs = guard.raw();
+        let mut buffer = Buffer::new(fs, Metrics::new(14.0, 20.0));
+        let mut attrs = Attrs::new()
+            .family(Family::Name(family))
+            .weight(Weight(weight));
+        if italic {
+            attrs = attrs.style(Style::Italic);
+        }
+        buffer.set_text(fs, text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(fs, false);
+        let mut out = Vec::new();
+        for run in buffer.layout_runs() {
+            for g in run.glyphs {
+                let face = fs.db().face(g.font_id).expect("face");
+                let ch = text[g.start..g.end].chars().next().expect("char");
+                // The real face behind a copy: its PostScript name.
+                let real_italic = face.post_script_name.contains("Italic");
+                out.push((ch, face.families[0].0.clone(), real_italic, face.weight.0));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn italic_and_bold_faces() {
+        // Inter italic: the real italic face, at the requested weight.
+        for w in [400, 700] {
+            let got = styled("Ag", SANS, w, true);
+            assert!(got.iter().all(|(_, f, it, _)| f == SANS && *it), "{got:?}");
+        }
+        // Latin Extended italic is real too; Cyrillic stays in Inter (upright).
+        let got = styled("ĂЖ", SANS, 400, true);
+        assert_eq!(got[0].1, "Inter latin-ext");
+        assert!(got[0].2, "{got:?}");
+        assert_eq!(got[1].1, "Inter cyrillic");
+        // Upright text is unchanged.
+        let got = styled("Ag", SANS, 400, false);
+        assert!(got.iter().all(|(_, f, it, _)| f == SANS && !*it), "{got:?}");
+        // JetBrains Mono: every weight 400–700 its own face, italic or not.
+        for (w, italic) in [
+            (400, false),
+            (500, false),
+            (600, false),
+            (700, false),
+            (400, true),
+            (500, true),
+            (600, true),
+            (700, true),
+        ] {
+            let got = styled("m", MONO, w, italic);
+            assert_eq!(got[0].1, MONO, "{w} {italic}");
+            assert_eq!(got[0].2, italic, "{w} {italic}");
+            assert_eq!(got[0].3, w, "{w} {italic}");
+        }
     }
 
     #[test]

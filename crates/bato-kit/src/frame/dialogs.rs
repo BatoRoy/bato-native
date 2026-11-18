@@ -131,7 +131,10 @@ thread_local! {
 }
 
 impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
-    pub(super) fn options_view<'a, M: Clone + 'a>(&'a self, wrap: fn(Msg<P>) -> M) -> El<'a, M> {
+    /// The App Options panel (theme, accent, scale, width, text selection,
+    /// the Server address card), 512 px wide, without its modal: for apps
+    /// that build their own overlay stack. Usually [`Frame::dialog_modal`].
+    pub fn options_view<'a, M: Clone + 'a>(&'a self, wrap: fn(Msg<P>) -> M) -> El<'a, M> {
         let cx = self.cx.on_card();
         let p = cx.p();
         let brand = self.brand.accent.to_lowercase();
@@ -332,7 +335,9 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             .into()
     }
 
-    pub(super) fn about_view<'a, M: Clone + 'a>(&'a self, wrap: fn(Msg<P>) -> M) -> El<'a, M> {
+    /// The About panel (mark, name, version, tagline, Check for updates),
+    /// 448 px wide, without its modal. Usually [`Frame::dialog_modal`].
+    pub fn about_view<'a, M: Clone + 'a>(&'a self, wrap: fn(Msg<P>) -> M) -> El<'a, M> {
         let cx = self.cx.on_card();
         let p = cx.p();
         let body = column![

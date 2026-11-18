@@ -16,11 +16,12 @@
 //! Tab stop (the selected segment), arrows move the selection.
 
 use iced::widget::row;
-use iced::{Length, Padding};
+use iced::{Alignment, Length, Padding};
 
 use crate::El;
 use crate::ctx::Ctx;
 use crate::focus::{Ring, roving};
+use crate::icon::{Icon, icon};
 use crate::label::{Span, label, rich};
 use crate::style::c;
 use crate::surface::{BoxStyle, Status, surface};
@@ -31,6 +32,10 @@ use crate::surface::{BoxStyle, Status, surface};
 pub struct Segment<T> {
     pub value: T,
     pub spans: Vec<(String, bool)>,
+    /// A leading icon (`inline-flex items-center gap-1.5`), in the text colour.
+    pub icon: Option<Icon>,
+    /// `tabular-nums` (counts that change while you watch).
+    pub tabular: bool,
 }
 
 impl<T> Segment<T> {
@@ -38,13 +43,28 @@ impl<T> Segment<T> {
         Self {
             value,
             spans: vec![(text.into(), false)],
+            icon: None,
+            tabular: false,
         }
+    }
+    /// A leading icon (14 px in tabs, 13 in a segmented control, 12 in a
+    /// small one), 6 px before the text.
+    pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+    /// Tabular digits (`tabular-nums`), so a live count does not jiggle.
+    pub fn tabular(mut self) -> Self {
+        self.tabular = true;
+        self
     }
     /// `(text, muted)` spans.
     pub fn rich<S: Into<String>>(value: T, spans: impl IntoIterator<Item = (S, bool)>) -> Self {
         Self {
             value,
             spans: spans.into_iter().map(|(s, m)| (s.into(), m)).collect(),
+            icon: None,
+            tabular: false,
         }
     }
 }
@@ -82,15 +102,36 @@ fn seg_style(cx: &Ctx, active: bool, radius: f32) -> impl Fn(Status) -> BoxStyle
     }
 }
 
+/// The segment's content: its icon (if any) and its label.
+fn seg_content<'a, T, M: 'a>(
+    cx: &Ctx,
+    o: &Segment<T>,
+    active: bool,
+    size: f32,
+    lh: f32,
+    icon_size: f32,
+) -> El<'a, M> {
+    let text = seg_label(cx, &o.spans, active, size, lh, o.tabular);
+    match o.icon {
+        Some(i) => row![icon(i, icon_size), text]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into(),
+        None => text,
+    }
+}
+
 fn seg_label<'a, M: 'a>(
     cx: &Ctx,
     spans: &[(String, bool)],
     active: bool,
     size: f32,
     lh: f32,
+    tabular: bool,
 ) -> El<'a, M> {
     if spans.len() == 1 && !spans[0].1 {
-        return label(spans[0].0.clone(), size, lh).medium().into();
+        let l = label(spans[0].0.clone(), size, lh).medium();
+        return if tabular { l.tabular() } else { l }.into();
     }
     let p = cx.p();
     let muted = c(if active { p.accent_bright } else { p.muted });
@@ -101,7 +142,8 @@ fn seg_label<'a, M: 'a>(
             if *m { sp.color(muted) } else { sp }
         })
         .collect();
-    rich(spans, size, lh).medium().into()
+    let l = rich(spans, size, lh).medium();
+    if tabular { l.tabular() } else { l }.into()
 }
 
 pub struct Segmented<'a, T, M> {
@@ -161,7 +203,8 @@ impl<'a, T: Copy + PartialEq + 'a, M: Clone + 'a> From<Segmented<'a, T, M>> for 
             .iter()
             .map(|o| {
                 let active = o.value == s.value;
-                surface(seg_label(&tcx, &o.spans, active, 12.0, 16.0))
+                let ico = if s.size == SegSize::Sm { 12.0 } else { 13.0 };
+                surface(seg_content(&tcx, o, active, 12.0, 16.0, ico))
                     .height(h)
                     .padding(Padding::from([0.0, px]))
                     .center()
@@ -203,7 +246,7 @@ pub fn tabs<'a, T: Copy + PartialEq + 'a, M: Clone + 'a>(
         .into_iter()
         .map(|o| {
             let active = o.value == value;
-            surface(seg_label(&tcx, &o.spans, active, 13.0, 19.5))
+            surface(seg_content(&tcx, &o, active, 13.0, 19.5, 14.0))
                 .width(Length::Fill)
                 .height(32)
                 .padding(Padding::from([0.0, 12.0]))

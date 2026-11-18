@@ -56,6 +56,30 @@ pub struct Span {
     pub size: Option<f32>,
     pub weight: Option<u16>,
     pub color: Option<Color>,
+    /// `italic` (the bundled Inter / JetBrains Mono italic faces).
+    pub italic: Option<bool>,
+    /// `underline` / `line-through` (in the span's colour).
+    pub deco: Deco,
+}
+
+/// Text decorations (`text-decoration-line`), drawn in the text's colour
+/// with the font's underline metrics, the way Blink places them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Deco {
+    pub underline: bool,
+    pub strike: bool,
+}
+
+impl Deco {
+    fn any(self) -> bool {
+        self.underline || self.strike
+    }
+    fn or(self, o: Deco) -> Deco {
+        Deco {
+            underline: self.underline || o.underline,
+            strike: self.strike || o.strike,
+        }
+    }
 }
 
 impl Span {
@@ -66,10 +90,31 @@ impl Span {
             size: None,
             weight: None,
             color: None,
+            italic: None,
+            deco: Deco::default(),
         }
     }
     pub fn mono(mut self) -> Self {
         self.fam = Some(Fam::Mono);
+        self
+    }
+    /// `font-bold` (700).
+    pub fn bold(self) -> Self {
+        self.weight(700)
+    }
+    /// `italic`.
+    pub fn italic(mut self) -> Self {
+        self.italic = Some(true);
+        self
+    }
+    /// `underline`.
+    pub fn underline(mut self) -> Self {
+        self.deco.underline = true;
+        self
+    }
+    /// `line-through`.
+    pub fn strike(mut self) -> Self {
+        self.deco.strike = true;
         self
     }
     pub fn size(mut self, s: f32) -> Self {
@@ -113,6 +158,10 @@ pub struct Label {
     anywhere: bool,
     /// `line-clamp-N`.
     max_lines: Option<usize>,
+    italic: bool,
+    deco: Deco,
+    /// `hover:underline`.
+    hover_underline: bool,
 }
 
 /// `text-[N]px` with Tailwind's default `line-height: 1.5`.
@@ -134,6 +183,9 @@ pub fn label(text: impl Into<String>, size: f32, line_height: f32) -> Label {
         hints: Vec::new(),
         anywhere: false,
         max_lines: None,
+        italic: false,
+        deco: Deco::default(),
+        hover_underline: false,
     }
 }
 
@@ -157,6 +209,31 @@ impl Label {
     }
     pub fn semibold(self) -> Self {
         self.weight(600)
+    }
+    /// `font-bold` (700).
+    pub fn bold(self) -> Self {
+        self.weight(700)
+    }
+    /// `italic`: Inter's and JetBrains Mono's real italic faces (bundled).
+    pub fn italic(mut self) -> Self {
+        self.italic = true;
+        self
+    }
+    /// `underline`, in the text colour, every line.
+    pub fn underline(mut self) -> Self {
+        self.deco.underline = true;
+        self
+    }
+    /// `line-through`, in the text colour, every line.
+    pub fn strikethrough(mut self) -> Self {
+        self.deco.strike = true;
+        self
+    }
+    /// `hover:underline`: underlined while the pointer is over the label
+    /// (links, a toast's action).
+    pub fn hover_underline(mut self) -> Self {
+        self.hover_underline = true;
+        self
     }
     pub fn color(mut self, c: Color) -> Self {
         self.color = Some(c);
@@ -227,6 +304,8 @@ impl Label {
             s.fam.hash(&mut h);
             s.size.map(f32::to_bits).hash(&mut h);
             s.weight.hash(&mut h);
+            s.italic.hash(&mut h);
+            s.deco.hash(&mut h);
             s.color
                 .map(|c| [c.r, c.g, c.b, c.a].map(f32::to_bits))
                 .hash(&mut h);
@@ -242,6 +321,8 @@ impl Label {
         self.hints.hash(&mut h);
         self.anywhere.hash(&mut h);
         self.max_lines.hash(&mut h);
+        self.italic.hash(&mut h);
+        self.deco.hash(&mut h);
         if self.wrap || self.ellipsis {
             avail.to_bits().hash(&mut h);
         }
@@ -255,6 +336,9 @@ impl Label {
             .family(ct::Family::Name(fam.name()))
             .weight(ct::Weight(s.weight.unwrap_or(self.weight)))
             .metrics(ct::Metrics::new(size, self.line_height));
+        if s.italic.unwrap_or(self.italic) {
+            a = a.style(ct::Style::Italic);
+        }
         if self.tracking_em != 0.0 {
             a = a.letter_spacing(self.tracking_em);
         }
@@ -277,9 +361,12 @@ impl Label {
         width: Option<f32>,
     ) -> ct::Buffer {
         let mut buf = ct::Buffer::new(fs, ct::Metrics::new(self.size, self.line_height));
-        let default = ct::Attrs::new()
+        let mut default = ct::Attrs::new()
             .family(ct::Family::Name(self.fam.name()))
             .weight(ct::Weight(self.weight));
+        if self.italic {
+            default = default.style(ct::Style::Italic);
+        }
         buf.set_wrap(
             fs,
             if width.is_some() {
@@ -297,7 +384,7 @@ impl Label {
             fs,
             spans
                 .iter()
-                .map(|(t, i)| (t.as_str(), self.attrs(&self.spans[*i]))),
+                .map(|(t, i)| (t.as_str(), self.attrs(&self.spans[*i]).metadata(*i))),
             &default,
             ct::Shaping::Advanced,
             None,
@@ -426,12 +513,14 @@ impl Label {
                 .next()
                 .map(|r| r.line_y)
                 .unwrap_or(self.line_height);
+            let decos = self.decorations(&buf);
             // Dominant family of the line decides the strut metrics: the
             // block's own family (CSS uses the parent's strut).
             lines.push(Line {
                 buffer: Arc::new(buf),
                 width: w,
                 line_y,
+                decos,
             });
         }
         let width = lines.iter().map(|l| l.width).fold(0.0, f32::max);
@@ -439,7 +528,39 @@ impl Label {
             key: 0,
             lines,
             width,
+            hovered: false,
         }
+    }
+
+    /// The decorated stretches of a one-line buffer: consecutive glyphs of
+    /// spans (or a label) with the same decoration and colour.
+    fn decorations(&self, buf: &ct::Buffer) -> Vec<DecoRun> {
+        let mut out: Vec<DecoRun> = Vec::new();
+        let Some(run) = buf.layout_runs().next() else {
+            return out;
+        };
+        for g in run.glyphs {
+            let span = self.spans.get(g.metadata);
+            let deco = span.map_or(Deco::default(), |s| s.deco).or(self.deco);
+            if !deco.any() {
+                continue;
+            }
+            let color = span.and_then(|s| s.color);
+            match out.last_mut() {
+                Some(last)
+                    if last.deco == deco && last.color == color && (last.x1 - g.x).abs() < 0.5 =>
+                {
+                    last.x1 = g.x + g.w;
+                }
+                _ => out.push(DecoRun {
+                    x0: g.x,
+                    x1: g.x + g.w,
+                    deco,
+                    color,
+                }),
+            }
+        }
+        out
     }
 }
 
@@ -557,6 +678,34 @@ fn draw_lines(
     color: Color,
     viewport: &Rectangle,
 ) {
+    draw_lines_deco(
+        renderer,
+        cache,
+        fam,
+        size,
+        line_height,
+        align,
+        b,
+        color,
+        viewport,
+        false,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_lines_deco(
+    renderer: &mut iced::Renderer,
+    cache: &Cache,
+    fam: Fam,
+    size: f32,
+    line_height: f32,
+    align: Align,
+    b: Rectangle,
+    color: Color,
+    viewport: &Rectangle,
+    underline_all: bool,
+) {
+    use iced::advanced::Renderer as _;
     let s = device_scale();
     let color = crate::anim::fade(color);
     let base = blink_baseline(fam, size, line_height, s);
@@ -585,6 +734,41 @@ fn draw_lines(
             color,
             clip_bounds: clip,
         });
+        if line.decos.is_empty() && !underline_all {
+            continue;
+        }
+        let (under, strike, thick) = deco_metrics(fam, size, s);
+        let mut bar = |x0: f32, x1: f32, dy: f32, c: Color| {
+            let left = ((x + x0) * s).round();
+            let right = ((x + x1) * s).round();
+            if right <= left {
+                return;
+            }
+            renderer.fill_quad(
+                iced::advanced::renderer::Quad {
+                    bounds: Rectangle {
+                        x: left / s,
+                        y: (baseline_dev + dy) / s,
+                        width: (right - left) / s,
+                        height: thick / s,
+                    },
+                    ..Default::default()
+                },
+                c,
+            );
+        };
+        if underline_all {
+            bar(0.0, line.width, under, color);
+        }
+        for d in &line.decos {
+            let c = d.color.map_or(color, crate::anim::fade);
+            if d.deco.underline && !underline_all {
+                bar(d.x0, d.x1, under, c);
+            }
+            if d.deco.strike {
+                bar(d.x0, d.x1, strike, c);
+            }
+        }
     }
 }
 
@@ -593,6 +777,16 @@ struct Line {
     width: f32,
     /// cosmic-text's baseline inside the one-line buffer (logical px).
     line_y: f32,
+    decos: Vec<DecoRun>,
+}
+
+/// An underlined / struck stretch of a line, x relative to the line start.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DecoRun {
+    x0: f32,
+    x1: f32,
+    deco: Deco,
+    color: Option<Color>,
 }
 
 #[derive(Default)]
@@ -600,6 +794,25 @@ struct Cache {
     key: u64,
     lines: Vec<Line>,
     width: f32,
+    /// The pointer is over the label (`hover:underline`).
+    hovered: bool,
+}
+
+/// Where a decoration line sits, in device px from the rounded baseline
+/// (positive = below), and how thick it is: Skia's underline metrics from
+/// the font (`post` table: Inter −348/140 of 2048, JetBrains Mono −155/50
+/// of 1000), Blink's rounding (thickness at least 1 device px), and
+/// `line-through` at a third of the ascent above the baseline.
+pub fn deco_metrics(fam: Fam, size: f32, scale: f32) -> (f32, f32, f32) {
+    let (pos, thick) = match fam {
+        Fam::Sans => (348.0 / 2048.0, 140.0 / 2048.0),
+        Fam::Mono => (155.0 / 1000.0, 50.0 / 1000.0),
+    };
+    let (asc, _) = fam.asc_desc();
+    let t = (thick * size * scale).round().max(1.0);
+    let under = (pos * size * scale).round();
+    let strike = -((asc * size * scale).round() / 3.0 + t / 2.0).round();
+    (under, strike, t)
 }
 
 /// Blink's baseline offset from the top of a line box, in device px
@@ -665,7 +878,7 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Label {
     ) {
         let cache = tree.state.downcast_ref::<Cache>();
         let color = self.color.unwrap_or(style.text_color);
-        draw_lines(
+        draw_lines_deco(
             renderer,
             cache,
             self.fam,
@@ -675,7 +888,32 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for Label {
             layout.bounds(),
             color,
             viewport,
+            self.hover_underline && cache.hovered,
         );
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &iced::Renderer,
+        _clipboard: &mut dyn iced::advanced::Clipboard,
+        shell: &mut iced::advanced::Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if !self.hover_underline {
+            return;
+        }
+        if let iced::Event::Mouse(_) | iced::Event::Touch(_) | iced::Event::Window(_) = event {
+            let cache = tree.state.downcast_mut::<Cache>();
+            let over = cursor.is_over(layout.bounds());
+            if over != cache.hovered {
+                cache.hovered = over;
+                shell.request_redraw();
+            }
+        }
     }
 }
 
@@ -784,5 +1022,71 @@ mod tests {
         // Fits: no ellipsis.
         let got = lines(&label("short", 13.0, 20.0).wrap().max_lines(2), 500.0);
         assert_eq!(got, ["short"]);
+    }
+
+    #[test]
+    fn decorations_follow_their_spans() {
+        crate::fonts::setup();
+        let l = rich(
+            vec![
+                Span::new("plain "),
+                Span::new("struck").strike(),
+                Span::new(" "),
+                Span::new("link").underline(),
+            ],
+            13.0,
+            19.5,
+        );
+        let c = l.build(f32::INFINITY);
+        let d = &c.lines[0].decos;
+        assert_eq!(d.len(), 2, "{d:?}");
+        assert!(d[0].deco.strike && !d[0].deco.underline);
+        assert!(d[1].deco.underline && !d[1].deco.strike);
+        assert!(d[0].x0 > 30.0 && d[0].x1 < d[1].x0 && d[1].x1 <= c.width + 0.01);
+        // A whole-label decoration covers every wrapped line.
+        let c = label("one two three four", 13.0, 19.5)
+            .wrap()
+            .underline()
+            .build(40.0);
+        assert!(c.lines.len() > 1);
+        assert!(
+            c.lines
+                .iter()
+                .all(|l| l.decos.len() == 1 && l.decos[0].x0 < 1.0)
+        );
+        // No decoration: nothing to draw, nothing cached.
+        assert!(
+            label("x", 13.0, 19.5).build(100.0).lines[0]
+                .decos
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn decoration_metrics_like_blink() {
+        // Inter 13 px at 1x: underline 2 px below the baseline, 1 px thick;
+        // line-through a third of the 13 px ascent above it.
+        assert_eq!(deco_metrics(Fam::Sans, 13.0, 1.0), (2.0, -5.0, 1.0));
+        // 2x: twice as far, 2 px thick.
+        let (u, s, t) = deco_metrics(Fam::Sans, 13.0, 2.0);
+        assert_eq!((u, t), (4.0, 2.0));
+        assert!(s < -8.0);
+        assert_eq!(deco_metrics(Fam::Mono, 12.0, 1.0).2, 1.0);
+    }
+
+    #[test]
+    fn italic_changes_the_shape() {
+        crate::fonts::setup();
+        let up = label("Italic text", 14.0, 20.0).build(f32::INFINITY).width;
+        let it = label("Italic text", 14.0, 20.0)
+            .italic()
+            .build(f32::INFINITY)
+            .width;
+        let bold = label("Italic text", 14.0, 20.0)
+            .bold()
+            .build(f32::INFINITY)
+            .width;
+        assert!((up - it).abs() > 0.1, "{up} {it}");
+        assert!(bold > up + 1.0, "{up} {bold}");
     }
 }

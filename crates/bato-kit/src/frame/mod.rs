@@ -77,7 +77,7 @@ use crate::modal::{Kind, Modal, level_id, modal};
 use crate::scale::set_device_scale;
 use crate::scroller::scroller;
 use crate::style::c;
-use crate::toast::{Toasts, toast_stack};
+use crate::toast::{Toast, Toasts, toast_stack_actions};
 
 /// Who the app is. Shown in the sidebar header, App Options and About.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +129,95 @@ impl<P> NavItem<P> {
     }
 }
 
+/// A mark on a sidebar row ([`Frame::set_badge`], [`SidebarRow::badge`]).
+/// Collapsed, any badge is an accent dot on the icon and a count joins the
+/// rail tip (`Recordings (3)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavBadge {
+    /// An accent pill with the count (`bg-app-accent text-app-accentInk`,
+    /// 11 px semibold, tabular digits). Hidden at 0.
+    Count(u32),
+    /// A quiet pill: a 6 % wash, a hairline ring, the count in 11 px mono
+    /// semibold (queued items). Hidden at 0.
+    Muted(u32),
+    /// An 8 px accent dot ("something new").
+    Dot,
+}
+
+impl NavBadge {
+    /// Whether it shows at all (a count of 0 does not).
+    pub fn visible(self) -> bool {
+        !matches!(self, NavBadge::Count(0) | NavBadge::Muted(0))
+    }
+    /// The count, for the rail tip.
+    pub fn count(self) -> Option<u32> {
+        match self {
+            NavBadge::Count(n) | NavBadge::Muted(n) => Some(n),
+            NavBadge::Dot => None,
+        }
+    }
+}
+
+/// An extra sidebar footer row, above About / App Options
+/// ([`Frame::set_footer_rows`]). Pressing it reports
+/// [`Action::Command`]`(command)`, like a palette command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidebarRow {
+    pub icon: Icon,
+    pub label: String,
+    pub command: String,
+    pub badge: Option<NavBadge>,
+    /// Drawn as the current row (`text@.07`, accent icon).
+    pub active: bool,
+}
+
+impl SidebarRow {
+    pub fn new(
+        icon: impl Into<Icon>,
+        label: impl Into<String>,
+        command: impl Into<String>,
+    ) -> Self {
+        Self {
+            icon: icon.into(),
+            label: label.into(),
+            command: command.into(),
+            badge: None,
+            active: false,
+        }
+    }
+    pub fn badge(mut self, badge: NavBadge) -> Self {
+        self.badge = Some(badge);
+        self
+    }
+    pub fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
+    }
+}
+
+/// A line under the version in the sidebar header ([`Frame::set_header_note`]):
+/// 11 px mono, `muted`, or the tone's colour (`v1.2.0 ⚠ server v1.1.0`).
+/// Collapsed (no text shown), a warning or error tone rings the app mark
+/// in its colour and the text becomes the mark's rail tip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderNote {
+    pub text: String,
+    pub tone: Tone,
+}
+
+impl HeaderNote {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tone: Tone::Neutral,
+        }
+    }
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+}
+
 /// The frame's own dialogs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialog {
@@ -166,7 +255,11 @@ pub enum Msg<P> {
     Close,
     /// Show a toast (pages can publish this directly).
     Toast(String, Tone),
+    /// Show a built toast (title, action, duration).
+    ShowToast(Toast),
     Dismiss(u64),
+    /// A toast's action button: dismisses it, reports its command.
+    ToastAction(u64),
     Theme(ThemeId),
     Accent(String),
     ToggleCustom,
@@ -264,6 +357,12 @@ pub struct Frame<P> {
     app_commands: Vec<crate::overlay::palette::Command<String>>,
     keys: crate::hotkeys::Hotkeys<Msg<P>>,
     epoch: u64,
+    badges: Vec<(P, NavBadge)>,
+    footer_rows: Vec<SidebarRow>,
+    header_note: Option<HeaderNote>,
+    show_about: bool,
+    show_search: bool,
+    show_sidebar: bool,
 }
 
 impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
@@ -303,6 +402,12 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             app_commands: Vec::new(),
             keys: crate::hotkeys::Hotkeys::new().bind("mod+k", Msg::OpenPalette),
             epoch: 0,
+            badges: Vec::new(),
+            footer_rows: Vec::new(),
+            header_note: None,
+            show_about: true,
+            show_search: true,
+            show_sidebar: true,
         }
     }
 
@@ -334,6 +439,34 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
     /// Hide the Server address card in App Options (apps without a backend).
     pub fn without_server_card(mut self) -> Self {
         self.server_card = false;
+        self
+    }
+
+    /// No About row in the sidebar footer (About stays reachable through
+    /// [`Msg::Open`]).
+    pub fn without_about(mut self) -> Self {
+        self.show_about = false;
+        self
+    }
+
+    /// No search box in the sidebar; `mod+k` still opens the palette.
+    pub fn without_search(mut self) -> Self {
+        self.show_search = false;
+        self
+    }
+
+    /// No command palette at all: no search box and no `mod+k`.
+    pub fn without_palette(mut self) -> Self {
+        self.show_search = false;
+        self.keys = crate::hotkeys::Hotkeys::new();
+        self
+    }
+
+    /// No sidebar: the frame is the page scroller, the dialogs, the toasts
+    /// and the overlay levels (apps with their own navigation; open App
+    /// Options / About with [`Msg::Open`]).
+    pub fn without_sidebar(mut self) -> Self {
+        self.show_sidebar = false;
         self
     }
 
@@ -372,6 +505,42 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
 
     pub fn toast(&mut self, text: impl Into<String>, tone: Tone) {
         self.toasts.push(text, tone);
+    }
+
+    /// Show a built toast (title, action button, duration); returns its id.
+    /// Its action reports [`Action::Command`].
+    pub fn show_toast(&mut self, toast: Toast) -> u64 {
+        self.toasts.show(toast)
+    }
+
+    pub fn dismiss_toast(&mut self, id: u64) {
+        self.toasts.dismiss(id);
+    }
+
+    /// A badge on the nav row of `page` (a live count, a dot); `None`
+    /// removes it.
+    pub fn set_badge(&mut self, page: P, badge: Option<NavBadge>) {
+        self.badges.retain(|(p, _)| *p != page);
+        if let Some(b) = badge {
+            self.badges.push((page, b));
+        }
+    }
+
+    pub fn badge(&self, page: P) -> Option<NavBadge> {
+        self.badges
+            .iter()
+            .find(|(p, _)| *p == page)
+            .map(|(_, b)| *b)
+    }
+
+    /// The app's own footer rows (History, Trash…), above About.
+    pub fn set_footer_rows(&mut self, rows: Vec<SidebarRow>) {
+        self.footer_rows = rows;
+    }
+
+    /// The line under the version in the sidebar header.
+    pub fn set_header_note(&mut self, note: Option<HeaderNote>) {
+        self.header_note = note;
     }
 
     /// The line under "Check for updates" in About, over the status's own
@@ -464,7 +633,15 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             }
             Msg::Close => self.dialog = None,
             Msg::Toast(t, tone) => self.toast(t, tone),
+            Msg::ShowToast(t) => {
+                self.show_toast(t);
+            }
             Msg::Dismiss(id) => self.toasts.dismiss(id),
+            Msg::ToastAction(id) => {
+                if let Some(command) = self.toasts.take_action(id) {
+                    return Action::Command(command);
+                }
+            }
             Msg::Theme(t) => {
                 self.settings.theme = t;
                 self.retheme();
@@ -573,28 +750,19 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             .initial(self.start.scroll)
             .initial_anchor(self.start.anchor.clone())
             .autoscroll(self.autoscroll.clone());
-        let shell: El<'a, M> = autoscroll_layer(
-            row![self.sidebar_view(wrap), main].height(Length::Fill),
-            self.autoscroll.clone(),
-        )
-        .into();
+        let body: El<'a, M> = if self.show_sidebar {
+            row![self.sidebar_view(wrap), main]
+                .height(Length::Fill)
+                .into()
+        } else {
+            main.into()
+        };
+        let shell: El<'a, M> = autoscroll_layer(body, self.autoscroll.clone()).into();
         let mut layers: Vec<El<'a, M>> = vec![shell];
         let animate = !self.start.no_animations;
         let mut depth = 0;
-        if let Some(d) = self.dialog {
-            let (panel, w) = match d {
-                Dialog::Options => (self.options_view(wrap), 512.0),
-                Dialog::About => (self.about_view(wrap), 448.0),
-            };
-            let cover = c(bato_theme::blend(Rgb::BLACK, 0.5, p.bg));
-            layers.push(
-                modal(panel, w, wrap(Msg::Close), cover)
-                    .animate(animate)
-                    .id(level_id(depth))
-                    .wrap_panel(|p| crate::focus::focus_scope(p).into())
-                    .backdrop(backdrop_blur(self.dialog_opened, animate))
-                    .into(),
-            );
+        if let Some(m) = self.dialog_modal(wrap) {
+            layers.push(m.id(level_id(depth)).into());
             depth += 1;
         }
         let mut above: Vec<El<'a, M>> = Vec::new();
@@ -630,9 +798,12 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             );
         }
         if !self.toasts.is_empty() {
-            layers.push(toast_stack(&self.cx, &self.toasts.items, move |id| {
-                wrap(Msg::Dismiss(id))
-            }));
+            layers.push(toast_stack_actions(
+                &self.cx,
+                &self.toasts.items,
+                move |id| wrap(Msg::Dismiss(id)),
+                move |id| wrap(Msg::ToastAction(id)),
+            ));
         }
         layers.extend(above);
         let cx = self.cx.clone();
@@ -642,6 +813,46 @@ impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
             move |e| boundary::fallback_view(&cx, e, wrap(Msg::Reload)),
         );
         crate::focus::focus_root(crate::hotkeys::probe(window)).into()
+    }
+}
+
+impl<P: Copy + PartialEq + std::fmt::Debug + Send + 'static> Frame<P> {
+    /// The open frame dialog (App Options or About) as an overlay level:
+    /// the panel, its width, the dimmed cover, the backdrop blur, the focus
+    /// trap and the frame's animation mode. [`Frame::view`] stacks it
+    /// itself; an app that draws its own window pushes it into its stack
+    /// (giving it an id with [`crate::modal::level_id`]).
+    pub fn dialog_modal<'a, M: Clone + 'a>(
+        &'a self,
+        wrap: fn(Msg<P>) -> M,
+    ) -> Option<Modal<'a, M>> {
+        let d = self.dialog?;
+        let p = self.cx.p();
+        let animate = !self.start.no_animations;
+        let (panel, w) = match d {
+            Dialog::Options => (self.options_view(wrap), 512.0),
+            Dialog::About => (self.about_view(wrap), 448.0),
+        };
+        let cover = c(bato_theme::blend(Rgb::BLACK, 0.5, p.bg));
+        Some(
+            modal(panel, w, wrap(Msg::Close), cover)
+                .animate(animate)
+                .wrap_panel(|p| crate::focus::focus_scope(p).into())
+                .backdrop(backdrop_blur(self.dialog_opened, animate)),
+        )
+    }
+
+    /// The toast stack alone (for an app that draws its own window), or
+    /// `None` when there are no toasts.
+    pub fn toasts_view<'a, M: Clone + 'a>(&'a self, wrap: fn(Msg<P>) -> M) -> Option<El<'a, M>> {
+        (!self.toasts.is_empty()).then(|| {
+            toast_stack_actions(
+                &self.cx,
+                &self.toasts.items,
+                move |id| wrap(Msg::Dismiss(id)),
+                move |id| wrap(Msg::ToastAction(id)),
+            )
+        })
     }
 }
 
@@ -754,5 +965,53 @@ mod tests {
         let id = f.toasts.items[0].id;
         f.update(Msg::Dismiss(id));
         assert_eq!(f.toasts.items[0].text, "b");
+    }
+
+    #[test]
+    fn toast_actions_report_their_command() {
+        let mut f = frame();
+        f.update(Msg::ShowToast(
+            Toast::new("Converted", Tone::Success)
+                .title("Done")
+                .action("Open folder", "open-output"),
+        ));
+        let id = f.toasts.items[0].id;
+        assert_eq!(
+            f.update(Msg::ToastAction(id)),
+            Action::Command("open-output".into())
+        );
+        assert!(f.toasts.is_empty(), "the action dismisses it");
+        assert_eq!(f.update(Msg::ToastAction(id)), Action::None);
+        let id = f.show_toast(Toast::new("x", Tone::Info).persistent());
+        f.dismiss_toast(id);
+        assert!(f.toasts.is_empty());
+    }
+
+    #[test]
+    fn sidebar_badges_rows_and_options() {
+        let mut f = frame().without_about().without_palette().without_sidebar();
+        assert!(!f.show_about && !f.show_search && !f.show_sidebar);
+        f.set_badge(Page::B, Some(NavBadge::Count(3)));
+        f.set_badge(Page::B, Some(NavBadge::Count(4)));
+        assert_eq!(f.badge(Page::B), Some(NavBadge::Count(4)));
+        assert_eq!(f.badge(Page::A), None);
+        f.set_badge(Page::B, None);
+        assert_eq!(f.badge(Page::B), None);
+        assert!(!NavBadge::Count(0).visible() && NavBadge::Dot.visible());
+        assert_eq!(NavBadge::Muted(2).count(), Some(2));
+        f.set_footer_rows(vec![
+            SidebarRow::new(Ico::History, "History (2)", "history").badge(NavBadge::Dot),
+        ]);
+        assert_eq!(f.footer_rows[0].command, "history");
+        f.set_header_note(Some(HeaderNote::new("server v1.1").tone(Tone::Warning)));
+        assert_eq!(f.header_note.as_ref().unwrap().tone, Tone::Warning);
+        // A footer row's press is a command, like the palette's.
+        assert_eq!(
+            f.update(Msg::Command("history".into())),
+            Action::Command("history".into())
+        );
+        // The frame still opens its dialogs on request.
+        f.update(Msg::Open(Dialog::About));
+        assert_eq!(f.dialog(), Some(Dialog::About));
     }
 }

@@ -12,6 +12,7 @@
 //! | [`sortable`] | `SortableContext` | a sortable list widget (SortableList, EditorTabs) |
 //! | [`handle`], [`no_drag`] | handle `listeners`, `stopPropagation` | where a press may start a drag |
 //! | [`os_drag`] | Electron's `webContents.startDrag` | drag files out to other apps (and know our own drag when it comes back) |
+//! | [`window_drop`] | `useWindowFileDrop` | files dropped anywhere in the window, with the full-window "Drop files" overlay |
 //!
 //! The drag state lives in widget state; the app sees only the result
 //! (`on_reorder(from, to)`, or the KanbanBoard's `on_change`). There is no
@@ -29,6 +30,7 @@ mod engine;
 mod list;
 pub mod os_drag;
 mod sort;
+pub mod window_drop;
 
 pub use engine::{
     ACTIVATION, DROP, Grab, Mark, MarkKind, Motion, Phase, Pointer, Preview, PreviewStyle, SORT,
