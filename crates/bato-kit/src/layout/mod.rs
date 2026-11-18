@@ -18,6 +18,8 @@
 //! | `PanelGroup` / `ResizablePanels` (draggable splits) | [`panel_group()`], [`resizable_panels()`] |
 //! | `EditorTabs` (sortable, closable tab strip) | [`editor_tabs()`] |
 //! | `Dashboard` (editable widget grid, Snap / Free) | [`dashboard()`] |
+//! | `flex flex-col` + `mt-auto` (a card's footer pinned in a stretched grid row) | [`fill_end()`] |
+//! | `sticky top-0` (a bar pinned to the top of the page scroller) | [`sticky()`] |
 //!
 //! Every cell is stretched like CSS's default `align-items: stretch`.
 
@@ -28,18 +30,22 @@ mod clip;
 mod collapse;
 pub mod dashboard;
 mod editor_tabs;
+mod fill_end;
 mod grid;
 mod lines;
 mod masonry;
 mod panels;
 mod primitives;
+mod sticky;
 mod stretch;
 
 pub use absolute::{Absolute, absolute};
 pub use aspect::{AspectRatio, aspect_ratio};
+pub use fill_end::{FillEnd, fill_end};
 pub use grid::{Grid, Track, grid};
 pub use lines::{gap, hline, page, vgap, vline};
 pub use masonry::{Masonry, masonry};
+pub use sticky::{Sticky, sticky};
 pub use stretch::{StretchColumn, stretch_column};
 
 pub use app_shell::{AppShell, app_shell};

@@ -9,6 +9,7 @@
 //! ```ignore
 //! progress(&cx, 64.0)                       // <Progress value={64} />
 //! progress(&cx, 0.0).indeterminate()        // 40 % wide, pulsing
+//! progress(&cx, 100.0).pulsing()            // <Progress value={100} indeterminate />: the value, pulsing
 //! circular_progress(&cx, 64.0).label()      // <CircularProgress value={64} showLabel />
 //! ```
 
@@ -83,6 +84,7 @@ fn redraw_while_running<M>(
 pub struct Progress {
     value: f32,
     indeterminate: bool,
+    pulsing: bool,
     track: Color,
     fill: Color,
     height: f32,
@@ -96,6 +98,7 @@ pub fn progress(cx: &Ctx, value: f32) -> Progress {
     Progress {
         value: clamp_pct(value),
         indeterminate: false,
+        pulsing: false,
         track: c(p.border),
         fill: c(p.accent),
         height: 6.0,
@@ -107,6 +110,13 @@ impl Progress {
     /// 40 % wide and pulsing (`animate-pulse`), for an unknown value.
     pub fn indeterminate(mut self) -> Self {
         self.indeterminate = true;
+        self.pulsing = true;
+        self
+    }
+    /// Pulsing (`animate-pulse`) at its own value: busy with a known
+    /// amount done ("Installing…" after a finished download).
+    pub fn pulsing(mut self) -> Self {
+        self.pulsing = true;
         self
     }
     pub fn width(mut self, w: impl Into<Length>) -> Self {
@@ -158,7 +168,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Progress {
         shell: &mut iced::advanced::Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if self.indeterminate
+        if self.pulsing
             && matches!(
                 event,
                 iced::Event::Window(iced::window::Event::RedrawRequested(_))
@@ -197,7 +207,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Progress {
         if w <= 0.0 {
             return;
         }
-        let fill = if self.indeterminate {
+        let fill = if self.pulsing {
             lerp(self.track, self.fill, pulse(epoch().elapsed()))
         } else {
             self.fill
@@ -406,6 +416,20 @@ impl<'a, Message: 'a> From<CircularProgress> for El<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pulsing_keeps_the_value_indeterminate_does_not() {
+        let cx = Ctx::from_palette(bato_theme::palette(
+            bato_theme::ThemeId::Dark,
+            bato_theme::Rgb::new(0x8b, 0x5c, 0xf6),
+        ));
+        let p = progress(&cx, 100.0).pulsing();
+        assert!(p.pulsing && !p.indeterminate);
+        assert_eq!(p.target(), 100.0);
+        let p = progress(&cx, 100.0).indeterminate();
+        assert!(p.pulsing);
+        assert_eq!(p.target(), 40.0);
+    }
 
     #[test]
     fn clamps_like_react() {
