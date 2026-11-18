@@ -114,13 +114,46 @@ pub fn smoke_enabled() -> bool {
 /// Milliseconds since the kernel started this process (`/proc/self/stat`
 /// field 22, CLOCK_BOOTTIME based), so the count includes exec and dynamic
 /// linking, not just `main`.
+#[cfg(unix)]
 pub fn process_age_ms() -> f64 {
     let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
     start_ms_since_boot(&stat).map_or(0.0, |start| boottime_ms() - start)
 }
 
+/// Windows: milliseconds since the process was created (`GetProcessTimes`).
+#[cfg(windows)]
+pub fn process_age_ms() -> f64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let ticks = |f: &FILETIME| ((f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64) as f64;
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user, mut now) = (zero, zero, zero, zero, zero);
+    // SAFETY: valid out-pointers; the pseudo handle needs no closing.
+    let ok = unsafe {
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    if ok == 0 {
+        return 0.0;
+    }
+    // SAFETY: valid out-pointer.
+    unsafe { GetSystemTimeAsFileTime(&mut now) };
+    // FILETIME counts 100 ns intervals.
+    ((ticks(&now) - ticks(&created)) / 10_000.0).max(0.0)
+}
+
 /// Parse `starttime` (field 22) from a `/proc/<pid>/stat` line, in ms. Fields
 /// are counted after the `)` that closes `comm`, which may contain spaces.
+#[cfg(unix)]
 fn start_ms_since_boot(stat: &str) -> Option<f64> {
     let after = stat.rsplit_once(')')?.1;
     let ticks: f64 = after.split_whitespace().nth(19)?.parse().ok()?;
@@ -129,6 +162,7 @@ fn start_ms_since_boot(stat: &str) -> Option<f64> {
     (hz > 0.0).then(|| ticks / hz * 1000.0)
 }
 
+#[cfg(unix)]
 fn boottime_ms() -> f64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -233,6 +267,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn proc_stat_start_time() {
         // comm with spaces and a ')' inside.
         let stat = "123 (my (odd) app) S 1 123 123 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 500 0 0";

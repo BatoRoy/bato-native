@@ -118,6 +118,7 @@ pub mod prelude {
 /// fix (wheel deltas, text hinting, gamma, backdrop blur, Wayland paste,
 /// pointer hot-unplug, the clipboard thread surviving it).
 #[doc(hidden)]
+#[cfg(unix)]
 pub const BATO_PATCHES: [&str; 6] = [
     winit::BATO_PATCH,
     cosmic_text::BATO_PATCH,
@@ -127,12 +128,24 @@ pub const BATO_PATCHES: [&str; 6] = [
     smithay_clipboard::BATO_PATCH,
 ];
 
+/// Windows: smithay-clipboard (Wayland) is not built, so five tripwires.
+#[doc(hidden)]
+#[cfg(not(unix))]
+pub const BATO_PATCHES: [&str; 5] = [
+    winit::BATO_PATCH,
+    cosmic_text::BATO_PATCH,
+    cryoglyph::BATO_PATCH,
+    iced_wgpu::BATO_PATCH,
+    iced_winit::BATO_PATCH,
+];
+
 // Linked for its `bundled` feature only (FreeType built from source).
 use freetype_sys as _;
 
 #[cfg(test)]
 mod tests {
     #[test]
+    #[cfg(unix)]
     fn patched_crates_are_linked() {
         assert_eq!(
             super::BATO_PATCHES,
@@ -151,6 +164,7 @@ mod tests {
     /// `KeyPressed::key` (winit's `key_without_modifiers`) is a digit with
     /// NumLock on and a navigation key with it off, like the logical key.
     #[test]
+    #[cfg(unix)]
     fn keypad_follows_num_lock() {
         use winit::bato_keypad::{key_without_modifiers_keysym as kwm, probe};
         use winit::keyboard::{Key, KeyLocation, NamedKey};

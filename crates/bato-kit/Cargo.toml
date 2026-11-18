@@ -46,7 +46,6 @@ cosmic-text = { version = "=0.15.0", default-features = false }
 cryoglyph = { version = "=0.1.0", default-features = false }
 iced_wgpu = { version = "=0.14.0", default-features = false }
 iced_winit = { version = "=0.14.1", default-features = false }
-smithay-clipboard = { version = "=0.7.3", default-features = false }
 # FreeType for the patched cosmic-text rasterizer, built from source
 # (`bundled`): the same hinting on every machine and no system FreeType
 # requirement. See README "FreeType".
@@ -68,3 +67,8 @@ unicode-segmentation = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Wayland's clipboard (the sixth patched crate): iced only uses it on Linux,
+# so Windows builds neither it nor its tripwire.
+[target.'cfg(unix)'.dependencies]
+smithay-clipboard = { version = "=0.7.3", default-features = false }

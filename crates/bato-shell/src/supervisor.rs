@@ -84,7 +84,9 @@
 //! ```
 
 use std::io;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -237,7 +239,12 @@ fn find_binary_from(env: Option<&Path>, exe: Option<&Path>, name: &str) -> Optio
         "aarch64" => "arm64",
         a => a,
     };
+    #[cfg(unix)]
     let dev = format!("{name}-linux-{arch}");
+    // Windows: `<name>.exe` beside the client, `dist/<name>-windows-amd64.exe`
+    // in a checkout.
+    #[cfg(windows)]
+    let (name, dev) = (format!("{name}.exe"), format!("{name}-windows-{arch}.exe"));
     std::iter::once(dir.join(name))
         .chain(
             dir.ancestors()
@@ -257,6 +264,7 @@ fn executable(p: &Path) -> bool {
     if !meta.is_file() {
         return false;
     }
+    #[cfg(unix)]
     if meta.permissions().mode() & 0o111 == 0 {
         return std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).is_ok();
     }
@@ -324,7 +332,28 @@ struct Shared {
     cv: Condvar,
 }
 
+/// A random secret: 32 bytes from the system RNG (`BCryptGenRandom`), hex.
+#[cfg(windows)]
+pub fn new_secret() -> String {
+    use windows_sys::Win32::Security::Cryptography::{
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
+    };
+    let mut buf = [0u8; 32];
+    // SAFETY: fills our buffer of the given length.
+    let r = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    assert_eq!(r, 0, "no source of randomness");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// A random secret: 32 bytes from the kernel, hex.
+#[cfg(unix)]
 pub fn new_secret() -> String {
     let mut buf = [0u8; 32];
     let mut filled = 0;
@@ -346,8 +375,19 @@ pub fn new_secret() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Windows: no alias (a symlink needs a privilege there); the server keeps
+/// its file name, `process_name` is ignored.
+#[cfg(windows)]
+fn alias(bin: &Path, _name: &str, _port: u16) -> io::Result<(PathBuf, PathBuf)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        format!("no process alias on Windows for {}", bin.display()),
+    ))
+}
+
 /// A symlink named `name` to `bin` in a private directory, so the server
 /// runs under that name. Returns (directory, link).
+#[cfg(unix)]
 fn alias(bin: &Path, name: &str, port: u16) -> io::Result<(PathBuf, PathBuf)> {
     if name.is_empty() || name.contains('/') || name == "." || name == ".." {
         return Err(io::Error::new(
@@ -452,6 +492,9 @@ impl Supervisor {
             // Before the spawn: the health check already carries it.
             crate::http::register_session(&url, s);
         }
+        // Windows has no alias: run the binary under its own name.
+        #[cfg(windows)]
+        cfg.process_name.take();
         let (alias_dir, exec) = match cfg.process_name.clone() {
             Some(name) => match alias(bin, &name, port) {
                 Ok((dir, link)) => (Some(dir), link),
@@ -556,7 +599,7 @@ impl Supervisor {
             let mut s = self.shared.state.lock().unwrap();
             s.stopping = true;
             if let Some(pid) = s.pid {
-                signal_group(pid, libc::SIGTERM);
+                signal_group(pid, SIGTERM);
             }
             self.shared.cv.notify_all();
             let (mut s, _) = self
@@ -565,7 +608,7 @@ impl Supervisor {
                 .wait_timeout_while(s, self.grace, |s| s.pid.is_some())
                 .unwrap();
             if let Some(pid) = s.pid {
-                signal_group(pid, libc::SIGKILL);
+                signal_group(pid, SIGKILL);
                 // Reaped by the monitor; wait for that so nothing outlives stop().
                 s = self.shared.cv.wait_while(s, |s| s.pid.is_some()).unwrap();
             }
@@ -587,6 +630,93 @@ impl Drop for Supervisor {
     }
 }
 
+#[cfg(unix)]
+const SIGTERM: i32 = libc::SIGTERM;
+#[cfg(unix)]
+const SIGKILL: i32 = libc::SIGKILL;
+// Windows has no signals: both end the process (`TerminateProcess`); the
+// job object takes anything it started with it.
+#[cfg(windows)]
+const SIGTERM: i32 = 15;
+#[cfg(windows)]
+const SIGKILL: i32 = 9;
+
+#[cfg(windows)]
+fn signal_group(pid: i32, _sig: i32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+    // SAFETY: a handle we open and close; the pid is still ours (see unix).
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid as u32);
+        if !h.is_null() {
+            TerminateProcess(h, 1);
+            CloseHandle(h);
+        }
+    }
+}
+
+/// Windows: the job every bundled server joins. `KILL_ON_JOB_CLOSE`: when
+/// this process ends, crash included, the system closes the job and ends
+/// the server (Linux: `PR_SET_PDEATHSIG`).
+#[cfg(windows)]
+fn job() -> Option<isize> {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectExtendedLimitInformation, SetInformationJobObject,
+    };
+    static JOB: OnceLock<Option<isize>> = OnceLock::new();
+    *JOB.get_or_init(|| {
+        // SAFETY: an unnamed job we keep open for the process's lifetime.
+        unsafe {
+            let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if h.is_null() {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(
+                h,
+                JobObjectExtendedLimitInformation,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            Some(h as isize)
+        }
+    })
+}
+
+/// Windows: put a started server in [`job`].
+#[cfg(windows)]
+fn join_job(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    if let Some(j) = job() {
+        // SAFETY: both handles are live; failure leaves the child outside.
+        unsafe { AssignProcessToJobObject(j as _, child.as_raw_handle() as _) };
+    }
+}
+
+/// Windows: has `pid` exited? (`WaitForSingleObject` on a fresh handle.)
+#[cfg(windows)]
+fn exited(pid: i32, block: bool) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    };
+    // SAFETY: a handle we open and close.
+    unsafe {
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid as u32);
+        if h.is_null() {
+            return true;
+        }
+        let r = WaitForSingleObject(h, if block { INFINITE } else { 0 });
+        CloseHandle(h);
+        r != WAIT_TIMEOUT
+    }
+}
+
+#[cfg(unix)]
 fn signal_group(pid: i32, sig: i32) {
     // SAFETY: plain syscall. The pid is still ours: the monitor clears it
     // under the same lock before reaping, so it cannot have been reused.
@@ -599,6 +729,7 @@ fn signal_group(pid: i32, sig: i32) {
 
 pub(crate) fn command(bin: &Path, port: u16, cfg: &Config) -> Command {
     let mut cmd = Command::new(bin);
+    #[cfg(unix)]
     if let Some(name) = &cfg.process_name {
         cmd.arg0(name);
     }
@@ -626,25 +757,35 @@ pub(crate) fn command(bin: &Path, port: u16, cfg: &Config) -> Command {
             cmd.env("PATH", path);
         }
     }
-    cmd.process_group(0);
-    let parent = std::process::id() as libc::pid_t;
-    // SAFETY: only async-signal-safe calls between fork and exec.
-    unsafe {
-        cmd.pre_exec(move || {
-            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong) != 0 {
-                return Err(io::Error::last_os_error());
-            }
-            // The parent died before prctl took effect: nobody will signal us.
-            if libc::getppid() != parent {
-                libc::_exit(0);
-            }
-            Ok(())
-        });
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window; its own group, so our Ctrl+C is not its.
+        cmd.creation_flags(crate::win::CREATE_NO_WINDOW | 0x0000_0200);
+    }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+        let parent = std::process::id() as libc::pid_t;
+        // SAFETY: only async-signal-safe calls between fork and exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                // The parent died before prctl took effect: nobody will signal us.
+                if libc::getppid() != parent {
+                    libc::_exit(0);
+                }
+                Ok(())
+            });
+        }
     }
     cmd
 }
 
 /// Has `pid` exited? Leaves it unreaped (`WNOWAIT`), so the pid stays ours.
+#[cfg(unix)]
 fn exited(pid: i32, block: bool) -> bool {
     // SAFETY: zeroed siginfo_t is a valid out-parameter for waitid.
     unsafe {
@@ -685,6 +826,8 @@ fn monitor(
             }
             match command(&bin, port, &cfg).spawn() {
                 Ok(c) => {
+                    #[cfg(windows)]
+                    join_job(&c);
                     s.pid = Some(c.id() as i32);
                     c
                 }
@@ -746,10 +889,13 @@ fn monitor(
         let status = child.wait();
         shared.cv.notify_all();
         let (code, signal) = match &status {
+            #[cfg(unix)]
             Ok(s) => {
                 use std::os::unix::process::ExitStatusExt;
                 (s.code(), s.signal())
             }
+            #[cfg(windows)]
+            Ok(s) => (s.code(), None),
             Err(_) => (None, None),
         };
         emit(Event::Exited { code, signal });
@@ -785,7 +931,7 @@ fn monitor(
     shared.cv.notify_all();
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

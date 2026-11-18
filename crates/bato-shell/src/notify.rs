@@ -11,24 +11,44 @@
 //!
 //! zbus runs on `async-io`, so these futures work on any executor (iced's
 //! thread pool included) and need no tokio.
+//!
+//! Windows: a notification-area balloon (a toast on Windows 10 and 11) from
+//! a hidden icon that exists only while a notification shows; a click on it
+//! is a [`Click`] with the `default` action.
 
+#[cfg(unix)]
 use std::collections::{HashMap, HashSet};
+#[cfg(unix)]
 use std::hash::{Hash, Hasher};
+#[cfg(unix)]
 use std::sync::{Arc, Mutex};
 
+#[cfg(unix)]
 use futures::StreamExt;
+#[cfg(unix)]
 use futures::stream::BoxStream;
+#[cfg(unix)]
 use zbus::message::Type as MessageType;
+#[cfg(unix)]
 use zbus::zvariant::Value;
+#[cfg(unix)]
 use zbus::{Connection, MatchRule, MessageStream};
 
+#[cfg(unix)]
 use crate::identity::AppIdentity;
+
+#[cfg(windows)]
+#[path = "notify_win.rs"]
+mod win;
+#[cfg(windows)]
+pub use win::Notifier;
 
 pub const BUS_NAME: &str = "org.freedesktop.Notifications";
 pub const PATH: &str = "/org/freedesktop/Notifications";
 pub const INTERFACE: &str = "org.freedesktop.Notifications";
 /// The action key a click on the notification body invokes.
 pub const DEFAULT_ACTION: &str = "default";
+#[cfg(unix)]
 const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Electron's `notify({ title, body, silent })`.
@@ -65,6 +85,7 @@ pub struct Click {
     pub activation_token: Option<String>,
 }
 
+#[cfg(unix)]
 /// Sends notifications and listens for clicks on them. Cheap to clone: the
 /// session-bus connection and the set of ids sent are shared.
 #[derive(Clone)]
@@ -75,6 +96,7 @@ pub struct Notifier {
     sent: Arc<Mutex<HashSet<u32>>>,
 }
 
+#[cfg(unix)]
 impl std::fmt::Debug for Notifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Notifier")
@@ -84,6 +106,7 @@ impl std::fmt::Debug for Notifier {
     }
 }
 
+#[cfg(unix)]
 /// Identity for iced's `Subscription::run_with`: one click listener per app.
 impl Hash for Notifier {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -92,6 +115,7 @@ impl Hash for Notifier {
     }
 }
 
+#[cfg(unix)]
 impl Notifier {
     /// Connects to the session bus lazily, on the first notification.
     pub fn new(app: &AppIdentity) -> Self {
@@ -226,7 +250,7 @@ impl Notifier {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;

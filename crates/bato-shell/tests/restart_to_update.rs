@@ -3,6 +3,8 @@
 //! CLI does (unlink, write a new file), then `relaunch` starts it.
 //!
 //! Its own test binary (one test), because it changes `PATH` for the process.
+//! Unix only: the fake CLI is a shell script.
+#![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

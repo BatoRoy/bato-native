@@ -82,9 +82,13 @@ pub mod notify;
 // features) lint and test it although apps opt in.
 #[cfg(any(test, feature = "supervisor"))]
 pub mod supervisor;
-// Same: built and tested by `cargo test`, opted into by apps.
-#[cfg(any(test, feature = "tray"))]
+// Same: built and tested by `cargo test`, opted into by apps. Linux only
+// (StatusNotifierItem over D-Bus).
+#[cfg(all(unix, any(test, feature = "tray")))]
 pub mod tray;
+
+#[cfg(windows)]
+mod win;
 
 #[cfg(feature = "iced")]
 pub mod iced_ext;
@@ -92,5 +96,5 @@ pub mod iced_ext;
 #[cfg(test)]
 mod test_support;
 
-pub use identity::{AppIdentity, Brand};
+pub use identity::{AppIdentity, Brand, home_dir};
 pub use settings::{Settings, SettingsExt};

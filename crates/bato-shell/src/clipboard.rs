@@ -44,13 +44,25 @@
 //! # Ok::<(), clipboard::ClipboardError>(())
 //! ```
 
+#[cfg(unix)]
 mod wayland;
+#[cfg(unix)]
 mod x11;
 
+#[cfg(windows)]
+#[path = "clipboard_win.rs"]
+mod win;
+#[cfg(windows)]
+pub use win::{copy_files, paste_files, types};
+
+#[cfg(unix)]
 use std::io::Read;
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use crate::desktop::{file_uri, uri_to_path};
 
@@ -101,6 +113,9 @@ pub enum Backend {
     WlClipboard,
     /// An X11 CLIPBOARD owner, in-process.
     X11,
+    /// Windows: `CF_HDROP` plus `Preferred DropEffect` (Explorer's format).
+    #[cfg(windows)]
+    Win32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,11 +173,13 @@ pub fn offers(paths: &[PathBuf], op: Op) -> Vec<(String, Vec<u8>)> {
     out
 }
 
+#[cfg(unix)]
 fn has(types: &[String], t: &str) -> bool {
     types.iter().any(|x| x.eq_ignore_ascii_case(t))
 }
 
 /// Which types to fetch, given the offered ones.
+#[cfg(unix)]
 fn to_fetch(types: &[String]) -> Vec<&'static str> {
     if has(types, GNOME_COPIED_FILES) {
         return vec![GNOME_COPIED_FILES];
@@ -238,6 +255,7 @@ fn from_uris<'a>(op: Op, lines: impl Iterator<Item = &'a str>) -> Files {
 
 // ── Backends ─────────────────────────────────────────────────────────────────
 
+#[cfg(unix)]
 /// The backends to try, in order, for this session.
 fn plan() -> Result<Vec<Backend>, ClipboardError> {
     let forced = std::env::var(ENV_BACKEND).ok().filter(|v| !v.is_empty());
@@ -265,6 +283,7 @@ fn plan() -> Result<Vec<Backend>, ClipboardError> {
     }
 }
 
+#[cfg(unix)]
 /// Put `paths` on the clipboard as files ([`offers`]); the backend that
 /// took them.
 pub fn copy_files(paths: &[PathBuf], op: Op) -> Result<Backend, ClipboardError> {
@@ -287,6 +306,7 @@ pub fn copy_files(paths: &[PathBuf], op: Op) -> Result<Backend, ClipboardError> 
     Err(unavailable(tried))
 }
 
+#[cfg(unix)]
 /// Files on the clipboard, `None` when it holds something else (or
 /// nothing).
 pub fn paste_files() -> Result<Option<Files>, ClipboardError> {
@@ -305,6 +325,7 @@ pub fn paste_files() -> Result<Option<Files>, ClipboardError> {
     Err(unavailable(tried))
 }
 
+#[cfg(unix)]
 /// The MIME types on the clipboard now (empty when it is empty).
 pub fn types() -> Result<Vec<String>, ClipboardError> {
     let mut tried = Vec::new();
@@ -327,12 +348,14 @@ pub fn types() -> Result<Vec<String>, ClipboardError> {
     Err(unavailable(tried))
 }
 
+#[cfg(unix)]
 fn unavailable(tried: Vec<String>) -> ClipboardError {
     ClipboardError::Unavailable(tried.join("; "))
 }
 
 // ── wl-clipboard tools ───────────────────────────────────────────────────────
 
+#[cfg(unix)]
 fn wl_copy(paths: &[PathBuf]) -> Result<(), String> {
     use std::io::Write;
     let mut child = Command::new("wl-copy")
@@ -358,6 +381,7 @@ fn wl_copy(paths: &[PathBuf]) -> Result<(), String> {
     }
 }
 
+#[cfg(unix)]
 fn wl_paste() -> Result<Vec<(String, Vec<u8>)>, String> {
     let list = run_capture("wl-paste", &["--list-types"])?;
     let types: Vec<String> = String::from_utf8_lossy(&list)
@@ -374,6 +398,7 @@ fn wl_paste() -> Result<Vec<(String, Vec<u8>)>, String> {
     Ok(out)
 }
 
+#[cfg(unix)]
 fn wait_timeout(
     child: &mut std::process::Child,
     within: Duration,
@@ -392,6 +417,7 @@ fn wait_timeout(
     }
 }
 
+#[cfg(unix)]
 /// Run a tool, capture stdout (≤ [`MAX_READ`]) within [`READ_TIMEOUT`].
 fn run_capture(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     let mut child = Command::new(program)
@@ -424,6 +450,7 @@ fn run_capture(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+#[cfg(unix)]
 /// Read a pipe until EOF, at most [`MAX_READ`] bytes, within `deadline`.
 pub(crate) fn read_pipe(fd: std::os::fd::OwnedFd, deadline: Instant) -> Result<Vec<u8>, String> {
     use std::os::fd::AsRawFd;
@@ -466,6 +493,7 @@ pub(crate) fn read_pipe(fd: std::os::fd::OwnedFd, deadline: Instant) -> Result<V
     }
 }
 
+#[cfg(unix)]
 /// A pipe, both ends close-on-exec.
 pub(crate) fn pipe() -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd), String> {
     use std::os::fd::FromRawFd;
@@ -483,6 +511,7 @@ pub(crate) fn pipe() -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd), Str
     })
 }
 
+#[cfg(unix)]
 /// Serve one data request: write `data` to `fd` on a short-lived thread, so
 /// a reader that never reads cannot stall the owner.
 pub(crate) fn serve_fd(fd: std::os::fd::OwnedFd, data: Vec<u8>) {
@@ -496,6 +525,7 @@ pub(crate) fn serve_fd(fd: std::os::fd::OwnedFd, data: Vec<u8>) {
         });
 }
 
+#[cfg(unix)]
 /// The data for `mime` among `offers` (text aliases share the text).
 pub(crate) fn lookup<'a>(offers: &'a [(String, Vec<u8>)], mime: &str) -> Option<&'a [u8]> {
     offers
@@ -504,7 +534,7 @@ pub(crate) fn lookup<'a>(offers: &'a [(String, Vec<u8>)], mime: &str) -> Option<
         .map(|(_, v)| v.as_slice())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
