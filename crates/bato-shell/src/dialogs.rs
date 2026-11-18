@@ -12,6 +12,9 @@
 //! `{ name, extensions }`, and `open_files` allows several files unless told
 //! otherwise.
 //!
+//! Windows: the common item dialog (`IFileOpenDialog` / `IFileSaveDialog`)
+//! on its own COM thread, modal to the app window, with the same semantics.
+//!
 //! ```no_run
 //! use bato_shell::dialogs::{self, FileFilter, OpenFiles};
 //! # async fn demo() -> Result<(), dialogs::DialogError> {
@@ -24,12 +27,20 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::Arc;
 
+#[cfg(unix)]
 use ashpd::WindowIdentifier;
+#[cfg(unix)]
 use ashpd::desktop::ResponseError;
+#[cfg(unix)]
 use ashpd::desktop::file_chooser::{FileFilter as PortalFilter, SelectedFiles};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
+
+#[cfg(windows)]
+#[path = "dialogs_win.rs"]
+mod win;
 
 /// Electron's `{ name, extensions }`; `"*"` matches everything.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,6 +76,7 @@ impl FileFilter {
             .collect()
     }
 
+    #[cfg(unix)]
     fn to_portal(&self) -> PortalFilter {
         self.globs()
             .iter()
@@ -83,13 +95,18 @@ pub enum Parent {
     /// An X11 window id.
     X11(u64),
     /// A Wayland toplevel exported through xdg-foreign.
+    #[cfg(unix)]
     Wayland(Exported),
+    /// A Win32 window (`HWND`).
+    #[cfg(windows)]
+    Win32(isize),
 }
 
 /// An xdg-foreign handle for a Wayland toplevel (`wayland:<handle>` without
 /// the prefix). One made by [`Parent::from_window`] owns the export: the
 /// compositor revokes the handle when the last clone drops, i.e. when the
 /// dialog that holds it has finished.
+#[cfg(unix)]
 #[derive(Clone)]
 pub struct Exported {
     handle: String,
@@ -98,6 +115,7 @@ pub struct Exported {
     export: Option<Arc<WindowIdentifier>>,
 }
 
+#[cfg(unix)]
 impl Exported {
     /// A handle the app exported itself and keeps alive for the dialog.
     pub fn from_handle(handle: impl Into<String>) -> Self {
@@ -117,20 +135,24 @@ impl Exported {
     }
 }
 
+#[cfg(unix)]
 impl std::fmt::Debug for Exported {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Exported").field(&self.handle).finish()
     }
 }
 
+#[cfg(unix)]
 impl PartialEq for Exported {
     fn eq(&self, o: &Self) -> bool {
         self.handle == o.handle
     }
 }
 
+#[cfg(unix)]
 impl Eq for Exported {}
 
+#[cfg(unix)]
 impl std::hash::Hash for Exported {
     fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
         self.handle.hash(h);
@@ -169,12 +191,15 @@ impl Parent {
     /// surface on that display). X11 handles are plain ids.
     pub unsafe fn from_raw(window: RawWindowHandle, display: Option<RawDisplayHandle>) -> Self {
         match (window, display) {
+            #[cfg(windows)]
+            (RawWindowHandle::Win32(h), _) => Parent::Win32(h.hwnd.get()),
             (RawWindowHandle::Xlib(h), _) => {
                 // c_ulong: u64 here, u32 on 32-bit targets.
                 #[allow(clippy::unnecessary_cast)]
                 Parent::X11(h.window as u64)
             }
             (RawWindowHandle::Xcb(h), _) => Parent::X11(u64::from(h.window.get())),
+            #[cfg(unix)]
             (RawWindowHandle::Wayland(_), Some(RawDisplayHandle::Wayland(_))) => {
                 let export = futures::executor::block_on(WindowIdentifier::from_raw_handle(
                     &window,
@@ -188,6 +213,7 @@ impl Parent {
 
     /// Wrap an export ashpd made; `None` unless it is a non-empty
     /// `wayland:` handle (a compositor that never sent the handle event).
+    #[cfg(unix)]
     fn from_export(export: WindowIdentifier) -> Self {
         match wayland_handle(&export.to_string()) {
             Some(handle) => Parent::Wayland(Exported {
@@ -200,10 +226,23 @@ impl Parent {
 
     /// The portal's `parent_window` string: `x11:<hex>`, `wayland:<handle>`,
     /// or `""` for none.
+    #[cfg(unix)]
     pub fn portal_string(&self) -> String {
         self.identifier().map(|i| i.to_string()).unwrap_or_default()
     }
 
+    /// Windows: `win32:<hex HWND>`, `x11:<hex>`, or `""` for none (there is
+    /// no portal; for logs and tests).
+    #[cfg(windows)]
+    pub fn portal_string(&self) -> String {
+        match self {
+            Parent::None => String::new(),
+            Parent::X11(x) => format!("x11:{x:x}"),
+            Parent::Win32(h) => format!("win32:{h:x}"),
+        }
+    }
+
+    #[cfg(unix)]
     fn identifier(&self) -> Option<WindowIdentifier> {
         match self {
             Parent::None => None,
@@ -216,6 +255,7 @@ impl Parent {
 }
 
 /// `wayland:<handle>` → `<handle>`, if non-empty.
+#[cfg(unix)]
 fn wayland_handle(identifier: &str) -> Option<&str> {
     identifier
         .strip_prefix("wayland:")
@@ -287,9 +327,12 @@ pub enum DialogError {
 impl std::fmt::Display for DialogError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(unix)]
             Self::Unavailable(e) => {
                 write!(f, "no file chooser available (xdg-desktop-portal): {e}")
             }
+            #[cfg(windows)]
+            Self::Unavailable(e) => write!(f, "no file chooser available: {e}"),
             Self::Failed(e) => write!(f, "file dialog failed: {e}"),
         }
     }
@@ -298,6 +341,7 @@ impl std::fmt::Display for DialogError {
 impl std::error::Error for DialogError {}
 
 /// Selected files; empty when cancelled.
+#[cfg(unix)]
 pub async fn open_files(o: OpenFiles) -> Result<Vec<PathBuf>, DialogError> {
     let req = SelectedFiles::open_file()
         .identifier(o.parent.identifier())
@@ -309,6 +353,7 @@ pub async fn open_files(o: OpenFiles) -> Result<Vec<PathBuf>, DialogError> {
 }
 
 /// The chosen folder; `None` when cancelled.
+#[cfg(unix)]
 pub async fn open_directory(o: OpenDirectory) -> Result<Option<PathBuf>, DialogError> {
     let req = SelectedFiles::open_file()
         .identifier(o.parent.identifier())
@@ -320,6 +365,7 @@ pub async fn open_directory(o: OpenDirectory) -> Result<Option<PathBuf>, DialogE
 }
 
 /// The path to save to; `None` when cancelled.
+#[cfg(unix)]
 pub async fn save_file(o: SaveFile) -> Result<Option<PathBuf>, DialogError> {
     let target = SaveTarget::from_default_path(o.default_path.as_deref());
     let mut req = SelectedFiles::save_file()
@@ -341,8 +387,10 @@ pub async fn save_file(o: SaveFile) -> Result<Option<PathBuf>, DialogError> {
     Ok(finish(req.send().await)?.into_iter().next())
 }
 
+#[cfg(unix)]
 type Sent = Result<ashpd::desktop::Request<SelectedFiles>, ashpd::Error>;
 
+#[cfg(unix)]
 fn finish(sent: Sent) -> Result<Vec<PathBuf>, DialogError> {
     let files = match sent.and_then(|r| r.response()) {
         Ok(f) => f,
@@ -359,8 +407,27 @@ fn finish(sent: Sent) -> Result<Vec<PathBuf>, DialogError> {
         .collect())
 }
 
+#[cfg(unix)]
 fn failed(e: ashpd::Error) -> DialogError {
     DialogError::Failed(e.to_string())
+}
+
+/// Windows: selected files; empty when cancelled.
+#[cfg(windows)]
+pub async fn open_files(o: OpenFiles) -> Result<Vec<PathBuf>, DialogError> {
+    win::run(move || win::open_files(&o)).await
+}
+
+/// Windows: the chosen folder; `None` when cancelled.
+#[cfg(windows)]
+pub async fn open_directory(o: OpenDirectory) -> Result<Option<PathBuf>, DialogError> {
+    win::run(move || win::open_directory(&o)).await
+}
+
+/// Windows: the chosen path; `None` when cancelled.
+#[cfg(windows)]
+pub async fn save_file(o: SaveFile) -> Result<Option<PathBuf>, DialogError> {
+    win::run(move || win::save_file(&o)).await
 }
 
 /// How Electron's `defaultPath` maps onto the portal's save options: an
@@ -433,11 +500,21 @@ pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
             }
         }
     }
-    use std::os::unix::ffi::OsStringExt;
-    Some(PathBuf::from(std::ffi::OsString::from_vec(out)))
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Some(PathBuf::from(std::ffi::OsString::from_vec(out)))
+    }
+    // `/C:/x` → `C:\x`.
+    #[cfg(windows)]
+    {
+        let s = String::from_utf8(out).ok()?;
+        let s = s.strip_prefix('/').unwrap_or(&s);
+        Some(PathBuf::from(s.replace('/', "\\")))
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

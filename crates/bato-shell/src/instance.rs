@@ -23,6 +23,13 @@
 //! existing window with a foreign token (its `focus_window` is a no-op on
 //! Wayland), so bato-shell does the `xdg_activation_v1.activate` itself.
 //!
+//! **Windows:** a named pipe derived from `%TEMP%\<app_id>` (per user) takes
+//! the place of the socket; the first launch creates it with
+//! `FILE_FLAG_FIRST_PIPE_INSTANCE`, so a second creation fails and that launch
+//! forwards instead. The pipe goes away with the process, crash included.
+//! The forwarding launch calls `AllowSetForegroundWindow`, so the first one
+//! may raise its window (`iced_ext::activate`).
+//!
 //! ```no_run
 //! use bato_shell::{AppIdentity, instance};
 //! const APP: AppIdentity = AppIdentity::new("BatoBrowse", "batobrowse", "1.0.0");
@@ -38,18 +45,31 @@
 //! ```
 
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Read, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(unix)]
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use futures::channel::mpsc;
 
 use crate::identity::AppIdentity;
+
+#[cfg(windows)]
+#[path = "instance_win.rs"]
+mod win;
 
 const MAGIC: &[u8] = b"bato-instance 1\n";
 const ACK: &[u8] = b"ok\n";
@@ -86,6 +106,7 @@ impl Request {
     }
 
     /// The value of `--name=value` (the last one wins).
+    #[cfg(unix)]
     pub fn flag(&self, name: &str) -> Option<&OsStr> {
         let prefix = format!("--{name}=");
         self.options()
@@ -95,6 +116,7 @@ impl Request {
     }
 
     /// Whether `--name` (or `--name=…`) is present.
+    #[cfg(unix)]
     pub fn has_flag(&self, name: &str) -> bool {
         let bare = format!("--{name}");
         self.options().any(|a| {
@@ -115,7 +137,7 @@ impl Request {
                 options_done = true;
                 continue;
             }
-            if !options_done && a.as_bytes().starts_with(b"-") && a.len() > 1 {
+            if !options_done && is_option(a) && a.len() > 1 {
                 continue;
             }
             let p = Path::new(a);
@@ -132,10 +154,33 @@ impl Request {
         self.argv
             .iter()
             .take_while(|a| *a != "--")
-            .filter(|a| a.as_bytes().starts_with(b"-"))
+            .filter(|a| is_option(a))
+    }
+
+    /// Windows: the value of `--name=value` (the last one wins).
+    #[cfg(windows)]
+    pub fn flag(&self, name: &str) -> Option<&OsStr> {
+        let prefix = format!("--{name}=");
+        self.options()
+            .filter_map(|a| a.to_str()?.strip_prefix(prefix.as_str()))
+            .map(OsStr::new)
+            .last()
+    }
+
+    /// Windows: whether `--name` (or `--name=…`) is present.
+    #[cfg(windows)]
+    pub fn has_flag(&self, name: &str) -> bool {
+        let bare = format!("--{name}");
+        self.options().any(|a| {
+            let b = a.to_string_lossy();
+            b == bare
+                || b.strip_prefix(bare.as_str())
+                    .is_some_and(|r| r.starts_with('='))
+        })
     }
 
     /// `MAGIC`, then NUL-terminated fields: token, cwd, argv….
+    #[cfg(unix)]
     fn encode(&self) -> Vec<u8> {
         let mut out = MAGIC.to_vec();
         let mut field = |b: &[u8]| {
@@ -150,6 +195,7 @@ impl Request {
         out
     }
 
+    #[cfg(unix)]
     fn decode(b: &[u8]) -> Option<Self> {
         let rest = b.strip_prefix(MAGIC)?;
         let body = rest.strip_suffix(b"\0")?;
@@ -163,6 +209,16 @@ impl Request {
             activation_token: (!token.is_empty()).then_some(token),
         })
     }
+}
+
+#[cfg(unix)]
+fn is_option(a: &OsStr) -> bool {
+    a.as_bytes().starts_with(b"-")
+}
+
+#[cfg(windows)]
+fn is_option(a: &OsStr) -> bool {
+    a.to_string_lossy().starts_with('-')
 }
 
 /// The outcome of [`acquire`].
@@ -187,6 +243,7 @@ struct Inner {
     stop: Arc<AtomicBool>,
     requests: Mutex<Option<mpsc::UnboundedReceiver<Request>>>,
     /// Holds the lock; closed (unlocked) after the socket is removed.
+    #[cfg(unix)]
     _lock: std::fs::File,
 }
 
@@ -220,6 +277,7 @@ impl Primary {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Inner {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -231,6 +289,7 @@ impl Drop for Inner {
 
 /// The directory for `app`'s socket: `$XDG_RUNTIME_DIR/<app_id>`, else
 /// `/tmp/<app_id>-<uid>`.
+#[cfg(unix)]
 pub fn dir_for(app: &AppIdentity) -> PathBuf {
     let id = app.app_id().replace('/', "_");
     match std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
@@ -246,7 +305,21 @@ pub fn acquire(app: &AppIdentity) -> io::Result<Instance> {
     acquire_at(&dir_for(app), Request::current())
 }
 
+/// Windows: `%TEMP%\<app_id>`, which names the pipe (the folder itself is
+/// not created).
+#[cfg(windows)]
+pub fn dir_for(app: &AppIdentity) -> PathBuf {
+    std::env::temp_dir().join(app.app_id().replace(['/', '\\'], "_"))
+}
+
 /// [`acquire`] with an explicit directory and request.
+#[cfg(windows)]
+pub fn acquire_at(dir: &Path, request: Request) -> io::Result<Instance> {
+    win::acquire_at(dir, request)
+}
+
+/// [`acquire`] with an explicit directory and request.
+#[cfg(unix)]
 pub fn acquire_at(dir: &Path, request: Request) -> io::Result<Instance> {
     private_dir(dir)?;
     let lock_path = dir.join("instance.lock");
@@ -265,6 +338,7 @@ pub fn acquire_at(dir: &Path, request: Request) -> io::Result<Instance> {
     Ok(Instance::Forwarded)
 }
 
+#[cfg(unix)]
 fn try_lock(f: &std::fs::File) -> io::Result<bool> {
     use std::os::fd::AsRawFd;
     loop {
@@ -281,6 +355,7 @@ fn try_lock(f: &std::fs::File) -> io::Result<bool> {
     }
 }
 
+#[cfg(unix)]
 /// Create `dir` 0700, or check that an existing one is ours and private.
 fn private_dir(dir: &Path) -> io::Result<()> {
     match std::fs::DirBuilder::new().mode(0o700).create(dir) {
@@ -310,6 +385,7 @@ fn private_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn listen(socket: PathBuf, lock: std::fs::File) -> io::Result<Primary> {
     // We hold the lock: any socket file is a dead instance's.
     let _ = std::fs::remove_file(&socket);
@@ -345,6 +421,7 @@ fn listen(socket: PathBuf, lock: std::fs::File) -> io::Result<Primary> {
     })
 }
 
+#[cfg(unix)]
 fn peer_uid(s: &UnixStream) -> Option<u32> {
     use std::os::fd::AsRawFd;
     let mut cred = libc::ucred {
@@ -366,6 +443,7 @@ fn peer_uid(s: &UnixStream) -> Option<u32> {
     (r == 0).then_some(cred.uid)
 }
 
+#[cfg(unix)]
 /// Read one request (to EOF).
 fn receive(mut conn: UnixStream) -> Option<(Request, UnixStream)> {
     // SAFETY: getuid cannot fail.
@@ -385,6 +463,7 @@ fn receive(mut conn: UnixStream) -> Option<(Request, UnixStream)> {
     Some((Request::decode(&buf)?, conn))
 }
 
+#[cfg(unix)]
 /// Send `request` to the running instance and wait for its acknowledgement.
 fn forward(socket: &Path, request: &Request) -> io::Result<()> {
     let end = Instant::now() + CONNECT_RETRY;
@@ -427,7 +506,7 @@ fn forward(socket: &Path, request: &Request) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use futures::StreamExt;

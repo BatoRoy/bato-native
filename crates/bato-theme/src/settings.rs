@@ -52,15 +52,31 @@ impl Default for Settings {
     }
 }
 
-/// `~/.config/<slug>`
+/// `~/.config/<slug>` (`$XDG_CONFIG_HOME/<slug>`); on Windows
+/// `%APPDATA%\<slug>`, where Electron keeps its userData.
 pub fn config_dir(slug: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-        });
+        .unwrap_or_else(default_config_base);
     base.join(slug)
+}
+
+#[cfg(not(windows))]
+fn default_config_base() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
+}
+
+#[cfg(windows)]
+fn default_config_base() -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default())
+                .join("AppData")
+                .join("Roaming")
+        })
 }
 
 impl Settings {

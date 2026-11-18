@@ -306,16 +306,22 @@ impl Updater {
     /// bundled server is stopped by the old process's exit and started fresh
     /// by the new one.
     pub fn relaunch(&self) -> std::io::Result<()> {
-        use std::os::unix::process::CommandExt;
         if !self.packaged {
             return Err(std::io::Error::other(NOT_PACKAGED));
         }
-        Command::new(self.installed_binary())
-            .args(std::env::args_os().skip(1))
-            .stdin(Stdio::null())
-            .process_group(0)
-            .spawn()
-            .map(drop)
+        let mut cmd = Command::new(self.installed_binary());
+        cmd.args(std::env::args_os().skip(1)).stdin(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(crate::win::DETACHED_FLAGS);
+        }
+        cmd.spawn().map(drop)
     }
 
     /// The whole Electron loop on the calling thread: check now and every

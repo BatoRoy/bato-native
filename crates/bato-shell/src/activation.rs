@@ -48,11 +48,20 @@ pub unsafe fn activate_raw(
     token: Option<&str>,
 ) -> bool {
     match (window, display) {
+        #[cfg(unix)]
         (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
             // SAFETY: forwarded from the caller.
             unsafe { wayland::activate(w.surface.as_ptr(), d.display.as_ptr(), token) }
                 .inspect_err(|e| eprintln!("[bato-shell] activation: {e}"))
                 .is_ok()
+        }
+        // Windows: restore a minimised window and bring it to the front
+        // (Electron's second-instance `restore()` + `focus()`). The launch
+        // that forwarded here allowed it with `AllowSetForegroundWindow`.
+        #[cfg(windows)]
+        (RawWindowHandle::Win32(w), _) => {
+            let _ = (display, token);
+            crate::win::raise(w.hwnd.get() as _)
         }
         _ => false,
     }
@@ -73,6 +82,7 @@ where
         return None;
     };
     match (w.as_raw(), d.as_raw()) {
+        #[cfg(unix)]
         (RawWindowHandle::Wayland(w), RawDisplayHandle::Wayland(d)) => {
             // SAFETY: both handles are borrowed from `window` for this call.
             unsafe { wayland::token(w.surface.as_ptr(), d.display.as_ptr()) }
@@ -83,6 +93,7 @@ where
     }
 }
 
+#[cfg(unix)]
 mod wayland {
     use wayland_backend::sys::client::{Backend, ObjectId};
     use wayland_client::globals::{GlobalListContents, registry_queue_init};

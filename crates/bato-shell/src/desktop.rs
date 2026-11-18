@@ -9,10 +9,16 @@
 //! | [`open`] | `xdg-open <path>`, detached; an early non-zero exit is an error | — |
 //! | [`Detached`] | `setsid`, stdio on `/dev/null`, every inherited fd closed at exec, reaped on a thread (no zombie), the app's own `BATO_*` and activation variables removed | — |
 //!
+//! Windows: [`reveal`] runs `explorer /select,`, [`open`] is `ShellExecuteW`
+//! ("open"), and [`Detached`] uses `DETACHED_PROCESS` in a new process group
+//! with stdio on `NUL`.
+//!
 //! Everything here blocks (D-Bus, process spawns) and runs on a worker
 //! (`iced_ext::blocking`).
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -39,6 +45,7 @@ pub const SCRUBBED_ENV: [&str; 8] = [
 
 /// `file://` URI for an absolute path, percent-encoded as RFC 8089 wants
 /// (Electron wrote the raw path, which breaks on spaces and `#`).
+#[cfg(unix)]
 pub fn file_uri(path: &Path) -> String {
     use std::os::unix::ffi::OsStrExt;
     let mut s = String::from("file://");
@@ -52,9 +59,30 @@ pub fn file_uri(path: &Path) -> String {
     s
 }
 
+/// Windows: `file:///C:/Users/me/a%20b.txt` for `C:\Users\me\a b.txt`, and
+/// `file://server/share/x` for a UNC path.
+#[cfg(windows)]
+pub fn file_uri(path: &Path) -> String {
+    let p = path.to_string_lossy().replace('\\', "/");
+    let (prefix, rest) = match p.strip_prefix("//") {
+        Some(unc) => ("file://", unc.to_string()),
+        None => ("file:///", p),
+    };
+    let mut s = String::from(prefix);
+    for &b in rest.as_bytes() {
+        if b.is_ascii_alphanumeric() || b"/-_.~!$&'()*+,;=:@".contains(&b) {
+            s.push(b as char);
+        } else {
+            s.push_str(&format!("%{b:02X}"));
+        }
+    }
+    s
+}
+
 /// The local path of a `file:` URI: `file:///p`, `file://localhost/p`,
 /// `file://<this host>/p`, or `file:/p` (KDE writes those). `None` for other
 /// schemes, other hosts, relative paths, or a bad escape.
+#[cfg(unix)]
 pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStringExt;
     let uri = uri.trim();
@@ -98,6 +126,65 @@ pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     Some(PathBuf::from(OsString::from_vec(out)))
 }
 
+/// Windows: `file:///C:/a%20b` → `C:\a b`; `file://server/share/x` →
+/// `\\server\share\x`. `None` for other schemes, relative paths or a bad
+/// escape.
+#[cfg(windows)]
+pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    let uri = uri.trim();
+    let rest = uri
+        .strip_prefix("file:")
+        .or_else(|| uri.strip_prefix("FILE:"))?;
+    let (unc, path) = match rest.strip_prefix("//") {
+        Some(r) => {
+            let slash = r.find('/')?;
+            let host = &r[..slash];
+            if host.is_empty()
+                || host.eq_ignore_ascii_case("localhost")
+                || host.eq_ignore_ascii_case(&hostname())
+            {
+                (None, &r[slash..])
+            } else {
+                (Some(host), &r[slash..])
+            }
+        }
+        None => (None, rest),
+    };
+    let path = path.split(['?', '#']).next()?;
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    if out.contains(&0) {
+        return None;
+    }
+    let decoded = String::from_utf8(out).ok()?.replace('/', "\\");
+    match unc {
+        Some(host) => Some(PathBuf::from(format!("\\\\{host}{decoded}"))),
+        None => {
+            // "\C:\x" → "C:\x"; a drive letter is required.
+            let d = decoded.trim_start_matches('\\');
+            let b = d.as_bytes();
+            (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':').then(|| PathBuf::from(d))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn hostname() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
+}
+
+#[cfg(unix)]
 fn hostname() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: gethostname writes at most len bytes into our buffer.
@@ -176,19 +263,27 @@ impl Detached {
 
     /// Start it; the pid. `NotFound` when the program is not installed.
     pub fn spawn(mut self) -> io::Result<u32> {
-        use std::os::unix::process::CommandExt;
         self.cmd
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        // SAFETY: only async-signal-safe calls (setsid, close_range, fcntl)
-        // between fork and exec.
-        unsafe {
-            self.cmd.pre_exec(|| {
-                libc::setsid();
-                cloexec_from(3);
-                Ok(())
-            });
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: only async-signal-safe calls (setsid, close_range, fcntl)
+            // between fork and exec.
+            unsafe {
+                self.cmd.pre_exec(|| {
+                    libc::setsid();
+                    cloexec_from(3);
+                    Ok(())
+                });
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            self.cmd.creation_flags(crate::win::DETACHED_FLAGS);
         }
         let mut child = self.cmd.spawn()?;
         let pid = child.id();
@@ -221,6 +316,7 @@ impl Detached {
 
 /// Mark every fd from `first` on close-on-exec. Not closing them: the error
 /// pipe std uses to report a failed `exec` must stay open until then.
+#[cfg(unix)]
 fn cloexec_from(first: libc::c_uint) {
     // SAFETY: plain syscalls on our own descriptor table.
     unsafe {
@@ -267,14 +363,186 @@ pub const OPEN_GRACE: Duration = Duration::from_secs(3);
 /// reported: `xdg-open` exits 3 or 4 when nothing can open the file, 2 when
 /// it does not exist.
 pub fn open(path: &Path) -> io::Result<()> {
-    open_with("xdg-open", path, None)
+    open_activated(path, None)
 }
 
 /// [`open`] with an activation token for the opened app's window.
+#[cfg(unix)]
 pub fn open_activated(path: &Path, token: Option<&str>) -> io::Result<()> {
     open_with("xdg-open", path, token)
 }
 
+/// Windows: `ShellExecuteW(…, "open", path)`; the token is a Wayland notion.
+#[cfg(windows)]
+pub fn open_activated(path: &Path, token: Option<&str>) -> io::Result<()> {
+    let _ = token;
+    if !path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} does not exist", path.display()),
+        ));
+    }
+    shell_open(path.as_os_str())
+}
+
+/// Open a URL or path with its handler (`ShellExecuteW` "open"), Electron's
+/// `shell.openExternal` / `openPath` on Windows.
+#[cfg(windows)]
+pub fn shell_open(target: &OsStr) -> io::Result<()> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let verb = crate::win::wide("open");
+    let file = crate::win::wide(target);
+    // SAFETY: NUL-terminated wide strings that outlive the call.
+    let r = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    // > 32 is success; 2/3 file or path not found, 31 no association.
+    match r {
+        r if r > 32 => Ok(()),
+        2 | 3 => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} does not exist", target.to_string_lossy()),
+        )),
+        31 => Err(io::Error::other(format!(
+            "no application can open {}",
+            target.to_string_lossy()
+        ))),
+        r => Err(io::Error::other(format!("ShellExecute failed ({r})"))),
+    }
+}
+
+/// Open an `http(s)://` URL in the default browser (`xdg-open` on Linux,
+/// `ShellExecuteW` on Windows). Other schemes are refused.
+pub fn open_url(url: &str) -> io::Result<()> {
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("not a web address: {url}"),
+        ));
+    }
+    #[cfg(windows)]
+    {
+        shell_open(OsStr::new(url.trim()))
+    }
+    #[cfg(unix)]
+    {
+        match Detached::new("xdg-open")
+            .arg(url.trim())
+            .spawn_and_wait(OPEN_GRACE)
+        {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "xdg-open is not installed",
+            )),
+            Err(e) => Err(e),
+            Ok(None) | Ok(Some(0)) => Ok(()),
+            Ok(Some(c)) => Err(io::Error::other(format!("xdg-open failed ({c})"))),
+        }
+    }
+}
+
+/// Make this program the handler of `scheme:` links (`nem://…`), Electron's
+/// `app.setAsDefaultProtocolClient`. Windows: per-user, under
+/// `HKCU\Software\Classes\<scheme>`, running `"<this exe>" "%1"`; a
+/// second launch then forwards the link through [`crate::instance`].
+/// Linux: nothing to do here (the launcher `bato install` writes declares
+/// `MimeType=x-scheme-handler/<scheme>`), so it returns `Ok(false)`.
+/// `Ok(true)` when a registration was written.
+pub fn register_url_scheme(scheme: &str, description: &str) -> io::Result<bool> {
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe()?;
+        win_scheme::register(scheme, description, &exe)?;
+        Ok(true)
+    }
+    #[cfg(unix)]
+    {
+        let _ = (scheme, description);
+        Ok(false)
+    }
+}
+
+#[cfg(windows)]
+mod win_scheme {
+    use std::io;
+    use std::path::Path;
+
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
+        RegCreateKeyExW, RegSetValueExW,
+    };
+
+    use crate::win::wide;
+
+    fn set(path: &str, name: Option<&str>, value: &str) -> io::Result<()> {
+        let key = wide(path);
+        let mut h: HKEY = std::ptr::null_mut();
+        // SAFETY: valid NUL-terminated strings; the key is closed below.
+        let r = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                0,
+                std::ptr::null(),
+                REG_OPTION_NON_VOLATILE,
+                KEY_WRITE,
+                std::ptr::null(),
+                &mut h,
+                std::ptr::null_mut(),
+            )
+        };
+        if r != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(r as i32));
+        }
+        let name_w = name.map(wide);
+        let data = wide(value);
+        // SAFETY: `data` is a NUL-terminated UTF-16 string of that length.
+        let r = unsafe {
+            RegSetValueExW(
+                h,
+                name_w.as_ref().map_or(std::ptr::null(), |n| n.as_ptr()),
+                0,
+                REG_SZ,
+                data.as_ptr().cast(),
+                (data.len() * 2) as u32,
+            )
+        };
+        // SAFETY: opened above.
+        unsafe { RegCloseKey(h) };
+        if r != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(r as i32));
+        }
+        Ok(())
+    }
+
+    pub fn register(scheme: &str, description: &str, exe: &Path) -> io::Result<()> {
+        let base = format!("Software\\Classes\\{scheme}");
+        set(&base, None, &format!("URL:{description}"))?;
+        set(&base, Some("URL Protocol"), "")?;
+        set(
+            &format!("{base}\\DefaultIcon"),
+            None,
+            &format!("\"{}\",0", exe.display()),
+        )?;
+        set(
+            &format!("{base}\\shell\\open\\command"),
+            None,
+            &format!("\"{}\" \"%1\"", exe.display()),
+        )
+    }
+}
+
+#[cfg(unix)]
 fn open_with(opener: &str, path: &Path, token: Option<&str>) -> io::Result<()> {
     if !path.exists() {
         return Err(io::Error::new(
@@ -324,6 +592,7 @@ pub fn reveal(path: &Path) -> io::Result<Revealed> {
 
 /// [`reveal`] with an activation token (`startup_id`), so the file
 /// manager's window may take focus.
+#[cfg(unix)]
 pub fn reveal_activated(path: &Path, token: Option<&str>) -> io::Result<Revealed> {
     let shown = futures::executor::block_on(async {
         let conn = zbus::Connection::session().await?;
@@ -340,7 +609,32 @@ pub fn reveal_activated(path: &Path, token: Option<&str>) -> io::Result<Revealed
     open_with("xdg-open", dir, token).map(|()| Revealed::Folder)
 }
 
+/// Windows: `explorer /select,"<path>"` (Electron's `showItemInFolder`);
+/// a folder that does not exist is an error.
+#[cfg(windows)]
+pub fn reveal_activated(path: &Path, token: Option<&str>) -> io::Result<Revealed> {
+    use std::os::windows::process::CommandExt;
+    let _ = token;
+    if !path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{} does not exist", path.display()),
+        ));
+    }
+    let mut cmd = Command::new("explorer.exe");
+    cmd.raw_arg(format!("/select,\"{}\"", path.display()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(crate::win::DETACHED_FLAGS);
+    // explorer exits 1 even when it worked: only a failed start is an error.
+    let mut child = cmd.spawn()?;
+    std::thread::spawn(move || child.wait());
+    Ok(Revealed::FileManager)
+}
+
 /// `ShowItems(as uris, s startup_id)` on `conn`, for any bus.
+#[cfg(unix)]
 pub async fn show_items_on(
     conn: &zbus::Connection,
     paths: &[&Path],
@@ -358,7 +652,7 @@ pub async fn show_items_on(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

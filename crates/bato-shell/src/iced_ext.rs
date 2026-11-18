@@ -29,6 +29,7 @@ pub fn window_settings(app: &AppIdentity) -> window::Settings {
         min_size: Some(Size::new(WINDOW.min_width, WINDOW.min_height)),
         decorations: WINDOW.decorations,
         icon: app.icon_png.and_then(icon_from_png),
+        #[cfg(unix)]
         platform_specific: window::settings::PlatformSpecific {
             application_id: app.app_id(),
             ..Default::default()
@@ -168,7 +169,7 @@ pub fn supervisor_events(
 
 /// The tray's clicks, menu rows and status changes ([`crate::tray::Event`]).
 /// Keyed on the tray instance: keep returning it while the tray lives.
-#[cfg(any(test, feature = "tray"))]
+#[cfg(all(unix, any(test, feature = "tray")))]
 pub fn tray_events(tray: &crate::tray::Tray) -> Subscription<crate::tray::Event> {
     Subscription::run_with(tray.clone(), |t| t.events())
 }
@@ -654,6 +655,7 @@ mod tests {
         assert_eq!(s.size, Size::new(1280.0, 800.0));
         assert_eq!(s.min_size, Some(Size::new(900.0, 600.0)));
         assert!(s.decorations);
+        #[cfg(unix)]
         assert_eq!(s.platform_specific.application_id, app.app_id());
         assert!(s.icon.is_some(), "icon decodes");
         assert!(icon_from_png(b"not a png").is_none());

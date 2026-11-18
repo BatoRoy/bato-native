@@ -117,8 +117,19 @@ pub const WINDOW: WindowDefaults = WindowDefaults {
     decorations: true,
 };
 
+/// The user's home folder: `$HOME`; on Windows `%USERPROFILE%` (Electron's
+/// `app.getPath('home')`), for files an Electron client kept under it.
+pub fn home_dir() -> PathBuf {
+    home()
+}
+
+/// `$HOME`; on Windows `%USERPROFILE%` (Electron's `app.getPath('home')`).
 pub(crate) fn home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+    #[cfg(windows)]
+    let var = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    #[cfg(not(windows))]
+    let var = std::env::var_os("HOME");
+    PathBuf::from(var.unwrap_or_default())
 }
 
 /// The running binary, with the ` (deleted)` suffix Linux appends to

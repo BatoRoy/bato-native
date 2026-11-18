@@ -14,7 +14,7 @@ iced = ["dep:iced", "dep:png", "dep:raw-window-handle"]
 # parented to the app window: X11 by id, Wayland by an xdg-foreign export
 # (ashpd's `wayland` feature: wayland-client on the libwayland that winit
 # already dlopens, so nothing new is linked).
-dialogs = ["dep:ashpd", "dep:raw-window-handle", "futures/executor"]
+dialogs = ["dep:ashpd", "dep:windows", "dep:raw-window-handle", "futures/executor"]
 # org.freedesktop.Notifications over the session bus.
 notify = ["dep:zbus"]
 # Sidecar supervisor for apps that bundle a Go server. Off by default: a native
@@ -49,17 +49,21 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 # bundle that its `rustls` feature adds.
 ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier"] }
 
+# Same version and features as bato-kit (the PoC's list plus x11), so the
+# workspace never builds two feature sets of iced.
+iced = { version = "=0.14.0", default-features = false, features = ["wgpu", "tiny-skia", "web-colors", "wayland", "x11", "thread-pool", "svg", "advanced"], optional = true }
+png = { version = "0.17", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
+# The Linux desktop: portals, D-Bus, StatusNotifierItem, Wayland and X11.
+# Never built for Windows, where the same features use Win32 instead.
+[target.'cfg(unix)'.dependencies]
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser", "raw_handle", "wayland"], optional = true }
 zbus = { version = "5", default-features = false, features = ["async-io"], optional = true }
 # The SNI/dbusmenu protocol (Unlicense). On zbus 5 and async-io like the rest,
 # so no tokio.
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"], optional = true }
 
-# Same version and features as bato-kit (the PoC's list plus x11), so the
-# workspace never builds two feature sets of iced.
-iced = { version = "=0.14.0", default-features = false, features = ["wgpu", "tiny-skia", "web-colors", "wayland", "x11", "thread-pool", "svg", "advanced"], optional = true }
-png = { version = "0.17", optional = true }
-raw-window-handle = { version = "0.6", optional = true }
 wayland-client = { version = "0.31", optional = true }
 # `client_system`: proxies on the libwayland connection winit opened (the
 # window's wl_display), as ashpd does for xdg-foreign.
@@ -68,14 +72,44 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"], option
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 x11rb = { version = "0.13", default-features = false, optional = true }
 
+# Windows: the same features on Win32 (file dialogs through the common item
+# dialog, notifications as tray balloons, a named pipe for single instance,
+# CF_HDROP for files on the clipboard, a job object for the bundled server).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# The common item dialog (IFileOpenDialog, IFileSaveDialog) is COM: the
+# `windows` version wgpu already builds on Windows.
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common"], optional = true }
+
 [dev-dependencies]
 futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
-zbus = { version = "5", default-features = false, features = ["async-io", "p2p"] }
 # Runs iced Tasks in the iced_ext tests (already in the tree through iced).
 iced_runtime = "0.14"
+png = "0.17"
+
+[target.'cfg(unix)'.dev-dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io", "p2p"] }
 # `tray` builds under `cargo test` (see the feature).
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
-png = "0.17"
 
 [[example]]
 name = "fileclip"
