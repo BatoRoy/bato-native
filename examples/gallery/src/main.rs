@@ -106,7 +106,12 @@ fn route(view: &BootView) -> (Page, Tab, Option<iced::widget::Id>) {
         .card
         .as_deref()
         .filter(|c| page == Page::Examples && tab.cards().contains(c))
-        .map(|c| showcase::card_id(tab, c));
+        .map(|c| showcase::card_id(tab, c))
+        .or_else(|| {
+            (page == Page::Interaction
+                && view.card.as_deref() == Some(gallery::interaction::kit13::ANCHOR))
+            .then(|| iced::widget::Id::new(gallery::interaction::kit13::ANCHOR))
+        });
     (page, tab, anchor)
 }
 
@@ -206,7 +211,11 @@ impl App {
     fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Frame(m) => match self.frame.update(m) {
-                // The gallery registers no commands of its own.
+                // The gallery registers no palette commands of its own; the
+                // kit 1.3 section's toast action and footer row say so.
+                Action::Command(id) if id.starts_with("kit13-") => {
+                    self.frame.toast(format!("Command: {id}"), Tone::Info);
+                }
                 Action::None | Action::Navigated(_) | Action::Command(_) => {}
                 Action::SaveSettings => self.save_settings(),
                 Action::TestServer(url) => {
@@ -271,8 +280,20 @@ impl App {
                 if let Some((text, tone)) = m.toast() {
                     self.frame.toast(text, tone);
                 }
-                return gallery::interaction::update(&mut self.interaction, m)
-                    .map(Msg::Interaction);
+                let effect_msg = m.clone();
+                let t =
+                    gallery::interaction::update(&mut self.interaction, m).map(Msg::Interaction);
+                use gallery::interaction::kit13::Effect;
+                match effect_msg.kit13_effect(&self.interaction) {
+                    Some(Effect::Toast(toast)) => {
+                        self.frame.show_toast(toast);
+                    }
+                    Some(Effect::Badge(b)) => self.frame.set_badge(Page::Interaction, b),
+                    Some(Effect::Footer(rows)) => self.frame.set_footer_rows(rows),
+                    Some(Effect::Note(n)) => self.frame.set_header_note(n),
+                    None => {}
+                }
+                return t;
             }
             Msg::Showcase(m) => match showcase::update(&mut self.showcase, m) {
                 Some(Effect::Toast(text, tone)) => self.frame.toast(text, tone),
@@ -373,6 +394,15 @@ impl App {
             _ => Vec::new(),
         };
         let root = self.frame.view_with(page, levels, Msg::Frame);
+        // The kit 1.3 section's window file-drop overlay, over everything.
+        let root = match gallery::interaction::kit13::drop_overlay(&self.interaction.kit13, cx) {
+            Some(o) => iced::widget::stack![
+                root,
+                o.map(|m| Msg::Interaction(gallery::interaction::Msg::Kit13(m)))
+            ]
+            .into(),
+            None => root,
+        };
         let root = match &self.script {
             Some(steps) => bato_kit::overlay::script::script(root, steps.clone()).into(),
             None => root,

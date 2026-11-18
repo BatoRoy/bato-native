@@ -4,6 +4,7 @@
 
 pub mod focus;
 pub mod gaps;
+pub mod kit13;
 pub mod modals;
 pub mod os_drag;
 pub mod overlay;
@@ -23,6 +24,7 @@ pub struct State {
     pub modals: modals::State,
     pub os_drag: os_drag::State,
     pub ports: ports::State,
+    pub kit13: kit13::State,
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +36,7 @@ pub enum Msg {
     Modals(modals::Msg),
     OsDrag(os_drag::Msg),
     Ports(ports::Msg),
+    Kit13(kit13::Msg),
 }
 
 impl Msg {
@@ -41,6 +44,14 @@ impl Msg {
     pub fn gaps_status(&self) -> Option<&bato_kit::frame::UpdateStatus> {
         match self {
             Msg::Gaps(m) => gaps::simulated(m),
+            _ => None,
+        }
+    }
+
+    /// What the kit 1.3 section asks of the frame (`state` after `update`).
+    pub fn kit13_effect(&self, state: &State) -> Option<kit13::Effect> {
+        match self {
+            Msg::Kit13(m) => kit13::effect(&state.kit13, m),
             _ => None,
         }
     }
@@ -63,6 +74,7 @@ pub fn update(state: &mut State, msg: Msg) -> Task<Msg> {
         Msg::Modals(m) => modals::update(&mut state.modals, m).map(Msg::Modals),
         Msg::OsDrag(m) => os_drag::update(&mut state.os_drag, m).map(Msg::OsDrag),
         Msg::Ports(m) => ports::update(&mut state.ports, m).map(Msg::Ports),
+        Msg::Kit13(m) => kit13::update(&mut state.kit13, m).map(Msg::Kit13),
     }
 }
 
@@ -70,6 +82,7 @@ pub fn subscription(state: &State) -> Subscription<Msg> {
     Subscription::batch([
         overlay::subscription(&state.overlay).map(Msg::Overlay),
         ports::subscription(&state.ports).map(Msg::Ports),
+        kit13::subscription(&state.kit13).map(Msg::Kit13),
     ])
 }
 
@@ -148,6 +161,8 @@ pub fn view<'a>(state: &'a State, cx: &Ctx, wide: bool) -> El<'a, Msg> {
             os_drag::view(&state.os_drag, cx).map(Msg::OsDrag),
             vgap(24.0),
             ports::view(&state.ports, cx).map(Msg::Ports),
+            vgap(24.0),
+            kit13::view(&state.kit13, cx).map(Msg::Kit13),
         ],
         wide,
         [48.0, 32.0],
