@@ -450,6 +450,98 @@ pub fn open_url(url: &str) -> io::Result<()> {
     }
 }
 
+/// Make this program the handler of `scheme:` links (`nem://…`), Electron's
+/// `app.setAsDefaultProtocolClient`. Windows: per-user, under
+/// `HKCU\Software\Classes\<scheme>`, running `"<this exe>" "%1"`; a
+/// second launch then forwards the link through [`crate::instance`].
+/// Linux: nothing to do here (the launcher `bato install` writes declares
+/// `MimeType=x-scheme-handler/<scheme>`), so it returns `Ok(false)`.
+/// `Ok(true)` when a registration was written.
+pub fn register_url_scheme(scheme: &str, description: &str) -> io::Result<bool> {
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe()?;
+        win_scheme::register(scheme, description, &exe)?;
+        Ok(true)
+    }
+    #[cfg(unix)]
+    {
+        let _ = (scheme, description);
+        Ok(false)
+    }
+}
+
+#[cfg(windows)]
+mod win_scheme {
+    use std::io;
+    use std::path::Path;
+
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
+        RegCreateKeyExW, RegSetValueExW,
+    };
+
+    use crate::win::wide;
+
+    fn set(path: &str, name: Option<&str>, value: &str) -> io::Result<()> {
+        let key = wide(path);
+        let mut h: HKEY = std::ptr::null_mut();
+        // SAFETY: valid NUL-terminated strings; the key is closed below.
+        let r = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                0,
+                std::ptr::null(),
+                REG_OPTION_NON_VOLATILE,
+                KEY_WRITE,
+                std::ptr::null(),
+                &mut h,
+                std::ptr::null_mut(),
+            )
+        };
+        if r != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(r as i32));
+        }
+        let name_w = name.map(wide);
+        let data = wide(value);
+        // SAFETY: `data` is a NUL-terminated UTF-16 string of that length.
+        let r = unsafe {
+            RegSetValueExW(
+                h,
+                name_w.as_ref().map_or(std::ptr::null(), |n| n.as_ptr()),
+                0,
+                REG_SZ,
+                data.as_ptr().cast(),
+                (data.len() * 2) as u32,
+            )
+        };
+        // SAFETY: opened above.
+        unsafe { RegCloseKey(h) };
+        if r != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(r as i32));
+        }
+        Ok(())
+    }
+
+    pub fn register(scheme: &str, description: &str, exe: &Path) -> io::Result<()> {
+        let base = format!("Software\\Classes\\{scheme}");
+        set(&base, None, &format!("URL:{description}"))?;
+        set(&base, Some("URL Protocol"), "")?;
+        set(
+            &format!("{base}\\DefaultIcon"),
+            None,
+            &format!("\"{}\",0", exe.display()),
+        )?;
+        set(
+            &format!("{base}\\shell\\open\\command"),
+            None,
+            &format!("\"{}\" \"%1\"", exe.display()),
+        )
+    }
+}
+
 #[cfg(unix)]
 fn open_with(opener: &str, path: &Path, token: Option<&str>) -> io::Result<()> {
     if !path.exists() {

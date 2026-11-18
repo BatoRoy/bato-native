@@ -10,6 +10,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 /// `CREATE_NO_WINDOW`: a console program (a Go server, a helper CLI) starts
 /// without flashing a console window (Electron's `windowsHide`).
+#[cfg_attr(not(any(test, feature = "supervisor")), allow(dead_code))]
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`: the child outlives this
 /// process and gets no console and no Ctrl+C of ours (`setsid`).
