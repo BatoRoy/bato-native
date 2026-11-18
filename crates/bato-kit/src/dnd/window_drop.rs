@@ -148,16 +148,15 @@ pub fn drop_overlay<'a, M: Clone + 'a>(
                 .color(c(p.muted)),
         );
     }
-    let card = dashed(
-        surface(content).padding([48.0, 56.0]).fixed(BoxStyle {
-            bg: Some(c(p.card)),
-            radius: 16.0,
-            shadows: shadows(&p.shadow_lg),
-            ..BoxStyle::default()
-        }),
-        c(p.accent_bright),
-    )
-    .radius(16.0);
+    // The dashes over the card's fill: the fill outside, the border inside.
+    let card =
+        surface(dashed(container(content).padding([48.0, 56.0]), c(p.accent_bright)).radius(16.0))
+            .fixed(BoxStyle {
+                bg: Some(c(p.card)),
+                radius: 16.0,
+                shadows: shadows(&p.shadow_lg),
+                ..BoxStyle::default()
+            });
     let bg = rgba(cx.p().bg, 0.8);
     stack![
         backdrop_blur(since, animate),

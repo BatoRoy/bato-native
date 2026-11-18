@@ -394,15 +394,14 @@ impl App {
             _ => Vec::new(),
         };
         let root = self.frame.view_with(page, levels, Msg::Frame);
-        // The kit 1.3 section's window file-drop overlay, over everything.
-        let root = match gallery::interaction::kit13::drop_overlay(&self.interaction.kit13, cx) {
-            Some(o) => iced::widget::stack![
-                root,
-                o.map(|m| Msg::Interaction(gallery::interaction::Msg::Kit13(m)))
-            ]
-            .into(),
-            None => root,
-        };
+        // The kit 1.3 section's window file-drop overlay, over everything. The
+        // stack is always there, so the page keeps its state when it shows.
+        let overlay: El<'_, Msg> =
+            match gallery::interaction::kit13::drop_overlay(&self.interaction.kit13, cx) {
+                Some(o) => o.map(|m| Msg::Interaction(gallery::interaction::Msg::Kit13(m))),
+                None => iced::widget::Space::new().into(),
+            };
+        let root: El<'_, Msg> = iced::widget::stack![root, overlay].into();
         let root = match &self.script {
             Some(steps) => bato_kit::overlay::script::script(root, steps.clone()).into(),
             None => root,

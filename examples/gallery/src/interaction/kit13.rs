@@ -230,7 +230,11 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
                 label(blurb.to_string(), 13.0, 19.5)
                     .color(c(p.subtext))
                     .wrap(),
-                button(&on.on_card()).secondary().sm().label("Install"),
+                button(&on.on_card())
+                    .secondary()
+                    .sm()
+                    .label("Install")
+                    .on_press(Msg::Noop),
                 16.0,
             ))
             .into()
@@ -259,6 +263,7 @@ pub fn view<'a>(state: &'a State, cx: &Ctx) -> El<'a, Msg> {
                     sticky(
                         label("Above the bar", 13.0, 19.5).color(c(p.subtext)),
                         container(label("Sticky bar", 13.0, 19.5).medium().color(c(p.text)))
+                            .width(Length::Fill)
                             .padding([6, 0]),
                         column((0..12).map(|i| {
                             label(format!("Row {}", i + 1), 13.0, 24.0).color(c(p.subtext)).into()

@@ -157,7 +157,16 @@ fn text_width(toasts: &[Toast]) -> f32 {
         })
         .fold(0.0f32, f32::max)
         .min(TEXT_MAX)
-        .ceil()
+}
+
+/// `l` in the text column `text_w` wide: on one line when it fits (as wide
+/// as the column, exactly as before wrapping existed), wrapping otherwise.
+fn fit(l: crate::label::Label, text_w: f32) -> crate::label::Label {
+    if l.shape(f32::INFINITY).width() <= text_w + 0.01 {
+        l.width(text_w)
+    } else {
+        l.wrap().width(text_w)
+    }
 }
 
 /// The stack, full-window, aligned bottom-right with 16 px margin; put it
@@ -219,21 +228,20 @@ pub fn toast_stack_actions<'a, M: Clone + 'a>(
             let mut lines: Vec<El<'a, M>> = Vec::new();
             if let Some(title) = &toast.title {
                 lines.push(
-                    label(title.clone(), 13.0, 16.25)
-                        .medium()
-                        .color(c(p.text))
-                        .wrap()
-                        .width(text_w)
-                        .into(),
+                    fit(
+                        label(title.clone(), 13.0, 16.25).medium().color(c(p.text)),
+                        text_w,
+                    )
+                    .into(),
                 );
                 lines.push(vgap(2.0));
             }
             lines.push(
-                label(toast.text.clone(), 13.0, 17.875)
-                    .color(c(p.text))
-                    .wrap()
-                    .width(text_w)
-                    .into(),
+                fit(
+                    label(toast.text.clone(), 13.0, 17.875).color(c(p.text)),
+                    text_w,
+                )
+                .into(),
             );
             if let Some(a) = &toast.action {
                 // An inline-block button (`mt-1.5`) on the message's line
@@ -268,10 +276,10 @@ pub fn toast_stack_actions<'a, M: Clone + 'a>(
         } else {
             row![
                 icon(ico, 16.0).color(c(color)),
-                label(toast.text.clone(), 13.0, 19.5)
-                    .color(c(p.text))
-                    .wrap()
-                    .width(text_w),
+                fit(
+                    label(toast.text.clone(), 13.0, 19.5).color(c(p.text)),
+                    text_w,
+                ),
                 container(close).padding(Padding {
                     left: 4.0,
                     ..Padding::ZERO
