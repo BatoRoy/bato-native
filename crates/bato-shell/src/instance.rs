@@ -334,8 +334,12 @@ pub fn acquire_at(dir: &Path, request: Request) -> io::Result<Instance> {
     if try_lock(&lock)? {
         return listen(socket, lock).map(Instance::Primary);
     }
-    forward(&socket, &request)?;
-    Ok(Instance::Forwarded)
+    if forward(&socket, &request, &lock)? {
+        Ok(Instance::Forwarded)
+    } else {
+        // The running instance exited while we waited for its socket.
+        listen(socket, lock).map(Instance::Primary)
+    }
 }
 
 #[cfg(unix)]
@@ -465,19 +469,25 @@ fn receive(mut conn: UnixStream) -> Option<(Request, UnixStream)> {
 
 #[cfg(unix)]
 /// Send `request` to the running instance and wait for its acknowledgement.
-fn forward(socket: &Path, request: &Request) -> io::Result<()> {
+/// `Ok(false)`: no instance runs any more (we took `lock` while waiting for
+/// its socket), so the caller becomes the primary.
+fn forward(socket: &Path, request: &Request, lock: &std::fs::File) -> io::Result<bool> {
     let end = Instant::now() + CONNECT_RETRY;
     let mut conn = loop {
         match UnixStream::connect(socket) {
             Ok(c) => break c,
             // Not bound yet (the first instance is starting), or a race
-            // with its exit.
+            // with its exit: the lock can outlive the socket for a moment
+            // (another thread's fork holds the lock file until its exec).
             Err(e) if Instant::now() < end => {
                 if !matches!(
                     e.kind(),
                     io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
                 ) {
                     return Err(e);
+                }
+                if try_lock(lock)? {
+                    return Ok(false);
                 }
                 std::thread::sleep(Duration::from_millis(25));
             }
@@ -503,7 +513,7 @@ fn forward(socket: &Path, request: &Request) -> io::Result<()> {
             "the running instance did not take the request",
         ));
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(all(test, unix))]

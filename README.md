@@ -44,17 +44,17 @@ fails if they disagree:
 
 ```toml
 [dependencies]
-bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0", optional = true }  # Examples + Scroll lab (`examples` feature)
+bato-kit   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+bato-shell = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+gallery    = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0", optional = true }  # Examples + Scroll lab (`examples` feature)
 
 [patch.crates-io]
-winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
-smithay-clipboard = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.3.0" }
+winit       = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+cosmic-text = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+cryoglyph   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+iced_wgpu   = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+iced_winit  = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
+smithay-clipboard = { git = "https://github.com/BatoRoy/bato-native", tag = "v1.4.0" }
 ```
 
 Working on the kit and an app together, without tagging: in the app, a git-ignored
@@ -65,6 +65,22 @@ Working on the kit and an app together, without tagging: in the app, a git-ignor
 bato-kit   = { path = "/path/to/bato-native/crates/bato-kit" }
 bato-shell = { path = "/path/to/bato-native/crates/bato-shell" }
 gallery    = { path = "/path/to/bato-native/examples/gallery" }
+```
+
+## Windows
+
+`bato-kit` and `bato-shell` also build for `x86_64-pc-windows-gnu` (cross-built from Linux with MinGW-w64).
+Linux-only parts (Wayland/X11 drag sources, portals, D-Bus, the tray, XDG launchers) are behind `cfg(unix)`;
+Windows gets Win32 single instance (a named pipe), file dialogs, notifications, the file clipboard, the
+sidecar supervisor, open/reveal and URL-scheme registration. Cross-build with a Rust toolchain that has the
+target, and point the C builds at MinGW (the bundled FreeType compiles libpng, which needs a `zlib.h`):
+
+```sh
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-ar \
+CFLAGS_x86_64_pc_windows_gnu=-I<path to a zlib source dir, e.g. libz-sys's src/zlib> \
+WINDRES=x86_64-w64-mingw32-windres \
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
 ## Develop
