@@ -25,6 +25,10 @@ use iced::{Color, Element, Event, Length, Point, Rectangle, Size, Vector, mouse}
 
 use crate::El;
 
+/// How far a pinned bar's background reaches above its top (see `draw`):
+/// over one device pixel at any size down to 50 %.
+const STUCK_LIFT: f32 = 2.0;
+
 pub struct Sticky<'a, M> {
     /// before, bar, after.
     cells: [El<'a, M>; 3],
@@ -233,10 +237,18 @@ impl<'a, M: 'a> Widget<M, iced::Theme, iced::Renderer> for Sticky<'a, M> {
                 viewport,
             );
         }
+        // Pinned, the bar's top sits on the scroller's top edge, which at a
+        // fractional scale (90 % size) falls inside a device pixel. The clip
+        // rounds that pixel in, the background's anti-aliased edge covers it
+        // only partly, and the row scrolling under it shows through as a
+        // one-pixel sliver of text. Start the background a little higher: the
+        // clip cuts off whatever lies above the scroller.
+        let lift = if dy > 0.0 { STUCK_LIFT } else { 0.0 };
         let back = Rectangle {
             x: shifted.x - self.bleed,
+            y: shifted.y - lift,
             width: shifted.width + 2.0 * self.bleed,
-            ..shifted
+            height: shifted.height + lift,
         };
         // Its own layer, created after everything above: on top of the cards.
         let clip = Rectangle {
